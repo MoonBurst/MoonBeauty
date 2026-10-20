@@ -1,0 +1,2169 @@
+warning: Git tree '/home/moonburst/projects/Moon-Beauty-Shell' is dirty
+nohup: ignoring input
+👀 Watching src/ and Cargo.toml for changes...
+Press Ctrl-C to stop.
+🔄 Change detected. Rebuilding...
+   Compiling moon-beauty-shell v0.2.0 (/home/moonburst/projects/Moon-Beauty-Shell)
+error[E0063]: missing field `capsule_shapes` in initializer of `ShellSettings`
+   --> src/config/settings.rs:266:9
+    |
+266 |         Self {
+    |         ^^^^ missing `capsule_shapes`
+
+For more information about this error, try `rustc --explain E0063`.
+error: could not compile `moon-beauty-shell` (lib) due to 1 previous error
+❌ Build failed. Waiting for next change...
+---------------------------------------------------
+🔄 Change detected. Rebuilding...
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling moon-beauty-shell v0.2.0 (/home/moonburst/projects/Moon-Beauty-Shell)
+warning: unused import: `send_annotator_show`
+  --> src/main.rs:10:51
+   |
+10 | use moon_beauty_shell::ipc::{send_client_command, send_annotator_show, IpcCommand, OverlayTarget};
+   |                                                   ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/screenshot/selector.rs:221:13
+    |
+221 |     fn view(&self) -> Element<Message> {
+    |             ^^^^^     ^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |             |
+    |             the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+    = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+    |
+221 |     fn view(&self) -> Element<'_, Message> {
+    |                               +++
+
+warning: `moon-beauty-shell` (bin "moon-beauty-shell") generated 2 warnings (run `cargo fix --bin "moon-beauty-shell" -p moon-beauty-shell` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 2m 05s
+✅ Build successful. Relaunching bar...
+---------------------------------------------------
+[ipc] listener bound (sync thread)
+[notif-surface] startup binded_output_name=Some("DP-1")
+[notif_dbus] serve failed: name already taken on the bus
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+🔄 Change detected. Rebuilding...
+   Compiling moon-beauty-shell v0.2.0 (/home/moonburst/projects/Moon-Beauty-Shell)
+warning: unused import: `send_annotator_show`
+  --> src/main.rs:10:51
+   |
+10 | use moon_beauty_shell::ipc::{send_client_command, send_annotator_show, IpcCommand, OverlayTarget};
+   |                                                   ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/screenshot/selector.rs:221:13
+    |
+221 |     fn view(&self) -> Element<Message> {
+    |             ^^^^^     ^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |             |
+    |             the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+    = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+    |
+221 |     fn view(&self) -> Element<'_, Message> {
+    |                               +++
+
+warning: `moon-beauty-shell` (bin "moon-beauty-shell") generated 2 warnings (run `cargo fix --bin "moon-beauty-shell" -p moon-beauty-shell` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 2m 04s
+✅ Build successful. Relaunching bar...
+---------------------------------------------------
+[ipc] listener bound (sync thread)
+[notif-surface] startup binded_output_name=Some("DP-1")
+[notif_dbus] serve failed: name already taken on the bus
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+🔄 Change detected. Rebuilding...
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+   Compiling moon-beauty-shell v0.2.0 (/home/moonburst/projects/Moon-Beauty-Shell)
+error[E0063]: missing field `module_shape` in initializer of `ShellSettings`
+   --> src/config/settings.rs:268:9
+    |
+268 |         Self {
+    |         ^^^^ missing `module_shape`
+
+For more information about this error, try `rustc --explain E0063`.
+error: could not compile `moon-beauty-shell` (lib) due to 1 previous error
+❌ Build failed. Waiting for next change...
+---------------------------------------------------
+🔄 Change detected. Rebuilding...
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+warning: unused import: `send_annotator_show`
+  --> src/main.rs:10:51
+   |
+10 | use moon_beauty_shell::ipc::{send_client_command, send_annotator_show, IpcCommand, OverlayTarget};
+   |                                                   ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/screenshot/selector.rs:221:13
+    |
+221 |     fn view(&self) -> Element<Message> {
+    |             ^^^^^     ^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |             |
+    |             the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+    = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+    |
+221 |     fn view(&self) -> Element<'_, Message> {
+    |                               +++
+
+warning: `moon-beauty-shell` (bin "moon-beauty-shell") generated 2 warnings (run `cargo fix --bin "moon-beauty-shell" -p moon-beauty-shell` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 2m 03s
+✅ Build successful. Relaunching bar...
+---------------------------------------------------
+[ipc] listener bound (sync thread)
+[notif-surface] startup binded_output_name=Some("DP-1")
+[notif_dbus] serve failed: name already taken on the bus
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52[launcher]  with icons
+80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+🔄 Change detected. Rebuilding...
+   Compiling moon-beauty-shell v0.2.0 (/home/moonburst/projects/Moon-Beauty-Shell)
+error[E0277]: expected an `Fn(CapsuleAction)` closure, found `str`
+  --> src/bar/top_bar.rs:57:21
+   |
+51 |                 left_row = left_row.push(CapsuleRenderer::render(
+   |                                          ----------------------- required by a bound introduced by this call
+...
+57 |                     settings.module_shape.as_str(),
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected an `Fn(CapsuleAction)` closure, found `str`
+   |
+   = help: the trait `Fn(CapsuleAction)` is not implemented for `str`
+   = note: required for `&str` to implement `Fn(CapsuleAction)`
+note: required by a bound in `CapsuleRenderer::render`
+  --> src/bar/capsules.rs:69:25
+   |
+63 |     pub fn render<'a, Message: 'static + Clone>(
+   |            ------ required by a bound in this associated function
+...
+69 |         on_action: impl Fn(CapsuleAction) -> Message + 'static + Copy,
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `CapsuleRenderer::render`
+
+error[E0061]: this function takes 6 arguments but 7 arguments were supplied
+  --> src/bar/top_bar.rs:51:42
+   |
+51 |                 left_row = left_row.push(CapsuleRenderer::render(
+   |                                          ^^^^^^^^^^^^^^^^^^^^^^^
+...
+58 |                     TopBarMessage::Action,
+   |                     --------------------- unexpected argument #7 of type `fn(CapsuleAction) -> TopBarMessage {TopBarMessage::Action}`
+   |
+note: associated function defined here
+  --> src/bar/capsules.rs:63:12
+   |
+63 |     pub fn render<'a, Message: 'static + Clone>(
+   |            ^^^^^^
+help: remove the extra argument
+   |
+57 -                     settings.module_shape.as_str(),
+58 -                     TopBarMessage::Action,
+57 +                     settings.module_shape.as_str(),
+   |
+
+error[E0277]: expected an `Fn(CapsuleAction)` closure, found `str`
+  --> src/bar/top_bar.rs:73:21
+   |
+67 |                 center_row = center_row.push(CapsuleRenderer::render(
+   |                                              ----------------------- required by a bound introduced by this call
+...
+73 |                     settings.module_shape.as_str(),
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected an `Fn(CapsuleAction)` closure, found `str`
+   |
+   = help: the trait `Fn(CapsuleAction)` is not implemented for `str`
+   = note: required for `&str` to implement `Fn(CapsuleAction)`
+note: required by a bound in `CapsuleRenderer::render`
+  --> src/bar/capsules.rs:69:25
+   |
+63 |     pub fn render<'a, Message: 'static + Clone>(
+   |            ------ required by a bound in this associated function
+...
+69 |         on_action: impl Fn(CapsuleAction) -> Message + 'static + Copy,
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `CapsuleRenderer::render`
+
+error[E0061]: this function takes 6 arguments but 7 arguments were supplied
+  --> src/bar/top_bar.rs:67:46
+   |
+67 |                 center_row = center_row.push(CapsuleRenderer::render(
+   |                                              ^^^^^^^^^^^^^^^^^^^^^^^
+...
+74 |                     TopBarMessage::Action,
+   |                     --------------------- unexpected argument #7 of type `fn(CapsuleAction) -> TopBarMessage {TopBarMessage::Action}`
+   |
+note: associated function defined here
+  --> src/bar/capsules.rs:63:12
+   |
+63 |     pub fn render<'a, Message: 'static + Clone>(
+   |            ^^^^^^
+help: remove the extra argument
+   |
+73 -                     settings.module_shape.as_str(),
+74 -                     TopBarMessage::Action,
+73 +                     settings.module_shape.as_str(),
+   |
+
+error[E0277]: expected an `Fn(CapsuleAction)` closure, found `str`
+  --> src/bar/top_bar.rs:89:21
+   |
+83 |                 right_row = right_row.push(CapsuleRenderer::render(
+   |                                            ----------------------- required by a bound introduced by this call
+...
+89 |                     settings.module_shape.as_str(),
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected an `Fn(CapsuleAction)` closure, found `str`
+   |
+   = help: the trait `Fn(CapsuleAction)` is not implemented for `str`
+   = note: required for `&str` to implement `Fn(CapsuleAction)`
+note: required by a bound in `CapsuleRenderer::render`
+  --> src/bar/capsules.rs:69:25
+   |
+63 |     pub fn render<'a, Message: 'static + Clone>(
+   |            ------ required by a bound in this associated function
+...
+69 |         on_action: impl Fn(CapsuleAction) -> Message + 'static + Copy,
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `CapsuleRenderer::render`
+
+error[E0061]: this function takes 6 arguments but 7 arguments were supplied
+  --> src/bar/top_bar.rs:83:44
+   |
+83 |                 right_row = right_row.push(CapsuleRenderer::render(
+   |                                            ^^^^^^^^^^^^^^^^^^^^^^^
+...
+90 |                     TopBarMessage::Action,
+   |                     --------------------- unexpected argument #7 of type `fn(CapsuleAction) -> TopBarMessage {TopBarMessage::Action}`
+   |
+note: associated function defined here
+  --> src/bar/capsules.rs:63:12
+   |
+63 |     pub fn render<'a, Message: 'static + Clone>(
+   |            ^^^^^^
+help: remove the extra argument
+   |
+89 -                     settings.module_shape.as_str(),
+90 -                     TopBarMessage::Action,
+89 +                     settings.module_shape.as_str(),
+   |
+
+Some errors have detailed explanations: E0061, E0277.
+For more information about an error, try `rustc --explain E0061`.
+error: could not compile `moon-beauty-shell` (lib) due to 6 previous errors
+❌ Build failed. Waiting for next change...
+---------------------------------------------------
+🔄 Change detected. Rebuilding...
+   Compiling moon-beauty-shell v0.2.0 (/home/moonburst/projects/Moon-Beauty-Shell)
+error[E0277]: expected an `Fn(CapsuleAction)` closure, found `str`
+  --> src/bar/top_bar.rs:57:21
+   |
+51 |                 left_row = left_row.push(CapsuleRenderer::render(
+   |                                          ----------------------- required by a bound introduced by this call
+...
+57 |                     settings.module_shape.as_str(),
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected an `Fn(CapsuleAction)` closure, found `str`
+   |
+   = help: the trait `Fn(CapsuleAction)` is not implemented for `str`
+   = note: required for `&str` to implement `Fn(CapsuleAction)`
+note: required by a bound in `CapsuleRenderer::render`
+  --> src/bar/capsules.rs:69:25
+   |
+63 |     pub fn render<'a, Message: 'static + Clone>(
+   |            ------ required by a bound in this associated function
+...
+69 |         on_action: impl Fn(CapsuleAction) -> Message + 'static + Copy,
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `CapsuleRenderer::render`
+
+error[E0061]: this function takes 6 arguments but 7 arguments were supplied
+  --> src/bar/top_bar.rs:51:42
+   |
+51 |                 left_row = left_row.push(CapsuleRenderer::render(
+   |                                          ^^^^^^^^^^^^^^^^^^^^^^^
+...
+58 |                     TopBarMessage::Action,
+   |                     --------------------- unexpected argument #7 of type `fn(CapsuleAction) -> TopBarMessage {TopBarMessage::Action}`
+   |
+note: associated function defined here
+  --> src/bar/capsules.rs:63:12
+   |
+63 |     pub fn render<'a, Message: 'static + Clone>(
+   |            ^^^^^^
+help: remove the extra argument
+   |
+57 -                     settings.module_shape.as_str(),
+58 -                     TopBarMessage::Action,
+57 +                     settings.module_shape.as_str(),
+   |
+
+error[E0277]: expected an `Fn(CapsuleAction)` closure, found `str`
+  --> src/bar/top_bar.rs:73:21
+   |
+67 |                 center_row = center_row.push(CapsuleRenderer::render(
+   |                                              ----------------------- required by a bound introduced by this call
+...
+73 |                     settings.module_shape.as_str(),
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected an `Fn(CapsuleAction)` closure, found `str`
+   |
+   = help: the trait `Fn(CapsuleAction)` is not implemented for `str`
+   = note: required for `&str` to implement `Fn(CapsuleAction)`
+note: required by a bound in `CapsuleRenderer::render`
+  --> src/bar/capsules.rs:69:25
+   |
+63 |     pub fn render<'a, Message: 'static + Clone>(
+   |            ------ required by a bound in this associated function
+...
+69 |         on_action: impl Fn(CapsuleAction) -> Message + 'static + Copy,
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `CapsuleRenderer::render`
+
+error[E0061]: this function takes 6 arguments but 7 arguments were supplied
+  --> src/bar/top_bar.rs:67:46
+   |
+67 |                 center_row = center_row.push(CapsuleRenderer::render(
+   |                                              ^^^^^^^^^^^^^^^^^^^^^^^
+...
+74 |                     TopBarMessage::Action,
+   |                     --------------------- unexpected argument #7 of type `fn(CapsuleAction) -> TopBarMessage {TopBarMessage::Action}`
+   |
+note: associated function defined here
+  --> src/bar/capsules.rs:63:12
+   |
+63 |     pub fn render<'a, Message: 'static + Clone>(
+   |            ^^^^^^
+help: remove the extra argument
+   |
+73 -                     settings.module_shape.as_str(),
+74 -                     TopBarMessage::Action,
+73 +                     settings.module_shape.as_str(),
+   |
+
+error[E0277]: expected an `Fn(CapsuleAction)` closure, found `str`
+  --> src/bar/top_bar.rs:89:21
+   |
+83 |                 right_row = right_row.push(CapsuleRenderer::render(
+   |                                            ----------------------- required by a bound introduced by this call
+...
+89 |                     settings.module_shape.as_str(),
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected an `Fn(CapsuleAction)` closure, found `str`
+   |
+   = help: the trait `Fn(CapsuleAction)` is not implemented for `str`
+   = note: required for `&str` to implement `Fn(CapsuleAction)`
+note: required by a bound in `CapsuleRenderer::render`
+  --> src/bar/capsules.rs:69:25
+   |
+63 |     pub fn render<'a, Message: 'static + Clone>(
+   |            ------ required by a bound in this associated function
+...
+69 |         on_action: impl Fn(CapsuleAction) -> Message + 'static + Copy,
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `CapsuleRenderer::render`
+
+error[E0061]: this function takes 6 arguments but 7 arguments were supplied
+  --> src/bar/top_bar.rs:83:44
+   |
+83 |                 right_row = right_row.push(CapsuleRenderer::render(
+   |                                            ^^^^^^^^^^^^^^^^^^^^^^^
+...
+90 |                     TopBarMessage::Action,
+   |                     --------------------- unexpected argument #7 of type `fn(CapsuleAction) -> TopBarMessage {TopBarMessage::Action}`
+   |
+note: associated function defined here
+  --> src/bar/capsules.rs:63:12
+   |
+63 |     pub fn render<'a, Message: 'static + Clone>(
+   |            ^^^^^^
+help: remove the extra argument
+   |
+89 -                     settings.module_shape.as_str(),
+90 -                     TopBarMessage::Action,
+89 +                     settings.module_shape.as_str(),
+   |
+
+Some errors have detailed explanations: E0061, E0277.
+For more information about an error, try `rustc --explain E0061`.
+error: could not compile `moon-beauty-shell` (lib) due to 6 previous errors
+❌ Build failed. Waiting for next change...
+---------------------------------------------------
+🔄 Change detected. Rebuilding...
+   Compiling moon-beauty-shell v0.2.0 (/home/moonburst/projects/Moon-Beauty-Shell)
+warning: unused variable: `module_shape`
+  --> src/bar/capsules.rs:69:9
+   |
+69 |         module_shape: &str,
+   |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_module_shape`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `moon-beauty-shell` (lib) generated 1 warning (run `cargo fix --lib -p moon-beauty-shell` to apply 1 suggestion)
+warning: unused import: `send_annotator_show`
+  --> src/main.rs:10:51
+   |
+10 | use moon_beauty_shell::ipc::{send_client_command, send_annotator_show, IpcCommand, OverlayTarget};
+   |                                                   ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/screenshot/selector.rs:221:13
+    |
+221 |     fn view(&self) -> Element<Message> {
+    |             ^^^^^     ^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |             |
+    |             the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+    = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+    |
+221 |     fn view(&self) -> Element<'_, Message> {
+    |                               +++
+
+warning: `moon-beauty-shell` (bin "moon-beauty-shell") generated 2 warnings (run `cargo fix --bin "moon-beauty-shell" -p moon-beauty-shell` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 2m 01s
+✅ Build successful. Relaunching bar...
+---------------------------------------------------
+[ipc] listener bound (sync thread)
+[notif-surface] startup binded_output_name=Some("DP-1")
+[notif_dbus] serve failed: name already taken on the bus
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+🔄 Change detected. Rebuilding...
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+warning: unused import: `send_annotator_show`
+  --> src/main.rs:10:51
+   |
+10 | use moon_beauty_shell::ipc::{send_client_command, send_annotator_show, IpcCommand, OverlayTarget};
+   |                                                   ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/screenshot/selector.rs:221:13
+    |
+221 |     fn view(&self) -> Element<Message> {
+    |             ^^^^^     ^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |             |
+    |             the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+    = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+    |
+221 |     fn view(&self) -> Element<'_, Message> {
+    |                               +++
+
+warning: `moon-beauty-shell` (bin "moon-beauty-shell") generated 2 warnings (run `cargo fix --bin "moon-beauty-shell" -p moon-beauty-shell` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 2m 01s
+✅ Build successful. Relaunching bar...
+---------------------------------------------------
+[ipc] listener bound (sync thread)
+[notif-surface] startup binded_output_name=Some("DP-1")
+[notif_dbus] serve failed: name already taken on the bus
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+🔄 Change detected. Rebuilding...
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling moon-beauty-shell v0.2.0 (/home/moonburst/projects/Moon-Beauty-Shell)
+warning: unused import: `send_annotator_show`
+  --> src/main.rs:10:51
+   |
+10 | use moon_beauty_shell::ipc::{send_client_command, send_annotator_show, IpcCommand, OverlayTarget};
+   |                                                   ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/screenshot/selector.rs:221:13
+    |
+221 |     fn view(&self) -> Element<Message> {
+    |             ^^^^^     ^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |             |
+    |             the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+    = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+    |
+221 |     fn view(&self) -> Element<'_, Message> {
+    |                               +++
+
+warning: `moon-beauty-shell` (bin "moon-beauty-shell") generated 2 warnings (run `cargo fix --bin "moon-beauty-shell" -p moon-beauty-shell` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 2m 00s
+✅ Build successful. Relaunching bar...
+---------------------------------------------------
+[ipc] listener bound (sync thread)
+[notif-surface] startup binded_output_name=Some("DP-1")
+[notif_dbus] serve failed: name already taken on the bus
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: Open(Annotator, Some("/tmp/mbs-freeze-out.png"))
+[annotator] spawned pid=1273648
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[annotator] loaded capture from /tmp/mbs-freeze-out.png
+[annotator] saved 1 file(s)
+🔄 Change detected. Rebuilding...
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+warning: unused import: `send_annotator_show`
+  --> src/main.rs:10:51
+   |
+10 | use moon_beauty_shell::ipc::{send_client_command, send_annotator_show, IpcCommand, OverlayTarget};
+   |                                                   ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/screenshot/selector.rs:221:13
+    |
+221 |     fn view(&self) -> Element<Message> {
+    |             ^^^^^     ^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |             |
+    |             the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+    = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+    |
+221 |     fn view(&self) -> Element<'_, Message> {
+    |                               +++
+
+warning: `moon-beauty-shell` (bin "moon-beauty-shell") generated 2 warnings (run `cargo fix --bin "moon-beauty-shell" -p moon-beauty-shell` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 2m 02s
+✅ Build successful. Relaunching bar...
+---------------------------------------------------
+[ipc] listener bound (sync thread)
+[notif-surface] startup binded_output_name=Some("DP-1")
+[notif_dbus] serve failed: name already taken on the bus
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+🔄 Change detected. Rebuilding...
+   Compiling moon-beauty-shell v0.2.0 (/home/moonburst/projects/Moon-Beauty-Shell)
+error: unexpected closing delimiter: `}`
+  --> src/bar/top_bar.rs:18:9
+   |
+11 | pub enum TopBarMessage {
+   |                        - this opening brace...
+...
+14 | }
+   | - ...matches this closing brace
+...
+18 |         }
+   |         ^ unexpected closing delimiter
+
+error: could not compile `moon-beauty-shell` (lib) due to 1 previous error
+❌ Build failed. Waiting for next change...
+---------------------------------------------------
+🔄 Change detected. Rebuilding...
+   Compiling moon-beauty-shell v0.2.0 (/home/moonburst/projects/Moon-Beauty-Shell)
+warning: unused import: `send_annotator_show`
+  --> src/main.rs:10:51
+   |
+10 | use moon_beauty_shell::ipc::{send_client_command, send_annotator_show, IpcCommand, OverlayTarget};
+   |                                                   ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/screenshot/selector.rs:221:13
+    |
+221 |     fn view(&self) -> Element<Message> {
+    |             ^^^^^     ^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |             |
+    |             the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+    = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+    |
+221 |     fn view(&self) -> Element<'_, Message> {
+    |                               +++
+
+warning: `moon-beauty-shell` (bin "moon-beauty-shell") generated 2 warnings (run `cargo fix --bin "moon-beauty-shell" -p moon-beauty-shell` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 1m 59s
+✅ Build successful. Relaunching bar...
+---------------------------------------------------
+[ipc] listener bound (sync thread)
+[notif-surface] startup binded_output_name=Some("DP-1")
+[notif_dbus] serve failed: name already taken on the bus
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+[ipc] accepted: Open(Annotator, Some("/tmp/mbs-freeze-out.png"))
+[annotator] spawned pid=1343640
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[annotator] loaded capture from /tmp/mbs-freeze-out.png
+[annotator] saved 1 file(s)
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+🔄 Change detected. Rebuilding...
+   Compiling moon-beauty-shell v0.2.0 (/home/moonburst/projects/Moon-Beauty-Shell)
+warning: unused import: `send_annotator_show`
+  --> src/main.rs:10:51
+   |
+10 | use moon_beauty_shell::ipc::{send_client_command, send_annotator_show, IpcCommand, OverlayTarget};
+   |                                                   ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/screenshot/selector.rs:221:13
+    |
+221 |     fn view(&self) -> Element<Message> {
+    |             ^^^^^     ^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |             |
+    |             the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+    = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+    |
+221 |     fn view(&self) -> Element<'_, Message> {
+    |                               +++
+
+warning: `moon-beauty-shell` (bin "moon-beauty-shell") generated 2 warnings (run `cargo fix --bin "moon-beauty-shell" -p moon-beauty-shell` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 2m 02s
+✅ Build successful. Relaunching bar...
+---------------------------------------------------
+[ipc] listener bound (sync thread)
+[notif-surface] startup binded_output_name=Some("DP-1")
+[notif_dbus] serve failed: name already taken on the bus
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+🔄 Change detected. Rebuilding...
+   Compiling moon-beauty-shell v0.2.0 (/home/moonburst/projects/Moon-Beauty-Shell)
+warning: unused import: `send_annotator_show`
+  --> src/main.rs:10:51
+   |
+10 | use moon_beauty_shell::ipc::{send_client_command, send_annotator_show, IpcCommand, OverlayTarget};
+   |                                                   ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: hiding a lifetime that's elided elsewhere is confusing
+   --> src/screenshot/selector.rs:221:13
+    |
+221 |     fn view(&self) -> Element<Message> {
+    |             ^^^^^     ^^^^^^^^^^^^^^^^ the same lifetime is hidden here
+    |             |
+    |             the lifetime is elided here
+    |
+    = help: the same lifetime is referred to in inconsistent ways, making the signature confusing
+    = note: `#[warn(mismatched_lifetime_syntaxes)]` on by default
+help: use `'_` for type paths
+    |
+221 |     fn view(&self) -> Element<'_, Message> {
+    |                               +++
+
+warning: `moon-beauty-shell` (bin "moon-beauty-shell") generated 2 warnings (run `cargo fix --bin "moon-beauty-shell" -p moon-beauty-shell` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 2m 04s
+✅ Build successful. Relaunching bar...
+---------------------------------------------------
+[ipc] listener bound (sync thread)
+[notif-surface] startup binded_output_name=Some("DP-1")
+[notif_dbus] serve failed: name already taken on the bus
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[ipc] accepted: Toggle(Launcher)
+[ipc] toggle Launcher
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: ReloadSettings
+[ipc] accepted: Open(Annotator, Some("/tmp/mbs-freeze-out.png"))
+[annotator] spawned pid=1373304
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[annotator] loaded capture from /tmp/mbs-freeze-out.png
+[mbs-child] CANVAS MOVE #0 raw=(8,879)
+[mbs-child] CANVAS MOVE #1 raw=(8,879)
+[mbs-child] CANVAS MOVE #2 raw=(8,879)
+[mbs-child] CANVAS MOVE #3 raw=(8,879)
+[mbs-child] CANVAS MOVE #4 raw=(8,879)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1042)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1042)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1042)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1042)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1042)
+[mbs-child] CANVAS MOVE #5 raw=(10,875)
+[mbs-child] CANVAS MOVE #6 raw=(10,875)
+[mbs-child] CANVAS MOVE #7 raw=(10,875)
+[mbs-child] CANVAS MOVE #8 raw=(10,875)
+[mbs-child] CANVAS MOVE #9 raw=(10,875)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1037)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1037)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1037)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1037)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1037)
+[mbs-child] CANVAS MOVE #10 raw=(12,872)
+[mbs-child] CANVAS MOVE #11 raw=(12,872)
+[mbs-child] CANVAS MOVE #12 raw=(12,872)
+[mbs-child] CANVAS MOVE #13 raw=(12,872)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1033)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1033)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1033)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1033)
+[mbs-child] CANVAS MOVE #14 raw=(14,868)
+[mbs-child] CANVAS MOVE #15 raw=(14,868)
+[mbs-child] CANVAS MOVE #16 raw=(14,868)
+[mbs-child] CANVAS MOVE #17 raw=(14,868)
+[mbs-child] CANVAS MOVE #18 raw=(14,868)
+[mbs-child] CANVAS MOVE #19 raw=(14,868)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1028)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1028)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1028)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1028)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1028)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1028)
+[mbs-child] CANVAS MOVE #20 raw=(16,865)
+[mbs-child] CANVAS MOVE #21 raw=(16,865)
+[mbs-child] CANVAS MOVE #22 raw=(16,865)
+[mbs-child] CANVAS MOVE #23 raw=(16,865)
+[mbs-child] CANVAS MOVE #24 raw=(16,865)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1025)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1025)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1025)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1025)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1025)
+[mbs-child] CANVAS MOVE #25 raw=(19,861)
+[mbs-child] CANVAS MOVE #26 raw=(19,861)
+[mbs-child] CANVAS MOVE #27 raw=(19,861)
+[mbs-child] CANVAS MOVE #28 raw=(19,861)
+[mbs-child] CANVAS MOVE #29 raw=(19,861)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1020)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1020)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1020)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1020)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1020)
+[mbs-child] CANVAS MOVE #30 raw=(21,857)
+[mbs-child] CANVAS MOVE #31 raw=(21,857)
+[mbs-child] CANVAS MOVE #32 raw=(21,857)
+[mbs-child] CANVAS MOVE #33 raw=(21,857)
+[mbs-child] CANVAS MOVE #34 raw=(21,857)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1015)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1015)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1015)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1015)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1015)
+[mbs-child] CANVAS MOVE #35 raw=(24,853)
+[mbs-child] CANVAS MOVE #36 raw=(24,853)
+[mbs-child] CANVAS MOVE #37 raw=(24,853)
+[mbs-child] CANVAS MOVE #38 raw=(24,853)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1011)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1011)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1011)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1011)
+[mbs-child] CANVAS MOVE #39 raw=(27,849)
+[mbs-child] CANVAS MOVE #40 raw=(27,849)
+[mbs-child] CANVAS MOVE #41 raw=(27,849)
+[mbs-child] CANVAS MOVE #42 raw=(27,849)
+[mbs-child] CANVAS MOVE #43 raw=(27,849)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1006)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1006)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1006)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1006)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1006)
+[mbs-child] CANVAS MOVE #44 raw=(30,846)
+[mbs-child] CANVAS MOVE #45 raw=(30,846)
+[mbs-child] CANVAS MOVE #46 raw=(30,846)
+[mbs-child] CANVAS MOVE #47 raw=(30,846)
+[mbs-child] CANVAS MOVE #48 raw=(30,846)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1002)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1002)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1002)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1002)
+[mbs-child] annotator.update: mouse "MOVE" at (0,1002)
+[mbs-child] CANVAS MOVE #49 raw=(33,842)
+[mbs-child] CANVAS MOVE #50 raw=(33,842)
+[mbs-child] CANVAS MOVE #51 raw=(33,842)
+[mbs-child] CANVAS MOVE #52 raw=(33,842)
+[mbs-child] CANVAS MOVE #53 raw=(33,842)
+[mbs-child] annotator.update: mouse "MOVE" at (0,998)
+[mbs-child] annotator.update: mouse "MOVE" at (0,998)
+[mbs-child] annotator.update: mouse "MOVE" at (0,998)
+[mbs-child] annotator.update: mouse "MOVE" at (0,998)
+[mbs-child] annotator.update: mouse "MOVE" at (0,998)
+[mbs-child] CANVAS MOVE #54 raw=(36,837)
+[mbs-child] CANVAS MOVE #55 raw=(36,837)
+[mbs-child] CANVAS MOVE #56 raw=(36,837)
+[mbs-child] CANVAS MOVE #57 raw=(36,837)
+[mbs-child] CANVAS MOVE #58 raw=(36,837)
+[mbs-child] CANVAS MOVE #59 raw=(36,837)
+[mbs-child] CANVAS MOVE #60 raw=(36,837)
+[mbs-child] annotator.update: mouse "MOVE" at (0,992)
+[mbs-child] annotator.update: mouse "MOVE" at (0,992)
+[mbs-child] annotator.update: mouse "MOVE" at (0,992)
+[mbs-child] annotator.update: mouse "MOVE" at (0,992)
+[mbs-child] annotator.update: mouse "MOVE" at (0,992)
+[mbs-child] annotator.update: mouse "MOVE" at (0,992)
+[mbs-child] annotator.update: mouse "MOVE" at (0,992)
+[mbs-child] CANVAS MOVE #61 raw=(39,835)
+[mbs-child] CANVAS MOVE #62 raw=(39,835)
+[mbs-child] CANVAS MOVE #63 raw=(39,835)
+[mbs-child] CANVAS MOVE #64 raw=(39,835)
+[mbs-child] CANVAS MOVE #65 raw=(39,835)
+[mbs-child] annotator.update: mouse "MOVE" at (0,989)
+[mbs-child] annotator.update: mouse "MOVE" at (0,989)
+[mbs-child] annotator.update: mouse "MOVE" at (0,989)
+[mbs-child] annotator.update: mouse "MOVE" at (0,989)
+[mbs-child] annotator.update: mouse "MOVE" at (0,989)
+[mbs-child] CANVAS MOVE #66 raw=(42,831)
+[mbs-child] CANVAS MOVE #67 raw=(42,831)
+[mbs-child] CANVAS MOVE #68 raw=(42,831)
+[mbs-child] CANVAS MOVE #69 raw=(42,831)
+[mbs-child] CANVAS MOVE #70 raw=(42,831)
+[mbs-child] annotator.update: mouse "MOVE" at (0,985)
+[mbs-child] annotator.update: mouse "MOVE" at (0,985)
+[mbs-child] annotator.update: mouse "MOVE" at (0,985)
+[mbs-child] annotator.update: mouse "MOVE" at (0,985)
+[mbs-child] annotator.update: mouse "MOVE" at (0,985)
+[mbs-child] CANVAS MOVE #71 raw=(46,827)
+[mbs-child] CANVAS MOVE #72 raw=(46,827)
+[mbs-child] CANVAS MOVE #73 raw=(46,827)
+[mbs-child] CANVAS MOVE #74 raw=(46,827)
+[mbs-child] CANVAS MOVE #75 raw=(46,827)
+[mbs-child] CANVAS MOVE #76 raw=(46,827)
+[mbs-child] annotator.update: mouse "MOVE" at (0,980)
+[mbs-child] annotator.update: mouse "MOVE" at (0,980)
+[mbs-child] annotator.update: mouse "MOVE" at (0,980)
+[mbs-child] annotator.update: mouse "MOVE" at (0,980)
+[mbs-child] annotator.update: mouse "MOVE" at (0,980)
+[mbs-child] annotator.update: mouse "MOVE" at (0,980)
+[mbs-child] CANVAS MOVE #77 raw=(50,823)
+[mbs-child] CANVAS MOVE #78 raw=(50,823)
+[mbs-child] CANVAS MOVE #79 raw=(50,823)
+[mbs-child] CANVAS MOVE #80 raw=(50,823)
+[mbs-child] CANVAS MOVE #81 raw=(50,823)
+[mbs-child] CANVAS MOVE #82 raw=(50,823)
+[mbs-child] annotator.update: mouse "MOVE" at (0,975)
+[mbs-child] annotator.update: mouse "MOVE" at (0,975)
+[mbs-child] annotator.update: mouse "MOVE" at (0,975)
+[mbs-child] annotator.update: mouse "MOVE" at (0,975)
+[mbs-child] annotator.update: mouse "MOVE" at (0,975)
+[mbs-child] annotator.update: mouse "MOVE" at (0,975)
+[mbs-child] CANVAS MOVE #83 raw=(54,818)
+[mbs-child] CANVAS MOVE #84 raw=(54,818)
+[mbs-child] CANVAS MOVE #85 raw=(54,818)
+[mbs-child] CANVAS MOVE #86 raw=(54,818)
+[mbs-child] CANVAS MOVE #87 raw=(54,818)
+[mbs-child] CANVAS MOVE #88 raw=(54,818)
+[mbs-child] annotator.update: mouse "MOVE" at (0,969)
+[mbs-child] annotator.update: mouse "MOVE" at (0,969)
+[mbs-child] annotator.update: mouse "MOVE" at (0,969)
+[mbs-child] annotator.update: mouse "MOVE" at (0,969)
+[mbs-child] annotator.update: mouse "MOVE" at (0,969)
+[mbs-child] annotator.update: mouse "MOVE" at (0,969)
+[mbs-child] CANVAS MOVE #89 raw=(59,814)
+[mbs-child] CANVAS MOVE #90 raw=(59,814)
+[mbs-child] CANVAS MOVE #91 raw=(59,814)
+[mbs-child] CANVAS MOVE #92 raw=(59,814)
+[mbs-child] CANVAS MOVE #93 raw=(59,814)
+[mbs-child] CANVAS MOVE #94 raw=(59,814)
+[mbs-child] annotator.update: mouse "MOVE" at (0,965)
+[mbs-child] annotator.update: mouse "MOVE" at (0,965)
+[mbs-child] annotator.update: mouse "MOVE" at (0,965)
+[mbs-child] annotator.update: mouse "MOVE" at (0,965)
+[mbs-child] annotator.update: mouse "MOVE" at (0,965)
+[mbs-child] annotator.update: mouse "MOVE" at (0,965)
+[mbs-child] CANVAS MOVE #95 raw=(65,809)
+[mbs-child] CANVAS MOVE #96 raw=(65,809)
+[mbs-child] CANVAS MOVE #97 raw=(65,809)
+[mbs-child] CANVAS MOVE #98 raw=(65,809)
+[mbs-child] CANVAS MOVE #99 raw=(65,809)
+[mbs-child] CANVAS MOVE #100 raw=(65,809)
+[mbs-child] CANVAS MOVE #101 raw=(65,809)
+[mbs-child] annotator.update: mouse "MOVE" at (0,959)
+[mbs-child] annotator.update: mouse "MOVE" at (0,959)
+[mbs-child] annotator.update: mouse "MOVE" at (0,959)
+[mbs-child] annotator.update: mouse "MOVE" at (0,959)
+[mbs-child] annotator.update: mouse "MOVE" at (0,959)
+[mbs-child] annotator.update: mouse "MOVE" at (0,959)
+[mbs-child] annotator.update: mouse "MOVE" at (0,959)
+[mbs-child] CANVAS MOVE #102 raw=(70,804)
+[mbs-child] CANVAS MOVE #103 raw=(70,804)
+[mbs-child] CANVAS MOVE #104 raw=(70,804)
+[mbs-child] CANVAS MOVE #105 raw=(70,804)
+[mbs-child] CANVAS MOVE #106 raw=(70,804)
+[mbs-child] CANVAS MOVE #107 raw=(70,804)
+[mbs-child] annotator.update: mouse "MOVE" at (0,953)
+[mbs-child] annotator.update: mouse "MOVE" at (0,953)
+[mbs-child] annotator.update: mouse "MOVE" at (0,953)
+[mbs-child] annotator.update: mouse "MOVE" at (0,953)
+[mbs-child] annotator.update: mouse "MOVE" at (0,953)
+[mbs-child] annotator.update: mouse "MOVE" at (0,953)
+[mbs-child] CANVAS MOVE #108 raw=(75,799)
+[mbs-child] CANVAS MOVE #109 raw=(75,799)
+[mbs-child] CANVAS MOVE #110 raw=(75,799)
+[mbs-child] CANVAS MOVE #111 raw=(75,799)
+[mbs-child] CANVAS MOVE #112 raw=(75,799)
+[mbs-child] CANVAS MOVE #113 raw=(75,799)
+[mbs-child] annotator.update: mouse "MOVE" at (0,947)
+[mbs-child] annotator.update: mouse "MOVE" at (0,947)
+[mbs-child] annotator.update: mouse "MOVE" at (0,947)
+[mbs-child] annotator.update: mouse "MOVE" at (0,947)
+[mbs-child] annotator.update: mouse "MOVE" at (0,947)
+[mbs-child] annotator.update: mouse "MOVE" at (0,947)
+[mbs-child] CANVAS MOVE #114 raw=(80,793)
+[mbs-child] CANVAS MOVE #115 raw=(80,793)
+[mbs-child] CANVAS MOVE #116 raw=(80,793)
+[mbs-child] CANVAS MOVE #117 raw=(80,793)
+[mbs-child] CANVAS MOVE #118 raw=(80,793)
+[mbs-child] CANVAS MOVE #119 raw=(80,793)
+[mbs-child] annotator.update: mouse "MOVE" at (0,940)
+[mbs-child] annotator.update: mouse "MOVE" at (0,940)
+[mbs-child] annotator.update: mouse "MOVE" at (0,940)
+[mbs-child] annotator.update: mouse "MOVE" at (0,940)
+[mbs-child] annotator.update: mouse "MOVE" at (0,940)
+[mbs-child] annotator.update: mouse "MOVE" at (0,940)
+[mbs-child] CANVAS MOVE #120 raw=(85,788)
+[mbs-child] CANVAS MOVE #121 raw=(85,788)
+[mbs-child] CANVAS MOVE #122 raw=(85,788)
+[mbs-child] CANVAS MOVE #123 raw=(85,788)
+[mbs-child] CANVAS MOVE #124 raw=(85,788)
+[mbs-child] CANVAS MOVE #125 raw=(85,788)
+[mbs-child] annotator.update: mouse "MOVE" at (0,934)
+[mbs-child] annotator.update: mouse "MOVE" at (0,934)
+[mbs-child] annotator.update: mouse "MOVE" at (0,934)
+[mbs-child] annotator.update: mouse "MOVE" at (0,934)
+[mbs-child] annotator.update: mouse "MOVE" at (0,934)
+[mbs-child] annotator.update: mouse "MOVE" at (0,934)
+[mbs-child] CANVAS MOVE #126 raw=(90,782)
+[mbs-child] CANVAS MOVE #127 raw=(90,782)
+[mbs-child] CANVAS MOVE #128 raw=(90,782)
+[mbs-child] CANVAS MOVE #129 raw=(90,782)
+[mbs-child] CANVAS MOVE #130 raw=(90,782)
+[mbs-child] CANVAS MOVE #131 raw=(90,782)
+[mbs-child] annotator.update: mouse "MOVE" at (0,927)
+[mbs-child] annotator.update: mouse "MOVE" at (0,927)
+[mbs-child] annotator.update: mouse "MOVE" at (0,927)
+[mbs-child] annotator.update: mouse "MOVE" at (0,927)
+[mbs-child] annotator.update: mouse "MOVE" at (0,927)
+[mbs-child] annotator.update: mouse "MOVE" at (0,927)
+[mbs-child] CANVAS MOVE #132 raw=(94,777)
+[mbs-child] CANVAS MOVE #133 raw=(94,777)
+[mbs-child] CANVAS MOVE #134 raw=(94,777)
+[mbs-child] CANVAS MOVE #135 raw=(94,777)
+[mbs-child] CANVAS MOVE #136 raw=(94,777)
+[mbs-child] CANVAS MOVE #137 raw=(94,777)
+[mbs-child] annotator.update: mouse "MOVE" at (3,921)
+[mbs-child] annotator.update: mouse "MOVE" at (3,921)
+[mbs-child] annotator.update: mouse "MOVE" at (3,921)
+[mbs-child] annotator.update: mouse "MOVE" at (3,921)
+[mbs-child] annotator.update: mouse "MOVE" at (3,921)
+[mbs-child] annotator.update: mouse "MOVE" at (3,921)
+[mbs-child] CANVAS MOVE #138 raw=(99,771)
+[mbs-child] CANVAS MOVE #139 raw=(99,771)
+[mbs-child] CANVAS MOVE #140 raw=(99,771)
+[mbs-child] CANVAS MOVE #141 raw=(99,771)
+[mbs-child] CANVAS MOVE #142 raw=(99,771)
+[mbs-child] CANVAS MOVE #143 raw=(99,771)
+[mbs-child] annotator.update: mouse "MOVE" at (8,914)
+[mbs-child] annotator.update: mouse "MOVE" at (8,914)
+[mbs-child] annotator.update: mouse "MOVE" at (8,914)
+[mbs-child] annotator.update: mouse "MOVE" at (8,914)
+[mbs-child] annotator.update: mouse "MOVE" at (8,914)
+[mbs-child] annotator.update: mouse "MOVE" at (8,914)
+[mbs-child] CANVAS MOVE #144 raw=(105,766)
+[mbs-child] CANVAS MOVE #145 raw=(105,766)
+[mbs-child] CANVAS MOVE #146 raw=(105,766)
+[mbs-child] CANVAS MOVE #147 raw=(105,766)
+[mbs-child] CANVAS MOVE #148 raw=(105,766)
+[mbs-child] CANVAS MOVE #149 raw=(105,766)
+[mbs-child] annotator.update: mouse "MOVE" at (16,908)
+[mbs-child] annotator.update: mouse "MOVE" at (16,908)
+[mbs-child] annotator.update: mouse "MOVE" at (16,908)
+[mbs-child] annotator.update: mouse "MOVE" at (16,908)
+[mbs-child] annotator.update: mouse "MOVE" at (16,908)
+[mbs-child] annotator.update: mouse "MOVE" at (16,908)
+[mbs-child] CANVAS MOVE #150 raw=(111,761)
+[mbs-child] CANVAS MOVE #151 raw=(111,761)
+[mbs-child] CANVAS MOVE #152 raw=(111,761)
+[mbs-child] CANVAS MOVE #153 raw=(111,761)
+[mbs-child] CANVAS MOVE #154 raw=(111,761)
+[mbs-child] CANVAS MOVE #155 raw=(111,761)
+[mbs-child] annotator.update: mouse "MOVE" at (23,902)
+[mbs-child] annotator.update: mouse "MOVE" at (23,902)
+[mbs-child] annotator.update: mouse "MOVE" at (23,902)
+[mbs-child] annotator.update: mouse "MOVE" at (23,902)
+[mbs-child] annotator.update: mouse "MOVE" at (23,902)
+[mbs-child] annotator.update: mouse "MOVE" at (23,902)
+[mbs-child] CANVAS MOVE #156 raw=(117,756)
+[mbs-child] CANVAS MOVE #157 raw=(117,756)
+[mbs-child] CANVAS MOVE #158 raw=(117,756)
+[mbs-child] CANVAS MOVE #159 raw=(117,756)
+[mbs-child] CANVAS MOVE #160 raw=(117,756)
+[mbs-child] CANVAS MOVE #161 raw=(117,756)
+[mbs-child] annotator.update: mouse "MOVE" at (30,896)
+[mbs-child] annotator.update: mouse "MOVE" at (30,896)
+[mbs-child] annotator.update: mouse "MOVE" at (30,896)
+[mbs-child] annotator.update: mouse "MOVE" at (30,896)
+[mbs-child] annotator.update: mouse "MOVE" at (30,896)
+[mbs-child] annotator.update: mouse "MOVE" at (30,896)
+[mbs-child] CANVAS MOVE #162 raw=(123,751)
+[mbs-child] CANVAS MOVE #163 raw=(123,751)
+[mbs-child] CANVAS MOVE #164 raw=(123,751)
+[mbs-child] CANVAS MOVE #165 raw=(123,751)
+[mbs-child] CANVAS MOVE #166 raw=(123,751)
+[mbs-child] CANVAS MOVE #167 raw=(123,751)
+[mbs-child] annotator.update: mouse "MOVE" at (37,890)
+[mbs-child] annotator.update: mouse "MOVE" at (37,890)
+[mbs-child] annotator.update: mouse "MOVE" at (37,890)
+[mbs-child] annotator.update: mouse "MOVE" at (37,890)
+[mbs-child] annotator.update: mouse "MOVE" at (37,890)
+[mbs-child] annotator.update: mouse "MOVE" at (37,890)
+[mbs-child] CANVAS MOVE #168 raw=(130,747)
+[mbs-child] CANVAS MOVE #169 raw=(130,747)
+[mbs-child] CANVAS MOVE #170 raw=(130,747)
+[mbs-child] CANVAS MOVE #171 raw=(130,747)
+[mbs-child] CANVAS MOVE #172 raw=(130,747)
+[mbs-child] CANVAS MOVE #173 raw=(130,747)
+[mbs-child] annotator.update: mouse "MOVE" at (45,885)
+[mbs-child] annotator.update: mouse "MOVE" at (45,885)
+[mbs-child] annotator.update: mouse "MOVE" at (45,885)
+[mbs-child] annotator.update: mouse "MOVE" at (45,885)
+[mbs-child] annotator.update: mouse "MOVE" at (45,885)
+[mbs-child] annotator.update: mouse "MOVE" at (45,885)
+[mbs-child] CANVAS MOVE #174 raw=(137,742)
+[mbs-child] CANVAS MOVE #175 raw=(137,742)
+[mbs-child] CANVAS MOVE #176 raw=(137,742)
+[mbs-child] CANVAS MOVE #177 raw=(137,742)
+[mbs-child] CANVAS MOVE #178 raw=(137,742)
+[mbs-child] CANVAS MOVE #179 raw=(137,742)
+[mbs-child] annotator.update: mouse "MOVE" at (54,879)
+[mbs-child] annotator.update: mouse "MOVE" at (54,879)
+[mbs-child] annotator.update: mouse "MOVE" at (54,879)
+[mbs-child] annotator.update: mouse "MOVE" at (54,879)
+[mbs-child] annotator.update: mouse "MOVE" at (54,879)
+[mbs-child] annotator.update: mouse "MOVE" at (54,879)
+[mbs-child] CANVAS MOVE #180 raw=(144,739)
+[mbs-child] CANVAS MOVE #181 raw=(144,739)
+[mbs-child] CANVAS MOVE #182 raw=(144,739)
+[mbs-child] CANVAS MOVE #183 raw=(144,739)
+[mbs-child] CANVAS MOVE #184 raw=(144,739)
+[mbs-child] CANVAS MOVE #185 raw=(144,739)
+[mbs-child] annotator.update: mouse "MOVE" at (62,876)
+[mbs-child] annotator.update: mouse "MOVE" at (62,876)
+[mbs-child] annotator.update: mouse "MOVE" at (62,876)
+[mbs-child] annotator.update: mouse "MOVE" at (62,876)
+[mbs-child] annotator.update: mouse "MOVE" at (62,876)
+[mbs-child] annotator.update: mouse "MOVE" at (62,876)
+[mbs-child] CANVAS MOVE #186 raw=(151,735)
+[mbs-child] CANVAS MOVE #187 raw=(151,735)
+[mbs-child] CANVAS MOVE #188 raw=(151,735)
+[mbs-child] CANVAS MOVE #189 raw=(151,735)
+[mbs-child] CANVAS MOVE #190 raw=(151,735)
+[mbs-child] CANVAS MOVE #191 raw=(151,735)
+[mbs-child] annotator.update: mouse "MOVE" at (70,871)
+[mbs-child] annotator.update: mouse "MOVE" at (70,871)
+[mbs-child] annotator.update: mouse "MOVE" at (70,871)
+[mbs-child] annotator.update: mouse "MOVE" at (70,871)
+[mbs-child] annotator.update: mouse "MOVE" at (70,871)
+[mbs-child] annotator.update: mouse "MOVE" at (70,871)
+[mbs-child] CANVAS MOVE #192 raw=(157,732)
+[mbs-child] CANVAS MOVE #193 raw=(157,732)
+[mbs-child] CANVAS MOVE #194 raw=(157,732)
+[mbs-child] CANVAS MOVE #195 raw=(157,732)
+[mbs-child] CANVAS MOVE #196 raw=(157,732)
+[mbs-child] CANVAS MOVE #197 raw=(157,732)
+[mbs-child] annotator.update: mouse "MOVE" at (77,867)
+[mbs-child] annotator.update: mouse "MOVE" at (77,867)
+[mbs-child] annotator.update: mouse "MOVE" at (77,867)
+[mbs-child] annotator.update: mouse "MOVE" at (77,867)
+[mbs-child] annotator.update: mouse "MOVE" at (77,867)
+[mbs-child] annotator.update: mouse "MOVE" at (77,867)
+[mbs-child] CANVAS MOVE #198 raw=(163,729)
+[mbs-child] CANVAS MOVE #199 raw=(163,729)
+[mbs-child] CANVAS MOVE #200 raw=(163,729)
+[mbs-child] CANVAS MOVE #201 raw=(163,729)
+[mbs-child] CANVAS MOVE #202 raw=(163,729)
+[mbs-child] CANVAS MOVE #203 raw=(163,729)
+[mbs-child] CANVAS MOVE #204 raw=(163,729)
+[mbs-child] annotator.update: mouse "MOVE" at (84,864)
+[mbs-child] annotator.update: mouse "MOVE" at (84,864)
+[mbs-child] annotator.update: mouse "MOVE" at (84,864)
+[mbs-child] annotator.update: mouse "MOVE" at (84,864)
+[mbs-child] annotator.update: mouse "MOVE" at (84,864)
+[mbs-child] annotator.update: mouse "MOVE" at (84,864)
+[mbs-child] annotator.update: mouse "MOVE" at (84,864)
+[mbs-child] CANVAS MOVE #205 raw=(168,726)
+[mbs-child] CANVAS MOVE #206 raw=(168,726)
+[mbs-child] CANVAS MOVE #207 raw=(168,726)
+[mbs-child] CANVAS MOVE #208 raw=(168,726)
+[mbs-child] CANVAS MOVE #209 raw=(168,726)
+[mbs-child] annotator.update: mouse "MOVE" at (90,860)
+[mbs-child] annotator.update: mouse "MOVE" at (90,860)
+[mbs-child] annotator.update: mouse "MOVE" at (90,860)
+[mbs-child] annotator.update: mouse "MOVE" at (90,860)
+[mbs-child] annotator.update: mouse "MOVE" at (90,860)
+[mbs-child] CANVAS MOVE #210 raw=(172,724)
+[mbs-child] CANVAS MOVE #211 raw=(172,724)
+[mbs-child] CANVAS MOVE #212 raw=(172,724)
+[mbs-child] CANVAS MOVE #213 raw=(172,724)
+[mbs-child] annotator.update: mouse "MOVE" at (95,858)
+[mbs-child] annotator.update: mouse "MOVE" at (95,858)
+[mbs-child] annotator.update: mouse "MOVE" at (95,858)
+[mbs-child] annotator.update: mouse "MOVE" at (95,858)
+[mbs-child] CANVAS MOVE #214 raw=(176,721)
+[mbs-child] CANVAS MOVE #215 raw=(176,721)
+[mbs-child] CANVAS MOVE #216 raw=(176,721)
+[mbs-child] CANVAS MOVE #217 raw=(176,721)
+[mbs-child] CANVAS MOVE #218 raw=(176,721)
+[mbs-child] annotator.update: mouse "MOVE" at (100,854)
+[mbs-child] annotator.update: mouse "MOVE" at (100,854)
+[mbs-child] annotator.update: mouse "MOVE" at (100,854)
+[mbs-child] annotator.update: mouse "MOVE" at (100,854)
+[mbs-child] annotator.update: mouse "MOVE" at (100,854)
+[mbs-child] CANVAS MOVE #219 raw=(180,719)
+[mbs-child] CANVAS MOVE #220 raw=(180,719)
+[mbs-child] CANVAS MOVE #221 raw=(180,719)
+[mbs-child] CANVAS MOVE #222 raw=(180,719)
+[mbs-child] CANVAS MOVE #223 raw=(180,719)
+[mbs-child] annotator.update: mouse "MOVE" at (104,852)
+[mbs-child] annotator.update: mouse "MOVE" at (104,852)
+[mbs-child] annotator.update: mouse "MOVE" at (104,852)
+[mbs-child] annotator.update: mouse "MOVE" at (104,852)
+[mbs-child] annotator.update: mouse "MOVE" at (104,852)
+[mbs-child] CANVAS MOVE #224 raw=(183,717)
+[mbs-child] CANVAS MOVE #225 raw=(183,717)
+[mbs-child] CANVAS MOVE #226 raw=(183,717)
+[mbs-child] annotator.update: mouse "MOVE" at (108,850)
+[mbs-child] annotator.update: mouse "MOVE" at (108,850)
+[mbs-child] annotator.update: mouse "MOVE" at (108,850)
+[mbs-child] CANVAS MOVE #227 raw=(187,715)
+[mbs-child] CANVAS MOVE #228 raw=(187,715)
+[mbs-child] CANVAS MOVE #229 raw=(187,715)
+[mbs-child] CANVAS MOVE #230 raw=(187,715)
+[mbs-child] CANVAS MOVE #231 raw=(187,715)
+[mbs-child] annotator.update: mouse "MOVE" at (113,847)
+[mbs-child] annotator.update: mouse "MOVE" at (113,847)
+[mbs-child] annotator.update: mouse "MOVE" at (113,847)
+[mbs-child] annotator.update: mouse "MOVE" at (113,847)
+[mbs-child] annotator.update: mouse "MOVE" at (113,847)
+[mbs-child] CANVAS MOVE #232 raw=(190,713)
+[mbs-child] CANVAS MOVE #233 raw=(190,713)
+[mbs-child] CANVAS MOVE #234 raw=(190,713)
+[mbs-child] CANVAS MOVE #235 raw=(190,713)
+[mbs-child] annotator.update: mouse "MOVE" at (116,845)
+[mbs-child] annotator.update: mouse "MOVE" at (116,845)
+[mbs-child] annotator.update: mouse "MOVE" at (116,845)
+[mbs-child] annotator.update: mouse "MOVE" at (116,845)
+[mbs-child] CANVAS MOVE #236 raw=(194,711)
+[mbs-child] CANVAS MOVE #237 raw=(194,711)
+[mbs-child] CANVAS MOVE #238 raw=(194,711)
+[mbs-child] CANVAS MOVE #239 raw=(194,711)
+[mbs-child] CANVAS MOVE #240 raw=(194,711)
+[mbs-child] CANVAS MOVE #241 raw=(194,711)
+[mbs-child] annotator.update: mouse "MOVE" at (121,842)
+[mbs-child] annotator.update: mouse "MOVE" at (121,842)
+[mbs-child] annotator.update: mouse "MOVE" at (121,842)
+[mbs-child] annotator.update: mouse "MOVE" at (121,842)
+[mbs-child] annotator.update: mouse "MOVE" at (121,842)
+[mbs-child] annotator.update: mouse "MOVE" at (121,842)
+[mbs-child] CANVAS MOVE #242 raw=(199,709)
+[mbs-child] CANVAS MOVE #243 raw=(199,709)
+[mbs-child] CANVAS MOVE #244 raw=(199,709)
+[mbs-child] CANVAS MOVE #245 raw=(199,709)
+[mbs-child] CANVAS MOVE #246 raw=(199,709)
+[mbs-child] annotator.update: mouse "MOVE" at (127,840)
+[mbs-child] annotator.update: mouse "MOVE" at (127,840)
+[mbs-child] annotator.update: mouse "MOVE" at (127,840)
+[mbs-child] annotator.update: mouse "MOVE" at (127,840)
+[mbs-child] annotator.update: mouse "MOVE" at (127,840)
+[mbs-child] CANVAS MOVE #247 raw=(204,706)
+[mbs-child] CANVAS MOVE #248 raw=(204,706)
+[mbs-child] CANVAS MOVE #249 raw=(204,706)
+[mbs-child] CANVAS MOVE #250 raw=(204,706)
+[mbs-child] CANVAS MOVE #251 raw=(204,706)
+[mbs-child] CANVAS MOVE #252 raw=(204,706)
+[mbs-child] annotator.update: mouse "MOVE" at (133,837)
+[mbs-child] annotator.update: mouse "MOVE" at (133,837)
+[mbs-child] annotator.update: mouse "MOVE" at (133,837)
+[mbs-child] annotator.update: mouse "MOVE" at (133,837)
+[mbs-child] annotator.update: mouse "MOVE" at (133,837)
+[mbs-child] annotator.update: mouse "MOVE" at (133,837)
+[mbs-child] CANVAS MOVE #253 raw=(209,704)
+[mbs-child] CANVAS MOVE #254 raw=(209,704)
+[mbs-child] CANVAS MOVE #255 raw=(209,704)
+[mbs-child] CANVAS MOVE #256 raw=(209,704)
+[mbs-child] CANVAS MOVE #257 raw=(209,704)
+[mbs-child] annotator.update: mouse "MOVE" at (139,834)
+[mbs-child] annotator.update: mouse "MOVE" at (139,834)
+[mbs-child] annotator.update: mouse "MOVE" at (139,834)
+[mbs-child] annotator.update: mouse "MOVE" at (139,834)
+[mbs-child] annotator.update: mouse "MOVE" at (139,834)
+[mbs-child] CANVAS MOVE #258 raw=(215,701)
+[mbs-child] CANVAS MOVE #259 raw=(215,701)
+[mbs-child] CANVAS MOVE #260 raw=(215,701)
+[mbs-child] CANVAS MOVE #261 raw=(215,701)
+[mbs-child] CANVAS MOVE #262 raw=(215,701)
+[mbs-child] CANVAS MOVE #263 raw=(215,701)
+[mbs-child] annotator.update: mouse "MOVE" at (146,831)
+[mbs-child] annotator.update: mouse "MOVE" at (146,831)
+[mbs-child] annotator.update: mouse "MOVE" at (146,831)
+[mbs-child] annotator.update: mouse "MOVE" at (146,831)
+[mbs-child] annotator.update: mouse "MOVE" at (146,831)
+[mbs-child] annotator.update: mouse "MOVE" at (146,831)
+[mbs-child] CANVAS MOVE #264 raw=(222,699)
+[mbs-child] CANVAS MOVE #265 raw=(222,699)
+[mbs-child] CANVAS MOVE #266 raw=(222,699)
+[mbs-child] CANVAS MOVE #267 raw=(222,699)
+[mbs-child] CANVAS MOVE #268 raw=(222,699)
+[mbs-child] CANVAS MOVE #269 raw=(222,699)
+[mbs-child] annotator.update: mouse "MOVE" at (154,828)
+[mbs-child] annotator.update: mouse "MOVE" at (154,828)
+[mbs-child] annotator.update: mouse "MOVE" at (154,828)
+[mbs-child] annotator.update: mouse "MOVE" at (154,828)
+[mbs-child] annotator.update: mouse "MOVE" at (154,828)
+[mbs-child] annotator.update: mouse "MOVE" at (154,828)
+[mbs-child] CANVAS MOVE #270 raw=(229,696)
+[mbs-child] CANVAS MOVE #271 raw=(229,696)
+[mbs-child] CANVAS MOVE #272 raw=(229,696)
+[mbs-child] CANVAS MOVE #273 raw=(229,696)
+[mbs-child] CANVAS MOVE #274 raw=(229,696)
+[mbs-child] CANVAS MOVE #275 raw=(229,696)
+[mbs-child] annotator.update: mouse "MOVE" at (162,825)
+[mbs-child] annotator.update: mouse "MOVE" at (162,825)
+[mbs-child] annotator.update: mouse "MOVE" at (162,825)
+[mbs-child] annotator.update: mouse "MOVE" at (162,825)
+[mbs-child] annotator.update: mouse "MOVE" at (162,825)
+[mbs-child] annotator.update: mouse "MOVE" at (162,825)
+[mbs-child] CANVAS MOVE #276 raw=(236,693)
+[mbs-child] CANVAS MOVE #277 raw=(236,693)
+[mbs-child] CANVAS MOVE #278 raw=(236,693)
+[mbs-child] CANVAS MOVE #279 raw=(236,693)
+[mbs-child] CANVAS MOVE #280 raw=(236,693)
+[mbs-child] CANVAS MOVE #281 raw=(236,693)
+[mbs-child] annotator.update: mouse "MOVE" at (171,821)
+[mbs-child] annotator.update: mouse "MOVE" at (171,821)
+[mbs-child] annotator.update: mouse "MOVE" at (171,821)
+[mbs-child] annotator.update: mouse "MOVE" at (171,821)
+[mbs-child] annotator.update: mouse "MOVE" at (171,821)
+[mbs-child] annotator.update: mouse "MOVE" at (171,821)
+[mbs-child] CANVAS MOVE #282 raw=(245,690)
+[mbs-child] CANVAS MOVE #283 raw=(245,690)
+[mbs-child] CANVAS MOVE #284 raw=(245,690)
+[mbs-child] CANVAS MOVE #285 raw=(245,690)
+[mbs-child] CANVAS MOVE #286 raw=(245,690)
+[mbs-child] CANVAS MOVE #287 raw=(245,690)
+[mbs-child] CANVAS MOVE #288 raw=(245,690)
+[mbs-child] annotator.update: mouse "MOVE" at (181,818)
+[mbs-child] annotator.update: mouse "MOVE" at (181,818)
+[mbs-child] annotator.update: mouse "MOVE" at (181,818)
+[mbs-child] annotator.update: mouse "MOVE" at (181,818)
+[mbs-child] annotator.update: mouse "MOVE" at (181,818)
+[mbs-child] annotator.update: mouse "MOVE" at (181,818)
+[mbs-child] annotator.update: mouse "MOVE" at (181,818)
+[mbs-child] CANVAS MOVE #289 raw=(253,687)
+[mbs-child] CANVAS MOVE #290 raw=(253,687)
+[mbs-child] CANVAS MOVE #291 raw=(253,687)
+[mbs-child] CANVAS MOVE #292 raw=(253,687)
+[mbs-child] CANVAS MOVE #293 raw=(253,687)
+[mbs-child] CANVAS MOVE #294 raw=(253,687)
+[mbs-child] annotator.update: mouse "MOVE" at (191,814)
+[mbs-child] annotator.update: mouse "MOVE" at (191,814)
+[mbs-child] annotator.update: mouse "MOVE" at (191,814)
+[mbs-child] annotator.update: mouse "MOVE" at (191,814)
+[mbs-child] annotator.update: mouse "MOVE" at (191,814)
+[mbs-child] annotator.update: mouse "MOVE" at (191,814)
+[mbs-child] CANVAS MOVE #295 raw=(261,685)
+[mbs-child] CANVAS MOVE #296 raw=(261,685)
+[mbs-child] CANVAS MOVE #297 raw=(261,685)
+[mbs-child] CANVAS MOVE #298 raw=(261,685)
+[mbs-child] CANVAS MOVE #299 raw=(261,685)
+[mbs-child] CANVAS MOVE #300 raw=(261,685)
+[mbs-child] annotator.update: mouse "MOVE" at (200,812)
+[mbs-child] annotator.update: mouse "MOVE" at (200,812)
+[mbs-child] annotator.update: mouse "MOVE" at (200,812)
+[mbs-child] annotator.update: mouse "MOVE" at (200,812)
+[mbs-child] annotator.update: mouse "MOVE" at (200,812)
+[mbs-child] annotator.update: mouse "MOVE" at (200,812)
+[mbs-child] CANVAS MOVE #301 raw=(269,683)
+[mbs-child] CANVAS MOVE #302 raw=(269,683)
+[mbs-child] CANVAS MOVE #303 raw=(269,683)
+[mbs-child] CANVAS MOVE #304 raw=(269,683)
+[mbs-child] CANVAS MOVE #305 raw=(269,683)
+[mbs-child] CANVAS MOVE #306 raw=(269,683)
+[mbs-child] annotator.update: mouse "MOVE" at (210,809)
+[mbs-child] annotator.update: mouse "MOVE" at (210,809)
+[mbs-child] annotator.update: mouse "MOVE" at (210,809)
+[mbs-child] annotator.update: mouse "MOVE" at (210,809)
+[mbs-child] annotator.update: mouse "MOVE" at (210,809)
+[mbs-child] annotator.update: mouse "MOVE" at (210,809)
+[mbs-child] CANVAS MOVE #307 raw=(276,681)
+[mbs-child] CANVAS MOVE #308 raw=(276,681)
+[mbs-child] CANVAS MOVE #309 raw=(276,681)
+[mbs-child] CANVAS MOVE #310 raw=(276,681)
+[mbs-child] CANVAS MOVE #311 raw=(276,681)
+[mbs-child] CANVAS MOVE #312 raw=(276,681)
+[mbs-child] annotator.update: mouse "MOVE" at (218,807)
+[mbs-child] annotator.update: mouse "MOVE" at (218,807)
+[mbs-child] annotator.update: mouse "MOVE" at (218,807)
+[mbs-child] annotator.update: mouse "MOVE" at (218,807)
+[mbs-child] annotator.update: mouse "MOVE" at (218,807)
+[mbs-child] annotator.update: mouse "MOVE" at (218,807)
+[mbs-child] CANVAS MOVE #313 raw=(283,678)
+[mbs-child] CANVAS MOVE #314 raw=(283,678)
+[mbs-child] CANVAS MOVE #315 raw=(283,678)
+[mbs-child] CANVAS MOVE #316 raw=(283,678)
+[mbs-child] CANVAS MOVE #317 raw=(283,678)
+[mbs-child] CANVAS MOVE #318 raw=(283,678)
+[mbs-child] annotator.update: mouse "MOVE" at (226,803)
+[mbs-child] annotator.update: mouse "MOVE" at (226,803)
+[mbs-child] annotator.update: mouse "MOVE" at (226,803)
+[mbs-child] annotator.update: mouse "MOVE" at (226,803)
+[mbs-child] annotator.update: mouse "MOVE" at (226,803)
+[mbs-child] annotator.update: mouse "MOVE" at (226,803)
+[mbs-child] CANVAS MOVE #319 raw=(290,677)
+[mbs-child] CANVAS MOVE #320 raw=(290,677)
+[mbs-child] CANVAS MOVE #321 raw=(290,677)
+[mbs-child] CANVAS MOVE #322 raw=(290,677)
+[mbs-child] CANVAS MOVE #323 raw=(290,677)
+[mbs-child] CANVAS MOVE #324 raw=(290,677)
+[mbs-child] annotator.update: mouse "MOVE" at (235,802)
+[mbs-child] annotator.update: mouse "MOVE" at (235,802)
+[mbs-child] annotator.update: mouse "MOVE" at (235,802)
+[mbs-child] annotator.update: mouse "MOVE" at (235,802)
+[mbs-child] annotator.update: mouse "MOVE" at (235,802)
+[mbs-child] annotator.update: mouse "MOVE" at (235,802)
+[mbs-child] CANVAS MOVE #325 raw=(295,675)
+[mbs-child] CANVAS MOVE #326 raw=(295,675)
+[mbs-child] CANVAS MOVE #327 raw=(295,675)
+[mbs-child] CANVAS MOVE #328 raw=(295,675)
+[mbs-child] CANVAS MOVE #329 raw=(295,675)
+[mbs-child] annotator.update: mouse "MOVE" at (241,800)
+[mbs-child] annotator.update: mouse "MOVE" at (241,800)
+[mbs-child] annotator.update: mouse "MOVE" at (241,800)
+[mbs-child] annotator.update: mouse "MOVE" at (241,800)
+[mbs-child] annotator.update: mouse "MOVE" at (241,800)
+[mbs-child] CANVAS MOVE #330 raw=(300,673)
+[mbs-child] CANVAS MOVE #331 raw=(300,673)
+[mbs-child] CANVAS MOVE #332 raw=(300,673)
+[mbs-child] CANVAS MOVE #333 raw=(300,673)
+[mbs-child] CANVAS MOVE #334 raw=(300,673)
+[mbs-child] CANVAS MOVE #335 raw=(300,673)
+[mbs-child] annotator.update: mouse "MOVE" at (247,797)
+[mbs-child] annotator.update: mouse "MOVE" at (247,797)
+[mbs-child] annotator.update: mouse "MOVE" at (247,797)
+[mbs-child] annotator.update: mouse "MOVE" at (247,797)
+[mbs-child] annotator.update: mouse "MOVE" at (247,797)
+[mbs-child] annotator.update: mouse "MOVE" at (247,797)
+[mbs-child] CANVAS MOVE #336 raw=(305,672)
+[mbs-child] CANVAS MOVE #337 raw=(305,672)
+[mbs-child] CANVAS MOVE #338 raw=(305,672)
+[mbs-child] CANVAS MOVE #339 raw=(305,672)
+[mbs-child] CANVAS MOVE #340 raw=(305,672)
+[mbs-child] CANVAS MOVE #341 raw=(305,672)
+[mbs-child] annotator.update: mouse "MOVE" at (253,796)
+[mbs-child] annotator.update: mouse "MOVE" at (253,796)
+[mbs-child] annotator.update: mouse "MOVE" at (253,796)
+[mbs-child] annotator.update: mouse "MOVE" at (253,796)
+[mbs-child] annotator.update: mouse "MOVE" at (253,796)
+[mbs-child] annotator.update: mouse "MOVE" at (253,796)
+[mbs-child] CANVAS MOVE #342 raw=(309,670)
+[mbs-child] CANVAS MOVE #343 raw=(309,670)
+[mbs-child] CANVAS MOVE #344 raw=(309,670)
+[mbs-child] CANVAS MOVE #345 raw=(309,670)
+[mbs-child] CANVAS MOVE #346 raw=(309,670)
+[mbs-child] annotator.update: mouse "MOVE" at (257,794)
+[mbs-child] annotator.update: mouse "MOVE" at (257,794)
+[mbs-child] annotator.update: mouse "MOVE" at (257,794)
+[mbs-child] annotator.update: mouse "MOVE" at (257,794)
+[mbs-child] annotator.update: mouse "MOVE" at (257,794)
+[mbs-child] CANVAS MOVE #347 raw=(313,668)
+[mbs-child] CANVAS MOVE #348 raw=(313,668)
+[mbs-child] CANVAS MOVE #349 raw=(313,668)
+[mbs-child] CANVAS MOVE #350 raw=(313,668)
+[mbs-child] annotator.update: mouse "MOVE" at (262,792)
+[mbs-child] annotator.update: mouse "MOVE" at (262,792)
+[mbs-child] annotator.update: mouse "MOVE" at (262,792)
+[mbs-child] annotator.update: mouse "MOVE" at (262,792)
+[mbs-child] CANVAS MOVE #351 raw=(316,667)
+[mbs-child] CANVAS MOVE #352 raw=(316,667)
+[mbs-child] CANVAS MOVE #353 raw=(316,667)
+[mbs-child] annotator.update: mouse "MOVE" at (266,790)
+[mbs-child] annotator.update: mouse "MOVE" at (266,790)
+[mbs-child] annotator.update: mouse "MOVE" at (266,790)
+[mbs-child] CANVAS MOVE #354 raw=(320,664)
+[mbs-child] CANVAS MOVE #355 raw=(320,664)
+[mbs-child] CANVAS MOVE #356 raw=(320,664)
+[mbs-child] CANVAS MOVE #357 raw=(320,664)
+[mbs-child] CANVAS MOVE #358 raw=(320,664)
+[mbs-child] annotator.update: mouse "MOVE" at (270,787)
+[mbs-child] annotator.update: mouse "MOVE" at (270,787)
+[mbs-child] annotator.update: mouse "MOVE" at (270,787)
+[mbs-child] annotator.update: mouse "MOVE" at (270,787)
+[mbs-child] annotator.update: mouse "MOVE" at (270,787)
+[mbs-child] CANVAS MOVE #359 raw=(323,662)
+[mbs-child] CANVAS MOVE #360 raw=(323,662)
+[mbs-child] CANVAS MOVE #361 raw=(323,662)
+[mbs-child] annotator.update: mouse "MOVE" at (274,784)
+[mbs-child] annotator.update: mouse "MOVE" at (274,784)
+[mbs-child] annotator.update: mouse "MOVE" at (274,784)
+[mbs-child] CANVAS MOVE #362 raw=(327,659)
+[mbs-child] CANVAS MOVE #363 raw=(327,659)
+[mbs-child] CANVAS MOVE #364 raw=(327,659)
+[mbs-child] CANVAS MOVE #365 raw=(327,659)
+[mbs-child] annotator.update: mouse "MOVE" at (279,781)
+[mbs-child] annotator.update: mouse "MOVE" at (279,781)
+[mbs-child] annotator.update: mouse "MOVE" at (279,781)
+[mbs-child] annotator.update: mouse "MOVE" at (279,781)
+[mbs-child] CANVAS MOVE #366 raw=(331,656)
+[mbs-child] CANVAS MOVE #367 raw=(331,656)
+[mbs-child] CANVAS MOVE #368 raw=(331,656)
+[mbs-child] CANVAS MOVE #369 raw=(331,656)
+[mbs-child] CANVAS MOVE #370 raw=(331,656)
+[mbs-child] CANVAS MOVE #371 raw=(331,656)
+[mbs-child] annotator.update: mouse "MOVE" at (283,777)
+[mbs-child] annotator.update: mouse "MOVE" at (283,777)
+[mbs-child] annotator.update: mouse "MOVE" at (283,777)
+[mbs-child] annotator.update: mouse "MOVE" at (283,777)
+[mbs-child] annotator.update: mouse "MOVE" at (283,777)
+[mbs-child] annotator.update: mouse "MOVE" at (283,777)
+[mbs-child] CANVAS MOVE #372 raw=(335,652)
+[mbs-child] CANVAS MOVE #373 raw=(335,652)
+[mbs-child] CANVAS MOVE #374 raw=(335,652)
+[mbs-child] CANVAS MOVE #375 raw=(335,652)
+[mbs-child] CANVAS MOVE #376 raw=(335,652)
+[mbs-child] CANVAS MOVE #377 raw=(335,652)
+[mbs-child] CANVAS MOVE #378 raw=(335,652)
+[mbs-child] annotator.update: mouse "MOVE" at (288,773)
+[mbs-child] annotator.update: mouse "MOVE" at (288,773)
+[mbs-child] annotator.update: mouse "MOVE" at (288,773)
+[mbs-child] annotator.update: mouse "MOVE" at (288,773)
+[mbs-child] annotator.update: mouse "MOVE" at (288,773)
+[mbs-child] annotator.update: mouse "MOVE" at (288,773)
+[mbs-child] annotator.update: mouse "MOVE" at (288,773)
+[mbs-child] CANVAS MOVE #379 raw=(339,648)
+[mbs-child] CANVAS MOVE #380 raw=(339,648)
+[mbs-child] CANVAS MOVE #381 raw=(339,648)
+[mbs-child] CANVAS MOVE #382 raw=(339,648)
+[mbs-child] CANVAS MOVE #383 raw=(339,648)
+[mbs-child] CANVAS MOVE #384 raw=(339,648)
+[mbs-child] annotator.update: mouse "MOVE" at (293,768)
+[mbs-child] annotator.update: mouse "MOVE" at (293,768)
+[mbs-child] annotator.update: mouse "MOVE" at (293,768)
+[mbs-child] annotator.update: mouse "MOVE" at (293,768)
+[mbs-child] annotator.update: mouse "MOVE" at (293,768)
+[mbs-child] annotator.update: mouse "MOVE" at (293,768)
+[mbs-child] CANVAS MOVE #385 raw=(343,645)
+[mbs-child] CANVAS MOVE #386 raw=(343,645)
+[mbs-child] CANVAS MOVE #387 raw=(343,645)
+[mbs-child] CANVAS MOVE #388 raw=(343,645)
+[mbs-child] annotator.update: mouse "MOVE" at (298,764)
+[mbs-child] annotator.update: mouse "MOVE" at (298,764)
+[mbs-child] annotator.update: mouse "MOVE" at (298,764)
+[mbs-child] annotator.update: mouse "MOVE" at (298,764)
+[mbs-child] CANVAS MOVE #389 raw=(347,641)
+[mbs-child] CANVAS MOVE #390 raw=(347,641)
+[mbs-child] CANVAS MOVE #391 raw=(347,641)
+[mbs-child] CANVAS MOVE #392 raw=(347,641)
+[mbs-child] CANVAS MOVE #393 raw=(347,641)
+[mbs-child] annotator.update: mouse "MOVE" at (302,760)
+[mbs-child] annotator.update: mouse "MOVE" at (302,760)
+[mbs-child] annotator.update: mouse "MOVE" at (302,760)
+[mbs-child] annotator.update: mouse "MOVE" at (302,760)
+[mbs-child] annotator.update: mouse "MOVE" at (302,760)
+[mbs-child] CANVAS MOVE #394 raw=(351,638)
+[mbs-child] CANVAS MOVE #395 raw=(351,638)
+[mbs-child] CANVAS MOVE #396 raw=(351,638)
+[mbs-child] CANVAS MOVE #397 raw=(351,638)
+[mbs-child] CANVAS MOVE #398 raw=(351,638)
+[mbs-child] annotator.update: mouse "MOVE" at (307,756)
+[mbs-child] annotator.update: mouse "MOVE" at (307,756)
+[mbs-child] annotator.update: mouse "MOVE" at (307,756)
+[mbs-child] annotator.update: mouse "MOVE" at (307,756)
+[mbs-child] annotator.update: mouse "MOVE" at (307,756)
+[mbs-child] CANVAS MOVE #399 raw=(354,636)
+[mbs-child] CANVAS MOVE #400 raw=(354,636)
+[mbs-child] CANVAS MOVE #401 raw=(354,636)
+[mbs-child] CANVAS MOVE #402 raw=(354,636)
+[mbs-child] annotator.update: mouse "MOVE" at (311,754)
+[mbs-child] annotator.update: mouse "MOVE" at (311,754)
+[mbs-child] annotator.update: mouse "MOVE" at (311,754)
+[mbs-child] annotator.update: mouse "MOVE" at (311,754)
+[mbs-child] CANVAS MOVE #403 raw=(356,634)
+[mbs-child] CANVAS MOVE #404 raw=(356,634)
+[mbs-child] CANVAS MOVE #405 raw=(356,634)
+[mbs-child] annotator.update: mouse "MOVE" at (313,751)
+[mbs-child] annotator.update: mouse "MOVE" at (313,751)
+[mbs-child] annotator.update: mouse "MOVE" at (313,751)
+[mbs-child] CANVAS MOVE #406 raw=(358,632)
+[mbs-child] CANVAS MOVE #407 raw=(358,632)
+[mbs-child] CANVAS MOVE #408 raw=(358,632)
+[mbs-child] CANVAS MOVE #409 raw=(358,632)
+[mbs-child] annotator.update: mouse "MOVE" at (315,749)
+[mbs-child] annotator.update: mouse "MOVE" at (315,749)
+[mbs-child] annotator.update: mouse "MOVE" at (315,749)
+[mbs-child] annotator.update: mouse "MOVE" at (315,749)
+[mbs-child] CANVAS MOVE #410 raw=(359,631)
+[mbs-child] CANVAS MOVE #411 raw=(359,631)
+[mbs-child] annotator.update: mouse "MOVE" at (317,748)
+[mbs-child] annotator.update: mouse "MOVE" at (317,748)
+[mbs-child] CANVAS MOVE #412 raw=(360,630)
+[mbs-child] CANVAS MOVE #413 raw=(360,630)
+[mbs-child] annotator.update: mouse "MOVE" at (318,747)
+[mbs-child] annotator.update: mouse "MOVE" at (318,747)
+[mbs-child] CANVAS MOVE #414 raw=(361,629)
+[mbs-child] CANVAS MOVE #415 raw=(361,629)
+[mbs-child] annotator.update: mouse "MOVE" at (319,745)
+[mbs-child] annotator.update: mouse "MOVE" at (319,745)
+[mbs-child] CANVAS MOVE #416 raw=(361,628)
+[mbs-child] annotator.update: mouse "MOVE" at (319,744)
+[mbs-child] CANVAS MOVE #417 raw=(361,627)
+[mbs-child] annotator.update: mouse "MOVE" at (319,743)
+[mbs-child] CANVAS MOVE #418 raw=(361,626)
+[mbs-child] annotator.update: mouse "MOVE" at (319,742)
+[mbs-child] CANVAS MOVE #419 raw=(360,626)
+[mbs-child] annotator.update: mouse "MOVE" at (318,742)
+[mbs-child] CANVAS MOVE #420 raw=(359,626)
+[mbs-child] annotator.update: mouse "MOVE" at (317,742)
+[mbs-child] CANVAS MOVE #421 raw=(359,627)
+[mbs-child] annotator.update: mouse "MOVE" at (317,743)
+[mbs-child] CANVAS MOVE #422 raw=(359,628)
+[mbs-child] annotator.update: mouse "MOVE" at (317,744)
+[mbs-child] CANVAS MOVE #423 raw=(358,630)
+[mbs-child] CANVAS MOVE #424 raw=(358,630)
+[mbs-child] CANVAS MOVE #425 raw=(358,630)
+[mbs-child] annotator.update: mouse "MOVE" at (315,747)
+[mbs-child] annotator.update: mouse "MOVE" at (315,747)
+[mbs-child] annotator.update: mouse "MOVE" at (315,747)
+[mbs-child] CANVAS MOVE #426 raw=(358,631)
+[mbs-child] annotator.update: mouse "MOVE" at (315,748)
+[mbs-child] CANVAS MOVE #427 raw=(357,633)
+[mbs-child] CANVAS MOVE #428 raw=(357,633)
+[mbs-child] CANVAS MOVE #429 raw=(357,633)
+[mbs-child] annotator.update: mouse "MOVE" at (314,750)
+[mbs-child] annotator.update: mouse "MOVE" at (314,750)
+[mbs-child] annotator.update: mouse "MOVE" at (314,750)
+[mbs-child] CANVAS MOVE #430 raw=(357,635)
+[mbs-child] CANVAS MOVE #431 raw=(357,635)
+[mbs-child] annotator.update: mouse "MOVE" at (314,752)
+[mbs-child] annotator.update: mouse "MOVE" at (314,752)
+[mbs-child] CANVAS MOVE #432 raw=(357,637)
+[mbs-child] CANVAS MOVE #433 raw=(357,637)
+[mbs-child] annotator.update: mouse "MOVE" at (314,755)
+[mbs-child] annotator.update: mouse "MOVE" at (314,755)
+[mbs-child] CANVAS MOVE #434 raw=(357,639)
+[mbs-child] CANVAS MOVE #435 raw=(357,639)
+[mbs-child] annotator.update: mouse "MOVE" at (314,757)
+[mbs-child] annotator.update: mouse "MOVE" at (314,757)
+[mbs-child] CANVAS MOVE #436 raw=(357,641)
+[mbs-child] CANVAS MOVE #437 raw=(357,641)
+[mbs-child] annotator.update: mouse "MOVE" at (314,760)
+[mbs-child] annotator.update: mouse "MOVE" at (314,760)
+[mbs-child] CANVAS MOVE #438 raw=(357,642)
+[mbs-child] annotator.update: mouse "MOVE" at (314,761)
+[mbs-child] CANVAS MOVE #439 raw=(358,642)
+[mbs-child] annotator.update: mouse "MOVE" at (315,761)
+[mbs-child] CANVAS MOVE #440 raw=(359,642)
+[mbs-child] annotator.update: mouse "MOVE" at (317,761)
+[mbs-child] CANVAS MOVE #441 raw=(360,642)
+[mbs-child] annotator.update: mouse "MOVE" at (318,761)
+[mbs-child] CANVAS MOVE #442 raw=(361,642)
+[mbs-child] annotator.update: mouse "MOVE" at (319,761)
+[mbs-child] CANVAS MOVE #443 raw=(362,642)
+[mbs-child] annotator.update: mouse "MOVE" at (320,761)
+[mbs-child] CANVAS MOVE #444 raw=(363,642)
+[mbs-child] annotator.update: mouse "MOVE" at (321,761)
+[mbs-child] CANVAS MOVE #445 raw=(365,642)
+[mbs-child] CANVAS MOVE #446 raw=(365,642)
+[mbs-child] annotator.update: mouse "MOVE" at (324,761)
+[mbs-child] annotator.update: mouse "MOVE" at (324,761)
+[mbs-child] CANVAS MOVE #447 raw=(367,641)
+[mbs-child] CANVAS MOVE #448 raw=(367,641)
+[mbs-child] CANVAS MOVE #449 raw=(367,641)
+[mbs-child] annotator.update: mouse "MOVE" at (326,760)
+[mbs-child] annotator.update: mouse "MOVE" at (326,760)
+[mbs-child] annotator.update: mouse "MOVE" at (326,760)
+[mbs-child] CANVAS MOVE #450 raw=(368,641)
+[mbs-child] annotator.update: mouse "MOVE" at (327,760)
+[mbs-child] CANVAS MOVE #451 raw=(370,640)
+[mbs-child] CANVAS MOVE #452 raw=(370,640)
+[mbs-child] CANVAS MOVE #453 raw=(370,640)
+[mbs-child] annotator.update: mouse "MOVE" at (330,758)
+[mbs-child] annotator.update: mouse "MOVE" at (330,758)
+[mbs-child] annotator.update: mouse "MOVE" at (330,758)
+[mbs-child] CANVAS MOVE #454 raw=(371,640)
+[mbs-child] annotator.update: mouse "MOVE" at (331,758)
+[mbs-child] CANVAS MOVE #455 raw=(372,639)
+[mbs-child] annotator.update: mouse "MOVE" at (332,757)
+[mbs-child] CANVAS MOVE #456 raw=(373,638)
+[mbs-child] CANVAS MOVE #457 raw=(373,638)
+[mbs-child] annotator.update: mouse "MOVE" at (333,756)
+[mbs-child] annotator.update: mouse "MOVE" at (333,756)
+[mbs-child] CANVAS MOVE #458 raw=(374,637)
+[mbs-child] annotator.update: mouse "MOVE" at (334,755)
+[mbs-child] CANVAS MOVE #459 raw=(374,636)
+[mbs-child] annotator.update: mouse "MOVE" at (334,754)
+[mbs-child] CANVAS MOVE #460 raw=(374,634)
+[mbs-child] CANVAS MOVE #461 raw=(374,634)
+[mbs-child] annotator.update: mouse "MOVE" at (334,751)
+[mbs-child] annotator.update: mouse "MOVE" at (334,751)
+[mbs-child] CANVAS MOVE #462 raw=(375,632)
+[mbs-child] CANVAS MOVE #463 raw=(375,632)
+[mbs-child] CANVAS MOVE #464 raw=(375,632)
+[mbs-child] annotator.update: mouse "MOVE" at (335,749)
+[mbs-child] annotator.update: mouse "MOVE" at (335,749)
+[mbs-child] annotator.update: mouse "MOVE" at (335,749)
+[mbs-child] CANVAS MOVE #465 raw=(375,630)
+[mbs-child] CANVAS MOVE #466 raw=(375,630)
+[mbs-child] annotator.update: mouse "MOVE" at (335,747)
+[mbs-child] annotator.update: mouse "MOVE" at (335,747)
+[mbs-child] CANVAS MOVE #467 raw=(375,628)
+[mbs-child] CANVAS MOVE #468 raw=(375,628)
+[mbs-child] annotator.update: mouse "MOVE" at (335,744)
+[mbs-child] annotator.update: mouse "MOVE" at (335,744)
+[mbs-child] CANVAS MOVE #469 raw=(376,626)
+[mbs-child] CANVAS MOVE #470 raw=(376,626)
+[mbs-child] annotator.update: mouse "MOVE" at (337,742)
+[mbs-child] annotator.update: mouse "MOVE" at (337,742)
+[mbs-child] CANVAS MOVE #471 raw=(377,624)
+[mbs-child] CANVAS MOVE #472 raw=(377,624)
+[mbs-child] CANVAS MOVE #473 raw=(377,624)
+[mbs-child] annotator.update: mouse "MOVE" at (338,739)
+[mbs-child] annotator.update: mouse "MOVE" at (338,739)
+[mbs-child] annotator.update: mouse "MOVE" at (338,739)
+[mbs-child] CANVAS MOVE #474 raw=(378,622)
+[mbs-child] CANVAS MOVE #475 raw=(378,622)
+[mbs-child] CANVAS MOVE #476 raw=(378,622)
+[mbs-child] annotator.update: mouse "MOVE" at (339,737)
+[mbs-child] annotator.update: mouse "MOVE" at (339,737)
+[mbs-child] annotator.update: mouse "MOVE" at (339,737)
+[mbs-child] CANVAS MOVE #477 raw=(379,620)
+[mbs-child] CANVAS MOVE #478 raw=(379,620)
+[mbs-child] CANVAS MOVE #479 raw=(379,620)
+[mbs-child] annotator.update: mouse "MOVE" at (340,735)
+[mbs-child] annotator.update: mouse "MOVE" at (340,735)
+[mbs-child] annotator.update: mouse "MOVE" at (340,735)
+[mbs-child] CANVAS MOVE #480 raw=(380,618)
+[mbs-child] CANVAS MOVE #481 raw=(380,618)
+[mbs-child] CANVAS MOVE #482 raw=(380,618)
+[mbs-child] annotator.update: mouse "MOVE" at (341,732)
+[mbs-child] annotator.update: mouse "MOVE" at (341,732)
+[mbs-child] annotator.update: mouse "MOVE" at (341,732)
+[mbs-child] CANVAS MOVE #483 raw=(381,617)
+[mbs-child] CANVAS MOVE #484 raw=(381,617)
+[mbs-child] annotator.update: mouse "MOVE" at (343,731)
+[mbs-child] annotator.update: mouse "MOVE" at (343,731)
+[mbs-child] CANVAS MOVE #485 raw=(382,616)
+[mbs-child] CANVAS MOVE #486 raw=(382,616)
+[mbs-child] annotator.update: mouse "MOVE" at (344,730)
+[mbs-child] annotator.update: mouse "MOVE" at (344,730)
+[mbs-child] CANVAS MOVE #487 raw=(383,615)
+[mbs-child] CANVAS MOVE #488 raw=(383,615)
+[mbs-child] annotator.update: mouse "MOVE" at (345,729)
+[mbs-child] annotator.update: mouse "MOVE" at (345,729)
+[mbs-child] CANVAS MOVE #489 raw=(383,614)
+[mbs-child] annotator.update: mouse "MOVE" at (345,728)
+[mbs-child] CANVAS MOVE #490 raw=(384,614)
+[mbs-child] annotator.update: mouse "MOVE" at (346,728)
+[mbs-child] CANVAS MOVE #491 raw=(385,614)
+[mbs-child] annotator.update: mouse "MOVE" at (347,728)
+[mbs-child] CANVAS MOVE #492 raw=(386,614)
+[mbs-child] annotator.update: mouse "MOVE" at (349,728)
+[mbs-child] CANVAS MOVE #493 raw=(387,614)
+[mbs-child] annotator.update: mouse "MOVE" at (350,728)
+[mbs-child] CANVAS MOVE #494 raw=(387,615)
+[mbs-child] annotator.update: mouse "MOVE" at (350,729)
+[mbs-child] CANVAS MOVE #495 raw=(388,615)
+[mbs-child] annotator.update: mouse "MOVE" at (351,729)
+[mbs-child] CANVAS MOVE #496 raw=(388,616)
+[mbs-child] annotator.update: mouse "MOVE" at (351,730)
+[mbs-child] CANVAS MOVE #497 raw=(388,617)
+[mbs-child] annotator.update: mouse "MOVE" at (351,731)
+[mbs-child] CANVAS MOVE #498 raw=(388,616)
+[mbs-child] annotator.update: mouse "MOVE" at (351,730)
+[mbs-child] CANVAS MOVE #499 raw=(387,616)
+[mbs-child] annotator.update: mouse "MOVE" at (350,730)
+[annotator] saved 1 file(s)
+[ipc] accepted: Toggle(Clipboard)
+[ipc] toggle Clipboard
+[ipc] accepted: Toggle(Clipboard)
+[ipc] toggle Clipboard
+[ipc] accepted: Toggle(Clipboard)
+[ipc] toggle Clipboard
+[ipc] accepted: Open(Annotator, Some("/tmp/mbs-freeze-out.png"))
+[annotator] spawned pid=1374129
+[launcher] 80 .desktop files scanned (16 hidden), 64 apps loaded, 52 with icons
+[annotator] loaded capture from /tmp/mbs-freeze-out.png
+[annotator] saved 1 file(s)

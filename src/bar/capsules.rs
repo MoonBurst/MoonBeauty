@@ -66,6 +66,7 @@ impl CapsuleRenderer {
         theme: &ShellTheme,
         slant_left: SlantSide,
         slant_right: SlantSide,
+        module_shape: &str,
         on_action: impl Fn(CapsuleAction) -> Message + 'static + Copy,
     ) -> Element<'a, Message> {
         LABEL_W.with(|w| w.set(0.0));
@@ -487,11 +488,20 @@ impl CapsuleRenderer {
         // grow the capsule so its text always fits on one row
         let min_width = min_width.max(LABEL_W.with(|w| w.get()) + theme.slant_width + 4.0);
 
-        let background_shape = ShapeBox::new()
-            .shape(ShapeType::Slant {
+        let shape_type = match module_shape {
+            "hexagon" => ShapeType::Hexagon {
+                cut: (theme.slant_width * 1.5) as u16,
+            },
+            "rounded" => ShapeType::Rounded(((theme.slant_width * 1.5) as u16).max(4)),
+            "flat" => ShapeType::Flat,
+            _ => ShapeType::Slant {
                 left: slant_left,
                 right: slant_right,
-            })
+            },
+        };
+
+        let background_shape = ShapeBox::new()
+            .shape(shape_type)
             .background(theme.background)
             .border(border_color, theme.control_border_width)
             .slant_width(theme.slant_width)

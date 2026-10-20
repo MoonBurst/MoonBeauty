@@ -131,6 +131,8 @@ pub struct ShellSettings {
     pub slant_mode: String,
     #[serde(default = "default_bar_shape", alias = "barShapeStyle")]
     pub bar_shape: String,
+    #[serde(default = "default_bar_shape", alias = "moduleShapeStyle")]
+    pub module_shape: String,
     #[serde(default = "default_global_border_width", alias = "globalBorderWidth")]
     pub global_border_width: f32,
     #[serde(default = "default_control_border_width", alias = "controlBorderWidth")]
@@ -190,6 +192,8 @@ pub struct ShellSettings {
     pub visible_capsules: HashMap<String, bool>,
     #[serde(default, alias = "capsuleSlants")]
     pub capsule_slants: HashMap<String, String>,
+    #[serde(default, alias = "capsuleShapes")]
+    pub capsule_shapes: HashMap<String, String>,
     #[serde(default, alias = "capsuleBarWidths")]
     pub capsule_bar_widths: HashMap<String, u32>,
     #[serde(default, alias = "standaloneWindows")]
@@ -269,6 +273,7 @@ impl Default for ShellSettings {
             slant_width: default_slant_width(),
             slant_mode: default_slant_mode(),
             bar_shape: default_bar_shape(),
+            module_shape: "slant".into(),
             global_border_width: default_global_border_width(),
             control_border_width: default_control_border_width(),
             global_padding: default_global_padding(),
@@ -297,6 +302,7 @@ impl Default for ShellSettings {
             bar_right: default_bar_right(),
             visible_capsules: visible,
             capsule_slants: HashMap::new(),
+            capsule_shapes: HashMap::new(),
             capsule_bar_widths: HashMap::new(),
             standalone_windows: HashMap::new(),
             gpu0: GpuThresholds::default(),

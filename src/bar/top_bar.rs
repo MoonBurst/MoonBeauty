@@ -15,26 +15,7 @@ pub enum TopBarMessage {
 
 pub struct TopBar;
 
-fn slant_for(settings: &ShellSettings, id: &str, section: &str) -> (SlantSide, SlantSide) {
-    if let Some(custom) = settings.capsule_slants.get(id) {
-        match custom.as_str() {
-            "left" => return (SlantSide::Left, SlantSide::Left),
-            "right" => return (SlantSide::Right, SlantSide::Right),
-            "center" => return (SlantSide::Left, SlantSide::Right),
-            _ => {}
-        }
-    }
-    match settings.slant_mode.as_str() {
-        "all-left" => (SlantSide::Left, SlantSide::Left),
-        "all-right" => (SlantSide::Right, SlantSide::Right),
-        _ => match section {
-            "left" => (SlantSide::Left, SlantSide::Left),
-            "right" => (SlantSide::Right, SlantSide::Right),
-            "center" => (SlantSide::Left, SlantSide::Right),
-            _ => (SlantSide::Left, SlantSide::Left),
-        },
-    }
-}
+
 
 impl TopBar {
     pub fn view<'a>(
@@ -47,43 +28,69 @@ impl TopBar {
         let mut left_row = Row::new().spacing(spacing_px).align_y(Alignment::Center);
         for id in &settings.bar_left {
             if settings.visible_capsules.get(id).copied().unwrap_or(true) {
-                let (sl, sr) = slant_for(settings, id, "left");
+                let (sl, sr) = match settings.slant_mode.as_str() {
+                    "left" => (SlantSide::Left, SlantSide::Left),
+                    "right" => (SlantSide::Right, SlantSide::Right),
+                    _ => (SlantSide::Left, SlantSide::Left), // Slant towards center
+                };
                 left_row = left_row.push(CapsuleRenderer::render(
                     id,
                     telemetry,
                     theme,
                     sl,
                     sr,
+                    &settings.module_shape,
                     TopBarMessage::Action,
                 ));
             }
         }
 
         let mut center_row = Row::new().spacing(spacing_px).align_y(Alignment::Center);
-        for id in &settings.bar_center {
-            if settings.visible_capsules.get(id).copied().unwrap_or(true) {
-                let (sl, sr) = slant_for(settings, id, "center");
-                center_row = center_row.push(CapsuleRenderer::render(
-                    id,
-                    telemetry,
-                    theme,
-                    sl,
-                    sr,
-                    TopBarMessage::Action,
-                ));
-            }
+        let visible_center: Vec<&String> = settings.bar_center.iter()
+            .filter(|id| settings.visible_capsules.get(*id).copied().unwrap_or(true))
+            .collect();
+        let keystone_idx = visible_center.len() / 2;
+
+        for (i, id) in visible_center.iter().enumerate() {
+            let (sl, sr) = match settings.slant_mode.as_str() {
+                "left" => (SlantSide::Left, SlantSide::Left),
+                "right" => (SlantSide::Right, SlantSide::Right),
+                _ => {
+                    if i == keystone_idx {
+                        (SlantSide::Left, SlantSide::Right) // Keystone /\
+                    } else if i < keystone_idx {
+                        (SlantSide::Left, SlantSide::Left) // Left of keystone //
+                    } else {
+                        (SlantSide::Right, SlantSide::Right) // Right of keystone \\
+                    }
+                }
+            };
+            center_row = center_row.push(CapsuleRenderer::render(
+                id,
+                telemetry,
+                theme,
+                sl,
+                sr,
+                &settings.module_shape,
+                TopBarMessage::Action,
+            ));
         }
 
         let mut right_row = Row::new().spacing(spacing_px).align_y(Alignment::Center);
         for id in &settings.bar_right {
             if settings.visible_capsules.get(id).copied().unwrap_or(true) {
-                let (sl, sr) = slant_for(settings, id, "right");
+                let (sl, sr) = match settings.slant_mode.as_str() {
+                    "left" => (SlantSide::Left, SlantSide::Left),
+                    "right" => (SlantSide::Right, SlantSide::Right),
+                    _ => (SlantSide::Right, SlantSide::Right), // Slant towards center
+                };
                 right_row = right_row.push(CapsuleRenderer::render(
                     id,
                     telemetry,
                     theme,
                     sl,
                     sr,
+                    &settings.module_shape,
                     TopBarMessage::Action,
                 ));
             }

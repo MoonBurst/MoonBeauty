@@ -33,6 +33,7 @@ pub enum SettingsMessage {
 
     // Bar Geometry
     SelectBarShape(String),
+    SelectModuleShape(String),
     SelectSlantMode(String),
 
     // Notifications
@@ -82,6 +83,9 @@ pub enum SettingsMessage {
 
     // Bar Layout
     ToggleCapsuleVisible(String),
+    MoveCapsuleTo(String, String),
+    MoveCapsuleUp(String),
+    MoveCapsuleDown(String),
 
     // Window Sizing & Geometry
     WindowWidth(String, u32),
@@ -124,6 +128,7 @@ impl SettingsOverlay {
             SettingsMessage::HardwarePollInterval(v) => settings.hardware_poll_interval_ms = v.clamp(500, 10000),
 
             SettingsMessage::SelectBarShape(s) => settings.bar_shape = s,
+            SettingsMessage::SelectModuleShape(s) => settings.module_shape = s,
             SettingsMessage::SelectSlantMode(m) => settings.slant_mode = m,
 
             SettingsMessage::ToggleNotifications => settings.notifications_enabled = !settings.notifications_enabled,
@@ -267,6 +272,36 @@ impl SettingsOverlay {
             SettingsMessage::ToggleCapsuleVisible(id) => {
                 let cur = settings.visible_capsules.get(&id).copied().unwrap_or(true);
                 settings.visible_capsules.insert(id, !cur);
+            }
+            SettingsMessage::MoveCapsuleTo(id, target) => {
+                settings.bar_left.retain(|x| x != &id);
+                settings.bar_center.retain(|x| x != &id);
+                settings.bar_right.retain(|x| x != &id);
+                match target.as_str() {
+                    "left" => { settings.bar_left.push(id.clone()); settings.visible_capsules.insert(id, true); }
+                    "center" => { settings.bar_center.push(id.clone()); settings.visible_capsules.insert(id, true); }
+                    "right" => { settings.bar_right.push(id.clone()); settings.visible_capsules.insert(id, true); }
+                    "hidden" => { settings.visible_capsules.insert(id, false); }
+                    _ => {}
+                }
+            }
+            SettingsMessage::MoveCapsuleUp(id) => {
+                let lists = [&mut settings.bar_left, &mut settings.bar_center, &mut settings.bar_right];
+                for list in lists {
+                    if let Some(pos) = list.iter().position(|x| x == &id) {
+                        if pos > 0 { list.swap(pos, pos - 1); }
+                        break;
+                    }
+                }
+            }
+            SettingsMessage::MoveCapsuleDown(id) => {
+                let lists = [&mut settings.bar_left, &mut settings.bar_center, &mut settings.bar_right];
+                for list in lists {
+                    if let Some(pos) = list.iter().position(|x| x == &id) {
+                        if pos < list.len() - 1 { list.swap(pos, pos + 1); }
+                        break;
+                    }
+                }
             }
 
             SettingsMessage::WindowWidth(id, w) => {
@@ -879,92 +914,213 @@ impl SettingsOverlay {
             .into(),
 
             SettingsTab::BarLayout => {
-                let all_modules = [
+                let all_capsules = [
                     "calendar", "music", "alarm", "weather", "unified", "notify",
                     "audio", "clock", "mic", "custom", "net", "cpu", "gpu", "ram", "battery", "tray"
                 ];
 
-                let slant_modes = [
-                    ("symmetric", "Symmetric (\\ /)"),
-                    ("all-left", "All Left (\\ \\)"),
-                    ("all-right", "All Right (/ /)"),
-                ];
-                let mut slants_row = row![text("Global Slants:").size(scale_sz(0.78)).bold().color(theme.text)].spacing(8).align_y(Alignment::Center);
-                for (sm_id, sm_label) in slant_modes {
-                    let is_sm = settings.slant_mode == sm_id;
-                    let sm_str = sm_id.to_string();
-                    let sm_btn = button(text(sm_label).size(scale_sz(0.7)).bold().color(if is_sm { Color::BLACK } else { theme.text }))
-                        .on_press(SettingsMessage::SelectSlantMode(sm_str))
+                let mk_toggle = move |label: &'static str, active: bool, msg: SettingsMessage| {
+                    let bg = if active { theme.success } else { theme.background };
+                    let fg = if active { Color::BLACK } else { theme.text };
+                    let border = if active { theme.success } else { theme.text };
+                    button(text(label).size(scale_sz(0.7)).bold().color(fg))
+                        .on_press(msg)
                         .padding([4, 10])
                         .style(move |_t, _s| button::Style {
-                            background: Some(iced::Background::Color(if is_sm { theme.text } else { Color::TRANSPARENT })),
+                            background: Some(iced::Background::Color(bg)),
+                            border: iced::Border { color: border, width: 1.0, radius: 4.0.into() },
+                            ..Default::default()
+                        })
+                };
+
+                let bg_bar_row = row![
+                    text("Background Bar Shape:").size(scale_sz(0.85)).bold().color(theme.text),
+                    mk_toggle("SLANT", settings.bar_shape == "slant", SettingsMessage::SelectBarShape("slant".into())),
+                    mk_toggle("HEXAGON", settings.bar_shape == "hexagon", SettingsMessage::SelectBarShape("hexagon".into())),
+                    mk_toggle("ROUNDED", settings.bar_shape == "rounded", SettingsMessage::SelectBarShape("rounded".into())),
+                    mk_toggle("FLAT", settings.bar_shape == "flat", SettingsMessage::SelectBarShape("flat".into())),
+                ].spacing(8).align_y(Alignment::Center).width(Length::Fill);
+
+                let module_slants_row = row![
+                    text("Module Slants:").size(scale_sz(0.85)).bold().color(theme.text),
+                    mk_toggle("LEFT (\\)", settings.slant_mode == "left", SettingsMessage::SelectSlantMode("left".into())),
+                    mk_toggle("CENTER (/\\/)", settings.slant_mode == "center" || settings.slant_mode == "symmetric" || settings.slant_mode == "sym", SettingsMessage::SelectSlantMode("center".into())),
+                    mk_toggle("RIGHT (/)", settings.slant_mode == "right", SettingsMessage::SelectSlantMode("right".into())),
+                ].spacing(8).align_y(Alignment::Center).width(Length::Fill);
+
+                let module_shape_row = row![
+                    text("Module Shape:").size(scale_sz(0.85)).bold().color(theme.text),
+                    mk_toggle("SLANT", settings.module_shape == "slant", SettingsMessage::SelectModuleShape("slant".into())),
+                    mk_toggle("HEXAGON", settings.module_shape == "hexagon", SettingsMessage::SelectModuleShape("hexagon".into())),
+                    mk_toggle("ROUNDED", settings.module_shape == "rounded", SettingsMessage::SelectModuleShape("rounded".into())),
+                    mk_toggle("FLAT", settings.module_shape == "flat", SettingsMessage::SelectModuleShape("flat".into())),
+                ].spacing(8).align_y(Alignment::Center).width(Length::Fill);
+
+                let top_sliders = column![
+                    row![
+                        column![
+                            row![text("Top Bar Height").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.bar_height)).size(scale_sz(0.8)).bold().color(theme.text)],
+                            slider(28..=90, settings.bar_height, SettingsMessage::BarHeight).width(Length::Fill),
+                        ].spacing(3).width(Length::FillPortion(1)),
+                        column![
+                            row![text("Global Font Size (Bar)").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.global_font_size)).size(scale_sz(0.8)).bold().color(theme.text)],
+                            slider(8..=32, settings.global_font_size, SettingsMessage::GlobalFontSize).width(Length::Fill),
+                        ].spacing(3).width(Length::FillPortion(1)),
+                    ].spacing(20).width(Length::Fill),
+                    row![
+                        column![
+                            row![text("Capsule Spacing").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.capsule_spacing)).size(scale_sz(0.8)).bold().color(theme.text)],
+                            slider(-50..=40, settings.capsule_spacing, SettingsMessage::CapsuleSpacing).width(Length::Fill),
+                        ].spacing(3).width(Length::FillPortion(1)),
+                        column![
+                            row![text("Capsule Slant Width").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.slant_width as u32)).size(scale_sz(0.8)).bold().color(theme.text)],
+                            slider(0..=40, settings.slant_width as u32, SettingsMessage::SlantWidth).width(Length::Fill),
+                        ].spacing(3).width(Length::FillPortion(1)),
+                    ].spacing(20).width(Length::Fill),
+                    row![
+                        column![
+                            row![text("Tooltip Text Size").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tooltip_font_size)).size(scale_sz(0.8)).bold().color(theme.text)],
+                            slider(8..=28, settings.tooltip_font_size, SettingsMessage::TooltipFontSize).width(Length::Fill),
+                        ].spacing(3).width(Length::FillPortion(1)),
+                        row![].width(Length::FillPortion(1)),
+                    ].spacing(20).width(Length::Fill),
+                ].spacing(12).width(Length::Fill);
+
+                let render_row = |id_str: &str, is_visible: bool| -> Element<'a, SettingsMessage> {
+                    let id = id_str.to_string();
+                    let up = button(text("▲").size(scale_sz(0.6)).color(theme.text))
+                        .on_press(SettingsMessage::MoveCapsuleUp(id.clone()))
+                        .padding([2, 6])
+                        .style(move |_t, _s| button::Style { background: None, border: iced::Border::default(), ..Default::default() });
+                    
+                    let down = button(text("▼").size(scale_sz(0.6)).color(theme.text))
+                        .on_press(SettingsMessage::MoveCapsuleDown(id.clone()))
+                        .padding([2, 6])
+                        .style(move |_t, _s| button::Style { background: None, border: iced::Border::default(), ..Default::default() });
+
+                    let edit_btn = button(text("Edit").size(scale_sz(0.65)).color(theme.background))
+                        .padding([4, 8])
+                        .style(move |_t, _s| button::Style {
+                            background: Some(iced::Background::Color(theme.text)),
                             border: iced::Border { color: theme.text, width: 1.0, radius: 4.0.into() },
                             ..Default::default()
                         });
-                    slants_row = slants_row.push(sm_btn);
-                }
 
-                let bar_shapes = ["slant", "hexagon", "rounded", "flat"];
-                let mut shape_row = row![text("Bar Shape:").size(scale_sz(0.78)).bold().color(theme.text)].spacing(8).align_y(Alignment::Center);
-                for bs in bar_shapes {
-                    let is_bs = settings.bar_shape == bs;
-                    let bs_str = bs.to_string();
-                    let bs_btn = button(text(bs.to_uppercase()).size(scale_sz(0.7)).bold().color(if is_bs { Color::BLACK } else { theme.text }))
-                        .on_press(SettingsMessage::SelectBarShape(bs_str))
-                        .padding([4, 10])
+                    let btn_text = if is_visible { "HIDE" } else { "SHOW" };
+                    let btn_bg = if is_visible { theme.danger } else { theme.success };
+                    let toggle_btn = button(text(btn_text).size(scale_sz(0.65)).bold().color(Color::BLACK))
+                        .on_press(SettingsMessage::ToggleCapsuleVisible(id.clone()))
+                        .padding([4, 8])
                         .style(move |_t, _s| button::Style {
-                            background: Some(iced::Background::Color(if is_bs { theme.text } else { Color::TRANSPARENT })),
-                            border: iced::Border { color: theme.text, width: 1.0, radius: 4.0.into() },
+                            background: Some(iced::Background::Color(btn_bg)),
+                            border: iced::Border { color: btn_bg, width: 1.0, radius: 4.0.into() },
                             ..Default::default()
                         });
-                    shape_row = shape_row.push(bs_btn);
-                }
 
-                let mut col = column![
-                    text("BAR GEOMETRY, CAPSULE SHAPES & LAYOUT")
-                        .size(scale_sz(0.95))
-                        .bold()
-                        .color(theme.success),
-                    slants_row,
-                    shape_row,
-                    container(text("")).width(Length::Fill).height(Length::Fixed(1.0)).style(move |_t| container::Style {
-                        background: Some(iced::Background::Color(theme.border)),
-                        ..Default::default()
-                    }),
-                    text("Toggle individual capsules on or off in the top bar:")
-                        .size(scale_sz(0.7))
-                        .color(theme.muted),
-                ].spacing(10);
+                    let mk_move = |lbl: &'static str, target: &'static str| {
+                        button(text(lbl).size(scale_sz(0.55)).color(theme.text))
+                            .on_press(SettingsMessage::MoveCapsuleTo(id.clone(), target.into()))
+                            .padding([2, 4])
+                            .style(move |_t, _s| button::Style { background: Some(iced::Background::Color(theme.background)), border: iced::Border { color: theme.text, width: 1.0, radius: 3.0.into() }, ..Default::default() })
+                    };
 
-                for id in all_modules {
-                    let is_vis = settings.visible_capsules.get(id).copied().unwrap_or(true);
-                    let id_str = id.to_string();
+                    let controls = row![
+                        mk_move("L", "left"), mk_move("C", "center"), mk_move("R", "right"),
+                        edit_btn,
+                        toggle_btn
+                    ].spacing(4).align_y(Alignment::Center);
 
-                    let vis_btn = button(
-                        text(if is_vis { "SHOW" } else { "HIDE" })
-                            .size(10)
-                            .bold()
-                            .color(if is_vis { Color::BLACK } else { theme.text }),
-                    )
-                    .on_press(SettingsMessage::ToggleCapsuleVisible(id_str))
-                    .padding([4, 14])
-                    .style(move |_t, _s| button::Style {
-                        background: Some(iced::Background::Color(if is_vis { theme.success } else { theme.danger })),
-                        border: iced::Border { color: if is_vis { theme.success } else { theme.danger }, width: 1.0, radius: 4.0.into() },
-                        ..Default::default()
-                    });
-
-                    col = col.push(
+                    container(
                         row![
-                            text(id.to_uppercase()).size(scale_sz(0.75)).bold().color(theme.text).width(Length::Fixed(160.0)),
-                            vis_btn,
+                            row![up, down].spacing(4),
+                            text(id_str.to_uppercase()).size(scale_sz(0.7)).bold().color(theme.text),
+                            row![].width(Length::Fill),
+                            controls
+                        ].spacing(8).align_y(Alignment::Center)
+                    )
+                    .padding([6, 10])
+                    .width(Length::Fill)
+                    .style(move |_t| container::Style {
+                        border: iced::Border { color: theme.text, width: 1.0, radius: 6.0.into() },
+                        ..Default::default()
+                    }).into()
+                };
+
+                let section_header = |title: &'static str, color: Color| {
+                    container(
+                        row![
+                            text(title).size(scale_sz(0.85)).bold().color(color),
+                            row![].width(Length::Fill),
+                            text(" \\ \\").size(scale_sz(0.85)).color(color)
                         ]
-                        .spacing(12)
-                        .align_y(Alignment::Center),
-                    );
+                    )
+                    .padding([4, 12])
+                    .style(move |_t| container::Style {
+                        border: iced::Border { color, width: 1.5, radius: 6.0.into() },
+                        ..Default::default()
+                    }).width(Length::Fill)
+                };
+
+                let mut sections = column![].spacing(16).width(Length::Fill);
+
+                sections = sections.push(section_header("LEFT BAR SECTION", theme.success));
+                for id in &settings.bar_left {
+                    if settings.visible_capsules.get(id).copied().unwrap_or(true) {
+                        sections = sections.push(render_row(id, true));
+                    }
                 }
 
-                scrollable(col).height(Length::Fixed(card_h - 220.0)).into()
+                sections = sections.push(section_header("CENTER BAR SECTION", theme.success));
+                for id in &settings.bar_center {
+                    if settings.visible_capsules.get(id).copied().unwrap_or(true) {
+                        sections = sections.push(render_row(id, true));
+                    }
+                }
+
+                sections = sections.push(section_header("RIGHT BAR SECTION", theme.success));
+                for id in &settings.bar_right {
+                    if settings.visible_capsules.get(id).copied().unwrap_or(true) {
+                        sections = sections.push(render_row(id, true));
+                    }
+                }
+
+                sections = sections.push(section_header("HIDDEN MODULES", theme.danger));
+                for id_str in all_capsules {
+                    let id = id_str.to_string();
+                    let is_vis = settings.visible_capsules.get(&id).copied().unwrap_or(true);
+                    let in_left = settings.bar_left.contains(&id);
+                    let in_center = settings.bar_center.contains(&id);
+                    let in_right = settings.bar_right.contains(&id);
+
+                    if !is_vis || (!in_left && !in_center && !in_right) {
+                        sections = sections.push(render_row(id_str, false));
+                    }
+                }
+
+                container(
+                    scrollable(
+                        column![
+                            text("BAR GEOMETRY, CAPSULE SHAPES & LAYOUT").size(scale_sz(1.0)).bold().color(theme.success),
+                            bg_bar_row,
+                            module_slants_row,
+                            module_shape_row,
+                            top_sliders,
+                            sections
+                        ].spacing(16).width(Length::Fill)
+                    )
+                    .height(Length::Fill)
+                    .width(Length::Fill)
+                )
+                .padding(iced::Padding {
+                    top: 0.0,
+                    right: 0.0,
+                    bottom: (settings.overlay_cut as f32) + 16.0, // Dynamic padding based on chamfer size
+                    left: 0.0,
+                })
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .clip(true)
+                .into()
             }
 
             SettingsTab::OverlaysWindows => {
