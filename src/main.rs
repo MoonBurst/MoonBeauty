@@ -10,6 +10,8 @@ use moon_beauty_shell::config::{ShellSettings, ShellTheme};
 use moon_beauty_shell::ipc::{send_client_command, send_annotator_show, IpcCommand, OverlayTarget};
 use moon_beauty_shell::overlays::*;
 
+mod screenshot;
+
 fn detect_notif_surface(args: &[String]) -> bool {
     args.iter().any(|a| a == "--notif-surface")
 }
@@ -84,42 +86,132 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     // --screenshot [--annotate] [--watermark "name"]
     // MUST be above the notif-surface spawn block, or the flag falls
     // through and boots the full bar.
+    // Temporary: verify freeze-frame capture works before UI build
+    if args.iter().any(|a| a == "--capture-test") {
+        match screenshot::capture::capture_fullscreen() {
+            Ok(bytes) => {
+                let path = "/tmp/mbs-capture-test.png";
+                let _ = std::fs::write(path, &bytes);
+                match image::load_from_memory(&bytes) {
+                    Ok(img) => println!(
+                        "captured {}x{} → {} ({} bytes)",
+                        img.width(), img.height(), path, bytes.len()
+                    ),
+                    Err(e) => eprintln!("decode: {e}"),
+                }
+            }
+            Err(e) => eprintln!("capture failed: {e}"),
+        }
+        std::process::exit(0);
+    }
+
+    // Child: render freeze-frame selector, write crop to disk
+    if args.iter().any(|a| a == "--freeze-selector") {
+        let idx = args.iter().position(|a| a == "--freeze-selector").unwrap();
+        let input = args.get(idx + 1).cloned().unwrap_or_default();
+        let output = args.get(idx + 2).cloned().unwrap_or_default();
+        if input.is_empty() || output.is_empty() {
+            eprintln!("usage: --freeze-selector <input.png> <output.png>");
+            std::process::exit(2);
+        }
+        match screenshot::selector::run(
+            std::path::PathBuf::from(input),
+            std::path::PathBuf::from(output),
+        ) {
+            Ok(_) => std::process::exit(0),
+            Err(e) => { eprintln!("[freeze-selector] {e}"); std::process::exit(1); }
+        }
+    }
+
+    // Orchestrator: capture focused output → spawn child → report crop
+    if args.iter().any(|a| a == "--freeze-test") {
+        let out_name = screenshot::output::focused_output();
+        eprintln!("[freeze] focused output: {:?}", out_name);
+        let bytes = match screenshot::capture::capture_output(out_name.as_deref()) {
+            Ok(b) => b,
+            Err(e) => { eprintln!("[freeze] capture failed: {e}"); std::process::exit(1); }
+        };
+        let img = match image::load_from_memory(&bytes) {
+            Ok(i) => i,
+            Err(e) => { eprintln!("[freeze] decode failed: {e}"); std::process::exit(1); }
+        };
+        eprintln!("[freeze] captured {}x{} ({} bytes)", img.width(), img.height(), bytes.len());
+
+        let tmp_in = "/tmp/mbs-freeze-in.png";
+        let tmp_out = "/tmp/mbs-freeze-out.png";
+        std::fs::write(tmp_in, &bytes).ok();
+        let _ = std::fs::remove_file(tmp_out);
+
+        let exe = resolve_exe();
+        let status = std::process::Command::new(exe)
+            .args(["--freeze-selector", tmp_in, tmp_out])
+            .status();
+        match status {
+            Ok(s) if s.success() && std::path::Path::new(tmp_out).exists() => {
+                let cropped = std::fs::read(tmp_out).unwrap_or_default();
+                if let Ok(i) = image::load_from_memory(&cropped) {
+                    eprintln!("[freeze] ✓ cropped {}x{} → {}", i.width(), i.height(), tmp_out);
+                }
+                std::process::exit(0);
+            }
+            Ok(_) => { eprintln!("[freeze] cancelled"); std::process::exit(1); }
+            Err(e) => { eprintln!("[freeze] child spawn failed: {e}"); std::process::exit(1); }
+        }
+    }
+
     if args.iter().any(|a| a == "--screenshot") {
         let quick = args.iter().any(|a| a == "--quick" || a == "--no-annotate");
-        // Default is now annotate. --quick restores the old capture-and-save.
-        let annotate = !quick && !args.iter().any(|a| a == "--no-annotate");
+        let annotate = !quick;
         let watermark_cli = args.iter()
             .position(|a| a == "--watermark")
             .and_then(|i| args.get(i + 1).cloned());
+        let _ = watermark_cli;
 
-        let region = slurp_region();
-        let path = match grim_capture(region.as_deref()) {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("[screenshot] capture failed: {e}");
-                std::process::exit(1);
-            }
+        let out_name = screenshot::output::focused_output();
+        eprintln!("[screenshot] focused output: {:?}", out_name);
+        let bytes = match screenshot::capture::capture_output(out_name.as_deref()) {
+            Ok(b) => b,
+            Err(e) => { eprintln!("[screenshot] capture failed: {e}"); std::process::exit(1); }
         };
-        eprintln!("[screenshot] saved {}", path.display());
 
-                if annotate {
-            let path_str = path.display().to_string();
-            // Route through the running bar's IPC so it opens the annotator
-            // overlay. send_client_command is async — block on it (no runtime
-            // here, we're in main() before iced starts).
-            let cmd = IpcCommand::Open(OverlayTarget::Annotator, Some(path_str.clone()));
+        let tmp_in = "/tmp/mbs-freeze-in.png";
+        let tmp_out = "/tmp/mbs-freeze-out.png";
+        std::fs::write(tmp_in, &bytes).ok();
+        let _ = std::fs::remove_file(tmp_out);
+
+        let exe = resolve_exe();
+        let status = std::process::Command::new(exe)
+            .args(["--freeze-selector", tmp_in, tmp_out])
+            .status();
+        match status {
+            Ok(s) if s.success() && std::path::Path::new(tmp_out).exists() => {
+                eprintln!("[screenshot] cropped → {}", tmp_out);
+            }
+            _ => {
+                eprintln!("[screenshot] cancelled");
+                std::process::exit(130);
+            }
+        }
+
+        if annotate {
+            let cmd = IpcCommand::Open(OverlayTarget::Annotator, Some(tmp_out.to_string()));
             match send_ipc_sync(&cmd) {
-                Ok(resp) => eprintln!("[screenshot] annotator via bar IPC: {}", resp.trim()),
+                Ok(_) => {}
                 Err(e) => {
-                    eprintln!("[screenshot] bar IPC failed: {e}; trying annotator socket");
-                    if let Err(e2) = send_annotator_show(path_str, watermark_cli) {
-                        eprintln!("[screenshot] annotator socket also failed: {e2}");
-                        eprintln!("[hint] the bar must be running (moon-beauty-shell &),");
-                        eprintln!("[hint] or an --annotator-session must be active");
-                        std::process::exit(1);
-                    }
+                    eprintln!("[screenshot] annotator IPC failed: {e}");
+                    std::process::exit(1);
                 }
             }
+        } else {
+            let home = std::env::var("HOME").unwrap_or_default();
+            let dir = std::path::PathBuf::from(home).join("Pictures").join("Screenshots");
+            let _ = std::fs::create_dir_all(&dir);
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs()).unwrap_or(0);
+            let dest = dir.join(format!("shot_{}.png", ts));
+            let _ = std::fs::copy(tmp_out, &dest);
+            eprintln!("[screenshot] saved → {}", dest.display());
         }
         std::process::exit(0);
     }

@@ -2447,9 +2447,13 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "smithay-client-toolkit 0.21.1",
  "sysinfo",
  "tokio",
  "walkdir",
+ "wayland-client",
+ "wayland-protocols 0.32.13",
+ "wayland-protocols-wlr 0.3.12",
  "zbus",
 ]
 
@@ -3954,7 +3958,7 @@ dependencies = [
  "wayland-protocols 0.31.2",
  "wayland-protocols-wlr 0.2.0",
  "wayland-scanner",
- "xkbcommon",
+ "xkbcommon 0.7.0",
  "xkeysym",
 ]
 
@@ -4003,10 +4007,38 @@ dependencies = [
  "wayland-csd-frame",
  "wayland-cursor",
  "wayland-protocols 0.32.13",
- "wayland-protocols-experimental",
+ "wayland-protocols-experimental 20250721.0.1",
  "wayland-protocols-misc",
  "wayland-protocols-wlr 0.3.12",
  "wayland-scanner",
+ "xkeysym",
+]
+
+[[package]]
+name = "smithay-client-toolkit"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74dc9ee14b0fdcb535f9556141bacac070c994a977d2240ee455d7438a617f00"
+dependencies = [
+ "bitflags 2.13.2",
+ "bytemuck",
+ "calloop 0.14.5",
+ "calloop-wayland-source 0.4.1",
+ "cursor-icon",
+ "log",
+ "memmap2 0.9.11",
+ "pkg-config",
+ "rustix 1.1.5",
+ "thiserror 2.0.21",
+ "wayland-client",
+ "wayland-csd-frame",
+ "wayland-cursor",
+ "wayland-protocols 0.32.13",
+ "wayland-protocols-experimental 20251230.0.3",
+ "wayland-protocols-misc",
+ "wayland-protocols-wlr 0.3.12",
+ "wayland-scanner",
+ "xkbcommon 0.8.0",
  "xkeysym",
 ]
 
@@ -4750,6 +4782,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "wayland-protocols-experimental"
+version = "20251230.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91c6c3e7178e553d093d46999032bc79aafea9dedd71dd702c8ace7bbc25cf13"
+dependencies = [
+ "bitflags 2.13.2",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols 0.32.13",
+ "wayland-scanner",
+]
+
+[[package]]
 name = "wayland-protocols-misc"
 version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5428,6 +5473,17 @@ checksum = "13867d259930edc7091a6c41b4ce6eee464328c6ff9659b7e4c668ca20d4c91e"
 dependencies = [
  "libc",
  "memmap2 0.8.0",
+ "xkeysym",
+]
+
+[[package]]
+name = "xkbcommon"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d66ca9352cbd4eecbbc40871d8a11b4ac8107cfc528a6e14d7c19c69d0e1ac9"
+dependencies = [
+ "libc",
+ "memmap2 0.9.11",
  "xkeysym",
 ]
 
