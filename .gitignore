@@ -20,3 +20,5 @@ result-*
 .idea/
 .vscode/
 *.swp
+watch.log
+*.log

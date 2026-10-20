@@ -636,40 +636,113 @@ pub fn save_annotated_image(
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("Screenshots");
     std::fs::create_dir_all(&save_dir).map_err(|e| format!("mkdir: {e}"))?;
+    
     let stamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+    let date_str = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let time_str = chrono::Local::now().format("%H-%M").to_string();
 
-    let composed_tmp = std::env::temp_dir().join(format!("mbs-composed-{}.png", stamp));
-    compose_annotations(&source, &annotations, &composed_tmp)?;
-    let composed_bytes = std::fs::read(&composed_tmp).map_err(|e| format!("read composed: {e}"))?;
+    let composed_bytes = if annotations.is_empty() {
+        std::fs::read(&source).map_err(|e| format!("read source: {e}"))?
+    } else {
+        let composed_tmp = std::env::temp_dir().join(format!("mbs-composed-{}.png", stamp));
+        compose_annotations(&source, &annotations, &composed_tmp)?;
+        let bytes = std::fs::read(&composed_tmp).map_err(|e| format!("read composed: {e}"))?;
+        let _ = std::fs::remove_file(&composed_tmp);
+        bytes
+    };
 
     let mut produced = Vec::new();
+    
     let names: Vec<String> = watermark
         .as_deref()
-        .map(|s| s.split(',').map(str::trim).filter(|n| !n.is_empty()).map(String::from).collect())
-        .unwrap_or_default();
+        .unwrap_or("")
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
 
-    if names.is_empty() {
-        let out = save_dir.join(format!("annotated_{}.png", stamp));
-        std::fs::write(&out, &composed_bytes).map_err(|e| format!("write: {e}"))?;
-        produced.push(out);
+    let final_names = if names.is_empty() {
+        vec!["Screenshot".to_string()]
     } else {
-        for name in &names {
-            let safe: String = name.chars()
-                .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
-                .collect();
-            let out = save_dir.join(format!("annotated_{}_{}.png", stamp, safe));
-            match crate::overlays::plate_watermark::add_plate_watermark(&composed_bytes, name) {
-                Ok(wm_bytes) => {
-                    std::fs::write(&out, &wm_bytes).map_err(|e| format!("write: {e}"))?;
-                    eprintln!("[save] plate OK, {} bytes -> {:?}", wm_bytes.len(), out);
-                    produced.push(out);
+        names
+    };
+
+    for (i, name) in final_names.iter().enumerate() {
+        // Stagger multiple saves so cliphist/wl-copy have time to register them
+        if i > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+
+        let safe_name: String = name.chars()
+            .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' { c } else { '_' })
+            .collect();
+        
+        let out = save_dir.join(format!("{} {} {}.png", safe_name, date_str, time_str));
+
+        match crate::overlays::plate_watermark::add_plate_watermark(&composed_bytes, name) {
+            Ok(wm_bytes) => {
+                std::fs::write(&out, &wm_bytes).map_err(|e| format!("write: {e}"))?;
+                eprintln!("[save] plate OK, {} bytes -> {:?}", wm_bytes.len(), out);
+                
+                let filename = out.file_name().unwrap_or_default().to_string_lossy().to_string();
+                
+                // Get existing IDs to find the new one
+                let mut existing_clip_ids = std::collections::HashSet::new();
+                if let Ok(list_out) = std::process::Command::new("cliphist").args(["list"]).output() {
+                    for line in String::from_utf8_lossy(&list_out.stdout).lines() {
+                        if let Some((id_str, _)) = line.split_once('\t') {
+                            if let Ok(id) = id_str.parse::<u64>() { existing_clip_ids.insert(id); }
+                        }
+                    }
                 }
-                Err(e) => eprintln!("[save] plate FAILED: {e}"),
+
+                // Copy the UNIQUE watermarked bytes
+                if let Ok(mut child) = std::process::Command::new("wl-copy")
+                    .args(["-t", "image/png"])
+                    .stdin(std::process::Stdio::piped())
+                    .spawn()
+                {
+                    use std::io::Write;
+                    if let Some(mut stdin) = child.stdin.take() {
+                        let _ = stdin.write_all(&wm_bytes);
+                    }
+                    let _ = child.wait();
+
+                    let cache_dir = dirs::cache_dir().unwrap_or_else(|| std::env::temp_dir());
+                    let _ = std::fs::create_dir_all(&cache_dir);
+                    let map_path = cache_dir.join("mbs-clip-names.txt");
+
+                    let mut found = false;
+                    for _ in 0..20 {
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                        if let Ok(list_out) = std::process::Command::new("cliphist").args(["list"]).output() {
+                            let text = String::from_utf8_lossy(&list_out.stdout);
+                            for line in text.lines() {
+                                if let Some((id_str, _)) = line.split_once('\t') {
+                                    if let Ok(id) = id_str.trim().parse::<u64>() {
+                                        if !existing_clip_ids.contains(&id) {
+                                            let entry = format!("{}\t{}\n", id, filename);
+                                            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&map_path) {
+                                                let _ = f.write_all(entry.as_bytes());
+                                                eprintln!("[save] Mapped ID {} to {}", id, filename);
+                                            }
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if found { break; }
+                    }
+                }
+                produced.push(out);
             }
+            Err(e) => eprintln!("[save] plate FAILED: {e}"),
         }
     }
 
-    let _ = std::fs::remove_file(&composed_tmp);
     Ok(produced)
 }
 

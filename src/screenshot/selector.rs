@@ -244,7 +244,7 @@ impl Application for SelectorApp {
 
 
 }
-pub fn run(input_png: PathBuf, output_png: PathBuf) -> Result<(), String> {
+pub fn run(input_png: PathBuf, output_png: PathBuf, binded_output: Option<String>) -> Result<(), String> {
     let bytes = std::fs::read(&input_png).map_err(|e| format!("read input: {e}"))?;
     let img = image::load_from_memory(&bytes).map_err(|e| format!("decode: {e}"))?;
     let rgba = img.to_rgba8();
@@ -268,6 +268,7 @@ pub fn run(input_png: PathBuf, output_png: PathBuf) -> Result<(), String> {
         anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
         layer: Layer::Overlay,
         keyboard_interactivity: KeyboardInteractivity::Exclusive,
+        binded_output_name: binded_output,
         ..Default::default()
     };
 

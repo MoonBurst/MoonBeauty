@@ -106,17 +106,42 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     }
 
     // Child: render freeze-frame selector, write crop to disk
+    if args.iter().any(|a| a == "--freeze-fragment") {
+        let idx = args.iter().position(|a| a == "--freeze-fragment").unwrap();
+        let monitor = args.get(idx + 1).cloned().unwrap_or_default();
+        let gx: i32 = args.get(idx + 2).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let gy: i32 = args.get(idx + 3).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let local_png = args.get(idx + 4).cloned().unwrap_or_default();
+        let state_file = args.get(idx + 5).cloned().unwrap_or_default();
+        if monitor.is_empty() || local_png.is_empty() || state_file.is_empty() {
+            eprintln!("usage: --freeze-fragment <name> <gx> <gy> <local.png> <state_file>");
+            std::process::exit(2);
+        }
+        match screenshot::fragment::run(
+            monitor,
+            gx,
+            gy,
+            std::path::PathBuf::from(local_png),
+            std::path::PathBuf::from(state_file),
+        ) {
+            Ok(_) => std::process::exit(0),
+            Err(e) => { eprintln!("[freeze-fragment] {e}"); std::process::exit(1); }
+        }
+    }
+
     if args.iter().any(|a| a == "--freeze-selector") {
         let idx = args.iter().position(|a| a == "--freeze-selector").unwrap();
         let input = args.get(idx + 1).cloned().unwrap_or_default();
         let output = args.get(idx + 2).cloned().unwrap_or_default();
+        let binded = args.get(idx + 3).cloned();
         if input.is_empty() || output.is_empty() {
-            eprintln!("usage: --freeze-selector <input.png> <output.png>");
+            eprintln!("usage: --freeze-selector <input.png> <output.png> [output-name]");
             std::process::exit(2);
         }
         match screenshot::selector::run(
             std::path::PathBuf::from(input),
             std::path::PathBuf::from(output),
+            binded,
         ) {
             Ok(_) => std::process::exit(0),
             Err(e) => { eprintln!("[freeze-selector] {e}"); std::process::exit(1); }
@@ -125,9 +150,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     // Orchestrator: capture focused output → spawn child → report crop
     if args.iter().any(|a| a == "--freeze-test") {
-        let out_name = screenshot::output::focused_output();
-        eprintln!("[freeze] focused output: {:?}", out_name);
-        let bytes = match screenshot::capture::capture_output(out_name.as_deref()) {
+        let bytes = match screenshot::capture::capture_output(None) {
             Ok(b) => b,
             Err(e) => { eprintln!("[freeze] capture failed: {e}"); std::process::exit(1); }
         };
@@ -167,34 +190,119 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             .and_then(|i| args.get(i + 1).cloned());
         let _ = watermark_cli;
 
-        let out_name = screenshot::output::focused_output();
-        eprintln!("[screenshot] focused output: {:?}", out_name);
-        let bytes = match screenshot::capture::capture_output(out_name.as_deref()) {
+        // Multi-monitor: capture the entire desktop once, then spawn one fragment
+        // per monitor with a local crop. Fragments coordinate drags via a shared state file.
+        let outputs = screenshot::output::list_all_outputs();
+        if outputs.is_empty() {
+            eprintln!("[screenshot] no outputs found");
+            std::process::exit(1);
+        }
+
+        let full_bytes = match screenshot::capture::capture_output(None) {
             Ok(b) => b,
             Err(e) => { eprintln!("[screenshot] capture failed: {e}"); std::process::exit(1); }
         };
+        let full_img = match image::load_from_memory(&full_bytes) {
+            Ok(i) => i.to_rgba8(),
+            Err(e) => { eprintln!("[screenshot] decode failed: {e}"); std::process::exit(1); }
+        };
 
-        let tmp_in = "/tmp/mbs-freeze-in.png";
-        let tmp_out = "/tmp/mbs-freeze-out.png";
-        std::fs::write(tmp_in, &bytes).ok();
-        let _ = std::fs::remove_file(tmp_out);
+        // The full image's origin corresponds to (min_x, min_y) in global space.
+        let min_x = outputs.iter().map(|(_, x, _, _, _)| *x).min().unwrap_or(0);
+        let min_y = outputs.iter().map(|(_, _, y, _, _)| *y).min().unwrap_or(0);
+
+        let pid = std::process::id();
+        let state_file = std::path::PathBuf::from(format!("/tmp/mbs-freeze-state-{}.txt", pid));
+        screenshot::fragment::write_state_file(&state_file, "idle", 0, 0, 0, 0);
 
         let exe = resolve_exe();
-        let status = std::process::Command::new(exe)
-            .args(["--freeze-selector", tmp_in, tmp_out])
-            .status();
-        match status {
-            Ok(s) if s.success() && std::path::Path::new(tmp_out).exists() => {
-                eprintln!("[screenshot] cropped → {}", tmp_out);
+        let mut children: Vec<(String, std::process::Child)> = Vec::new();
+
+        for (name, x, y, w, h) in &outputs {
+            let lx = (*x - min_x) as u32;
+            let ly = (*y - min_y) as u32;
+            if lx + *w > full_img.width() || ly + *h > full_img.height() {
+                continue;
             }
-            _ => {
-                eprintln!("[screenshot] cancelled");
-                std::process::exit(130);
+            let crop = image::imageops::crop_imm(&full_img, lx, ly, *w, *h).to_image();
+            let local_png = format!("/tmp/mbs-freeze-{}-{}.png", name, pid);
+            if crop.save(&local_png).is_err() { continue; }
+
+            match std::process::Command::new(&exe)
+                .args([
+                    "--freeze-fragment",
+                    name,
+                    &x.to_string(),
+                    &y.to_string(),
+                    &local_png,
+                    state_file.to_str().unwrap_or(""),
+                ])
+                .spawn()
+            {
+                Ok(child) => children.push((name.clone(), child)),
+                Err(e) => eprintln!("[screenshot] spawn {} failed: {e}", name),
             }
         }
 
+        if children.is_empty() {
+            eprintln!("[screenshot] no fragments spawned");
+            std::process::exit(1);
+        }
+
+        // Poll state file
+        let mut rect: Option<(i32, i32, i32, i32)> = None;
+        loop {
+            let (state, sx, sy, cx, cy) = screenshot::fragment::read_state_file(&state_file);
+            if state == "done" { rect = Some((sx, sy, cx, cy)); break; }
+            if state == "cancelled" { break; }
+            let mut any_alive = false;
+            for (_, child) in children.iter_mut() {
+                match child.try_wait() {
+                    Ok(Some(_)) => {}
+                    Ok(None) => any_alive = true,
+                    Err(_) => {}
+                }
+            }
+            if !any_alive { break; }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        for (_, mut child) in children.drain(..) {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+
+        // Clean up per-monitor crops
+        for (name, _, _, _, _) in &outputs {
+            let _ = std::fs::remove_file(format!("/tmp/mbs-freeze-{}-{}.png", name, pid));
+        }
+        let _ = std::fs::remove_file(&state_file);
+
+        let Some((sx, sy, cx, cy)) = rect else {
+            eprintln!("[screenshot] cancelled");
+            std::process::exit(130);
+        };
+
+        let rx = (sx.min(cx) - min_x).max(0) as u32;
+        let ry = (sy.min(cy) - min_y).max(0) as u32;
+        let rw = (sx - cx).unsigned_abs();
+        let rh = (sy - cy).unsigned_abs();
+
+        if rw < 4 || rh < 4 || rx + rw > full_img.width() || ry + rh > full_img.height() {
+            eprintln!("[screenshot] invalid selection");
+            std::process::exit(130);
+        }
+
+        let cropped = image::imageops::crop_imm(&full_img, rx, ry, rw, rh).to_image();
+        let out_path = format!("/tmp/mbs-freeze-out-{}.png", pid);
+        if cropped.save(&out_path).is_err() {
+            eprintln!("[screenshot] save crop failed");
+            std::process::exit(1);
+        }
+        eprintln!("[screenshot] cropped → {}", out_path);
+
         if annotate {
-            let cmd = IpcCommand::Open(OverlayTarget::Annotator, Some(tmp_out.to_string()));
+            let cmd = IpcCommand::Open(OverlayTarget::Annotator, Some(out_path.clone()));
             match send_ipc_sync(&cmd) {
                 Ok(_) => {}
                 Err(e) => {
@@ -210,7 +318,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs()).unwrap_or(0);
             let dest = dir.join(format!("shot_{}.png", ts));
-            let _ = std::fs::copy(tmp_out, &dest);
+            let _ = std::fs::copy(&out_path, &dest);
             eprintln!("[screenshot] saved → {}", dest.display());
         }
         std::process::exit(0);
@@ -879,7 +987,105 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 ClipboardMessage::Reloaded(entries) => {
                     self.clipboard.entries = entries;
                 }
-                ClipboardMessage::SelectEntry(id) => {
+                ClipboardMessage::SelectNext => {
+                let ids = self.clipboard.filtered_ids();
+                if ids.is_empty() { return Command::none(); }
+                let next_idx = self.clipboard.selected_id.and_then(|sel| ids.iter().position(|&id| id == sel)).map(|p| (p + 1) % ids.len()).unwrap_or(0);
+                let next_id = ids[next_idx];
+                eprintln!("[debug-nav] Down pressed. next_idx: {}, next_id: {}", next_idx, next_id);
+                self.clipboard.selected_id = Some(next_id);
+                return Command::batch([
+                    Command::perform(ClipboardOverlay::load_preview(next_id), |(text, image_path)| Message::Clipboard(ClipboardMessage::PreviewLoaded { text, image_path })),
+                    iced::widget::scrollable::scroll_to(
+                        iced::widget::scrollable::Id::new("clip_list"),
+                        iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: (next_idx as f32 * 64.0 - 200.0).max(0.0) }
+                    )
+                ]);
+            }
+            ClipboardMessage::SelectPrev => {
+                let ids = self.clipboard.filtered_ids();
+                if ids.is_empty() { return Command::none(); }
+                let prev_idx = self.clipboard.selected_id.and_then(|sel| ids.iter().position(|&id| id == sel)).map(|p| (p + ids.len() - 1) % ids.len()).unwrap_or(0);
+                let prev_id = ids[prev_idx];
+                eprintln!("[debug-nav] Up pressed. prev_idx: {}, prev_id: {}", prev_idx, prev_id);
+                self.clipboard.selected_id = Some(prev_id);
+                return Command::batch([
+                    Command::perform(ClipboardOverlay::load_preview(prev_id), |(text, image_path)| Message::Clipboard(ClipboardMessage::PreviewLoaded { text, image_path })),
+                    iced::widget::scrollable::scroll_to(
+                        iced::widget::scrollable::Id::new("clip_list"),
+                        iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: (prev_idx as f32 * 64.0 - 200.0).max(0.0) }
+                    )
+                ]);
+            }
+                        ClipboardMessage::DeleteSelected => {
+                eprintln!("[clip] Delete key pressed. Selected ID: {:?}", self.clipboard.selected_id);
+                if let Some(id) = self.clipboard.selected_id {
+                    let pos = self.clipboard.entries.iter().position(|e| e.id == id);
+
+                    // Matches Lua logic: pipe ID + tab into cliphist delete
+                    if let Ok(mut child) = std::process::Command::new("cliphist")
+                        .arg("delete")
+                        .stdin(std::process::Stdio::piped())
+                        .spawn()
+                    {
+                        use std::io::Write;
+                        if let Some(mut stdin) = child.stdin.take() {
+                            let _ = writeln!(stdin, "{}\t", id);
+                        }
+                        let _ = child.wait();
+                        eprintln!("[clip] Deleted ID {}", id);
+                    }
+
+                    if let Some(idx) = pos {
+                        self.clipboard.entries.remove(idx);
+                        if !self.clipboard.entries.is_empty() {
+                            let next_idx = if idx >= self.clipboard.entries.len() { self.clipboard.entries.len() - 1 } else { idx };
+                            let next_id = self.clipboard.entries[next_idx].id;
+                            self.clipboard.selected_id = Some(next_id);
+                            return Command::batch([
+                                Command::perform(
+                                    ClipboardOverlay::load_preview(next_id),
+                                    |(text, image_path)| Message::Clipboard(ClipboardMessage::PreviewLoaded { text, image_path })
+                                ),
+                                iced::widget::scrollable::scroll_to(
+                                    iced::widget::scrollable::Id::new("clip_list"),
+                                    iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: (next_idx as f32 * 64.0 - 200.0).max(0.0) }
+                                )
+                            ]);
+                        } else {
+                            self.clipboard.selected_id = None;
+                            self.clipboard.preview_text.clear();
+                            self.clipboard.preview_image_path = None;
+                        }
+                    }
+                }
+                return Command::none();
+            }
+            ClipboardMessage::DeleteEntry(id) => {
+                let _ = std::process::Command::new("cliphist")
+                    .args(["delete", &id.to_string()])
+                    .status();
+                self.clipboard.entries.retain(|e| e.id != id);
+                if self.clipboard.selected_id == Some(id) {
+                    self.clipboard.selected_id = None;
+                    self.clipboard.preview_text.clear();
+                    self.clipboard.preview_image_path = None;
+                }
+                return Command::none();
+            }
+            ClipboardMessage::CopySelected => {
+                if let Some(id) = self.clipboard.selected_id {
+                    if let Ok(out) = std::process::Command::new("cliphist").args(["decode", &id.to_string()]).output() {
+                        if let Ok(mut child) = std::process::Command::new("wl-copy").stdin(std::process::Stdio::piped()).spawn() {
+                            use std::io::Write;
+                            if let Some(mut stdin) = child.stdin.take() { let _ = stdin.write_all(&out.stdout); }
+                        }
+                    }
+                    if self.is_standalone { std::process::exit(0); }
+                    self.active_overlay = None;
+                }
+            }
+                        ClipboardMessage::SelectEntry(id) => {
                     self.clipboard.selected_id = Some(id);
                     return Command::perform(
                         ClipboardOverlay::load_preview(id),
@@ -1137,6 +1343,19 @@ impl iced_layershell::Application for MoonBeautyShellApp {
         };
         let hw_sub = iced::time::every(std::time::Duration::from_millis(self.settings.hardware_poll_interval_ms)).map(|_| Message::TickHardware);
 
+        let clip_sub = if matches!(self.active_overlay, Some(OverlayTarget::Clipboard)) {
+            iced::keyboard::on_key_press(|key, _mods| match key {
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => Some(Message::Clipboard(ClipboardMessage::SelectPrev)),
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => Some(Message::Clipboard(ClipboardMessage::SelectNext)),
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => Some(Message::Clipboard(ClipboardMessage::CopySelected)),
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::Delete) => Some(Message::Clipboard(ClipboardMessage::DeleteSelected)),
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => Some(Message::Clipboard(ClipboardMessage::DeleteSelected)),
+                _ => None,
+            })
+        } else {
+            iced::Subscription::none()
+        };
+
         let esc_sub = iced::keyboard::on_key_press(|key, _modifiers| {
             if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
                 Some(Message::DismissActiveOverlay)
@@ -1176,7 +1395,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
         let resize_sub = iced::window::resize_events()
             .map(|(_id, size)| Message::WindowResized(size.width));
         iced::Subscription::batch(vec![clock_sub, toast_sub, hw_sub, esc_sub,
-            enter_sub, ipc_sub, notif_sub, resize_sub])
+            enter_sub, ipc_sub, notif_sub, resize_sub, clip_sub])
     }
 
     fn view(&self) -> Element<'_, Message> {

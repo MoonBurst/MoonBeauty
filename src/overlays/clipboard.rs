@@ -19,8 +19,12 @@ pub struct ClipItem {
 pub enum ClipboardMessage {
     SearchChanged(String),
     SelectEntry(u64),
+    SelectNext,
+    SelectPrev,
+    CopySelected,
     CopyEntry(u64),
     DeleteEntry(u64),
+    DeleteSelected,
     WipeAll,
     RunOcr(u64),
     Reloaded(Vec<ClipItem>),
@@ -37,6 +41,13 @@ pub struct ClipboardOverlay {
 }
 
 impl ClipboardOverlay {
+    pub fn filtered_ids(&self) -> Vec<u64> {
+        self.entries.iter()
+            .filter(|e| self.search_query.is_empty() || e.text.to_lowercase().contains(&self.search_query.to_lowercase()))
+            .map(|e| e.id)
+            .collect()
+    }
+
     pub fn new() -> Self {
         Self {
             search_query: String::new(),
@@ -48,6 +59,20 @@ impl ClipboardOverlay {
     }
 
     pub async fn reload() -> Vec<ClipItem> {
+        let cache_dir = dirs::cache_dir().unwrap_or_else(|| std::env::temp_dir());
+        let map_path = cache_dir.join("mbs-clip-names.txt");
+        let mut name_map = std::collections::HashMap::new();
+        
+        if let Ok(map_content) = std::fs::read_to_string(&map_path) {
+            for line in map_content.lines() {
+                if let Some((id_str, name)) = line.split_once('\t') {
+                    if let Ok(id) = id_str.parse::<u64>() {
+                        name_map.insert(id, name.to_string());
+                    }
+                }
+            }
+        }
+
         let Ok(out) = Command::new("cliphist").arg("list").output().await else {
             return Vec::new();
         };
@@ -75,9 +100,22 @@ impl ClipboardOverlay {
                             _ => None,
                         }
                     } else { None };
+
+                    // Use mapped filename if it exists
+                    let text_val = if is_image {
+                        if let Some(name) = name_map.get(&id) {
+                            format!("📸 {}", name)
+                        } else {
+                            let clean = content.replace("[[ binary data ", "").replace(" ]]", "");
+                            format!("📸 Screenshot {}", clean.trim())
+                        }
+                    } else {
+                        content.to_string()
+                    };
+
                     list.push(ClipItem {
                         id,
-                        text: content.to_string(),
+                        text: text_val,
                         is_image,
                         thumb_path,
                     });
@@ -243,7 +281,8 @@ impl ClipboardOverlay {
     }
 
     pub fn view<'a>(&'a self, theme: &'a ShellTheme, settings: &ShellSettings) -> Element<'a, ClipboardMessage> {
-        let (win_w, win_h) = settings.get_window_size("clipboard", 1080, 700);
+        let (win_w, win_h) = settings.get_window_size("clipboard", 1000, 700);
+        let cut = theme.overlay_cut as u16;
 
         let cut_f = theme.overlay_cut;
         let angle_deg = theme.overlay_angle;
@@ -252,139 +291,242 @@ impl ClipboardOverlay {
         let dx = (cut_f * rad.cos() * sqrt2).min(win_w * 0.45).max(0.0);
         let dy = (cut_f * rad.sin() * sqrt2).min(win_h * 0.45).max(0.0);
 
-        let header_inset = if dy > 22.0 {
-            (dx * (1.0 - (22.0 / dy))).max(0.0) + 16.0
-        } else {
-            16.0
-        };
-        let footer_inset = if dy > 20.0 {
-            (dx * (1.0 - (20.0 / dy))).max(0.0) + 16.0
+        let pad_top = 18.0_f32;
+        let pad_bottom = 16.0_f32;
+
+        let search_inward = if dy > pad_top {
+            (dx * (1.0 - (pad_top / dy))).max(0.0) + 16.0
         } else {
             16.0
         };
 
-        let input = text_input("Search clipboard (e.g. image, text)...", &self.search_query)
+        let list_top_inset = if dy > 72.0 {
+            (dx * (1.0 - (72.0 / dy))).max(0.0) + 16.0
+        } else {
+            16.0
+        };
+        let list_bottom_inset = if dy > 45.0 {
+            (dx * (1.0 - (45.0 / dy))).max(0.0) + 16.0
+        } else {
+            16.0
+        };
+        let list_side_inset = list_top_inset.max(list_bottom_inset).max(20.0);
+
+        // Header
+        let search_input = text_input("Search clipboard...", &self.search_query)
             .on_input(ClipboardMessage::SearchChanged)
-            .padding(14)
-            .size(theme.font_size_overlay);
-
-        let query_lower = self.search_query.trim().to_lowercase();
-        let mut list_col = column![].spacing(6);
-        for item in self.entries.iter()
-            .filter(|item| query_lower.is_empty() || item.text.to_lowercase().contains(&query_lower))
-            .take(50)
-        {
-            let id = item.id;
-            let icon = if item.is_image { "🖼 " } else { "📄 " };
-            let display_txt = if item.is_image { "[Image Entry]" } else { &item.text };
-
-            let mut content_row = row![].spacing(10).align_y(Alignment::Center);
-            if let Some(ref thumb) = item.thumb_path {
-                content_row = content_row.push(
-                    iced::widget::image(iced::widget::image::Handle::from_path(thumb.clone()))
-                        .width(Length::Fixed(48.0))
-                        .height(Length::Fixed(48.0))
-                );
-            }
-            content_row = content_row.push(text(icon).size(16));
-            content_row = content_row.push(
-                text(display_txt)
-                    .size(theme.font_size_normal)
-                    .color(theme.text)
-            );
-
-            let row_item = button(content_row)
-            .on_press(ClipboardMessage::SelectEntry(id))
-            .padding([8, 12])
+            .padding(Padding { top: 12.0, right: 24.0, bottom: 12.0, left: 24.0 })
+            .size(theme.font_size_overlay)
             .width(Length::Fill)
-            .style(|_t, _s| button::Style {
-                background: None,
+            .style(move |_t, _s| text_input::Style {
+                background: iced::Background::Color(Color::TRANSPARENT),
+                border: iced::Border::default(),
+                icon: theme.muted,
+                placeholder: theme.muted,
+                value: theme.text,
+                selection: theme.surface_alt,
+            });
+
+        let search_bg = ShapeBox::new()
+            .shape(ShapeType::Hexagon { cut })
+            .background(theme.background)
+            .border(theme.border, theme.control_border_width)
+            .size(Length::Fill, Length::Fixed(48.0));
+
+        let search_bar = container(
+            Stack::new()
+                .push(search_bg.view())
+                .push(search_input)
+        ).height(Length::Fixed(48.0));
+
+        let wipe_btn = button(
+            container(text("Wipe All").size(theme.font_size_overlay).color(theme.danger))
+                .center_y(Length::Fill)
+                .center_x(Length::Fill)
+        )
+        .on_press(ClipboardMessage::WipeAll)
+        .height(Length::Fixed(48.0))
+        .width(Length::Fixed(100.0))
+        .style(move |_t, _s| button::Style {
+            background: Some(iced::Background::Color(Color::TRANSPARENT)),
+            border: iced::Border::default(),
+            ..Default::default()
+        });
+
+        let wipe_bg = ShapeBox::new()
+            .shape(ShapeType::Hexagon { cut })
+            .background(theme.background)
+            .border(theme.danger, theme.control_border_width)
+            .size(Length::Fixed(100.0), Length::Fixed(48.0));
+
+        let wipe_bar = container(
+            Stack::new()
+                .push(wipe_bg.view())
+                .push(wipe_btn)
+        ).height(Length::Fixed(48.0)).width(Length::Fixed(100.0));
+
+        let input_row = container(
+            row![search_bar, wipe_bar].spacing(12).align_y(Alignment::Center)
+        )
+        .width(Length::Fill)
+        .padding(Padding { top: 0.0, right: search_inward, bottom: 0.0, left: search_inward });
+
+        // Left Pane (List)
+        let mut list_col = column![].spacing(8);
+        for item in &self.entries {
+            if !self.search_query.is_empty() && !item.text.to_lowercase().contains(&self.search_query.to_lowercase()) {
+                continue;
+            }
+            let is_sel = self.selected_id == Some(item.id);
+            let border_color = if is_sel { theme.danger } else { theme.border }; // Base08 outline
+            let text_color = if is_sel { theme.text } else { theme.text }; // Keep text normal
+
+            let raw_text = item.text.lines().next().unwrap_or("").to_string();
+            
+            let display_text = if raw_text.chars().count() > 30 {
+                let truncated: String = raw_text.chars().take(30).collect();
+                format!("{}...", truncated)
+            } else {
+                raw_text
+            };
+
+            let mut item_row = row![].spacing(12).align_y(Alignment::Center);
+            if let Some(thumb) = &item.thumb_path {
+                item_row = item_row.push(
+                    iced::widget::image(iced::widget::image::Handle::from_path(thumb.clone()))
+                        .width(Length::Fixed(40.0))
+                        .height(Length::Fixed(40.0))
+                        .content_fit(iced::ContentFit::Contain)
+                );
+            } else {
+                item_row = item_row.push(text("■").size(10).color(theme.muted));
+            }
+            
+            // Force the text to stay strictly within the box
+            let text_container = container(text(display_text).size(theme.font_size_overlay).color(text_color))
+                .width(Length::Fill)
+                .clip(true);
+            item_row = item_row.push(text_container);
+
+            let btn_content = container(item_row)
+                .padding(Padding { top: 0.0, right: 24.0, bottom: 0.0, left: 24.0 })
+                .width(Length::Fill)
+                .height(Length::Fixed(56.0))
+                .align_y(Alignment::Center);
+
+            let item_bg = ShapeBox::new()
+                .shape(ShapeType::Hexagon { cut })
+                .background(theme.background) // Always dark background
+                .border(border_color, theme.control_border_width)
+                .size(Length::Fill, Length::Fixed(56.0));
+
+            let item_btn = button(
+                Stack::new()
+                    .push(item_bg.view())
+                    .push(btn_content)
+            )
+            .on_press(ClipboardMessage::SelectEntry(item.id))
+            .width(Length::Fill)
+            .height(Length::Fixed(56.0))
+            .style(move |_t, _s| button::Style {
+                background: Some(iced::Background::Color(Color::TRANSPARENT)),
+                border: iced::Border::default(),
                 ..Default::default()
             });
 
-            list_col = list_col.push(row_item);
+            list_col = list_col.push(item_btn);
         }
 
-        let card_bg = ShapeBox::new()
-            .shape(ShapeType::AngledHexagon { cut: cut_f, angle_deg })
+        let left_pane = container(
+            scrollable(list_col).id(iced::widget::scrollable::Id::new("clip_list")).width(Length::Fill).height(Length::Fill)
+        )
+        .width(Length::FillPortion(1))
+        .height(Length::Fill)
+        .clip(true)
+        .padding(Padding {
+            top: list_top_inset,
+            right: 24.0, // Increased to keep scrollbar away from right pane
+            bottom: list_bottom_inset,
+            left: list_side_inset,
+        });
+
+        // Right Pane (Preview)
+        // Dynamic padding based on the chamfer cut to prevent spilling out of the octagon
+        let inner_pad = cut_f + 4.0; // Tight padding: just enough to clear the chamfer
+        let inner_padding = Padding { top: inner_pad, right: inner_pad, bottom: inner_pad, left: inner_pad };
+
+        let preview_content: Element<'a, ClipboardMessage> = if let Some(img_path) = &self.preview_image_path {
+            container(
+                container(
+                    iced::widget::image(iced::widget::image::Handle::from_path(img_path.clone()))
+                        .width(Length::Fill)
+                        .content_fit(iced::ContentFit::Contain)
+                )
+                .padding(inner_padding)
+                .center_x(Length::Fill).center_y(Length::Fill).width(Length::Fill).height(Length::Fill)
+            ).into()
+        } else if !self.preview_text.is_empty() {
+            container(
+                scrollable(
+                    container(
+                        text(&self.preview_text)
+                            .size(theme.font_size_overlay)
+                            .font(iced::Font::MONOSPACE)
+                            .color(theme.text)
+                            .wrapping(iced::widget::text::Wrapping::WordOrGlyph)
+                    ).width(Length::Fill)
+                ).width(Length::Fill).height(Length::Fill)
+            ).padding(inner_padding).width(Length::Fill).height(Length::Fill).into()
+        } else {
+            container(text("Select an entry to preview").size(theme.font_size_overlay).color(theme.muted))
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        };
+
+        let right_bg = ShapeBox::new()
+            .shape(ShapeType::Hexagon { cut })
             .background(theme.background)
-            .border(theme.border, theme.border_width)
-            .size(Length::Fixed(win_w), Length::Fixed(win_h));
+            .border(theme.border, theme.control_border_width)
+            .size(Length::Fill, Length::Fill);
 
-        let list_pane = container(
-            column![
-                input,
-                scrollable(list_col).height(Length::Fill),
-            ]
-            .spacing(8)
-            .padding(4),
+        // Wrap the Stack in a container with .clip(true) so the text inside the right pane doesn't bleed out
+        let right_pane = container(
+            Stack::new()
+                .push(right_bg.view())
+                .push(preview_content)
         )
-        .width(Length::FillPortion(45))
-        .height(Length::Fill);
+        .width(Length::FillPortion(2))
+        .clip(true)
+        .height(Length::Fill)
+        .clip(true);
 
-        let preview_pane = self.preview_view(theme);
-
-        let header_row = container(
-            row![
-                text("📋 CLIPBOARD MANAGER")
-                    .size(theme.font_size_overlay)
-                    .color(theme.text),
-                row![].width(Length::Fill),
-                button(text("🗑 Wipe All").size(12).color(theme.danger))
-                    .on_press(ClipboardMessage::WipeAll)
-                    .style(|_t, _s| button::Style {
-                        background: None,
-                        ..Default::default()
-                    }),
-            ]
-            .align_y(Alignment::Center)
-        )
-        .width(Length::Fill)
-        .padding(Padding {
-            top: 0.0,
-            right: header_inset,
-            bottom: 0.0,
-            left: header_inset,
-        });
-
-        let footer_text = container(
-            text("Click to select  •  Click 📋 to copy  •  ESC to dismiss")
-                .size(11)
-                .color(theme.muted)
-                .align_x(Alignment::Center)
-        )
-        .width(Length::Fill)
-        .padding(Padding {
-            top: 0.0,
-            right: footer_inset,
-            bottom: 0.0,
-            left: footer_inset,
-        });
-
-        let card_content = container(
-            column![
-                header_row,
-                row![list_pane, preview_pane].spacing(12).height(Length::Fill),
-                footer_text,
-            ]
-            .spacing(12)
-            .padding(20),
-        )
+        let content = column![
+            input_row,
+            row![left_pane, right_pane].spacing(16).height(Length::Fill).width(Length::Fill)
+        ]
+        .spacing(16)
+        .padding(Padding { top: pad_top, right: 0.0, bottom: pad_bottom, left: 0.0 })
         .width(Length::Fixed(win_w))
         .height(Length::Fixed(win_h));
 
-        let card = Stack::new().push(card_bg.view()).push(card_content);
+        let bg_shape = ShapeBox::new()
+            .shape(ShapeType::Hexagon { cut })
+            .background(theme.background)
+            .border(theme.border, theme.control_border_width)
+            .size(Length::Fixed(win_w), Length::Fixed(win_h));
 
-        let backdrop = button(container(column![]).width(Length::Fill).height(Length::Fill))
-            .on_press(ClipboardMessage::Dismiss)
-            .style(|_t, _s| button::Style {
-                background: Some(iced::Background::Color(Color::from_rgba8(0, 0, 0, 0.65))),
-                ..Default::default()
-            });
-
-        Stack::new()
-            .push(backdrop)
-            .push(container(card).center_x(Length::Fill).center_y(Length::Fill))
-            .into()
+        container(
+            Stack::new()
+                .push(bg_shape.view())
+                .push(content)
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .into()
     }
 }

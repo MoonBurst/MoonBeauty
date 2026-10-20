@@ -21,6 +21,8 @@
           pipewire
           pam
           tesseract
+          imagemagick
+          wl-clipboard
         ];
       in {
         devShells.default = pkgs.mkShell {
