@@ -943,33 +943,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 }
                 AnnotatorMessage::Saved(_) | AnnotatorMessage::RevealLoaded(_) => {}
                 other => self.annotator.update(other),
-            },Message::Annotator(AnnotatorMessage::ToggleReveal) => {
-                    if self.annotator.reveal_mode {
-                        self.annotator.reveal_mode = false;
-                        self.annotator.reveal_text = None;
-                        self.annotator.reveal_handle = None;
-                        eprintln!("[mbs] reveal: OFF");
-                    } else if let Some(path) = self.annotator.source_path.clone() {
-                        eprintln!("[mbs] reveal: computing high-pass on {:?}", path);
-                        match std::fs::read(&path) {
-                            Ok(bytes) => {
-                                match moon_beauty_shell::overlays::plate_watermark::reveal(&bytes) {
-                                    Ok(amplified) => {
-                                        eprintln!("[mbs] reveal: {} bytes", amplified.len());
-                                        self.annotator.reveal_handle = Some(
-                                            iced::widget::image::Handle::from_bytes(amplified)
-                                        );
-                                        self.annotator.reveal_text = None;
-                                        self.annotator.reveal_mode = true;
-                                    }
-                                    Err(e) => eprintln!("[mbs] reveal failed: {e}"),
-                                }
-                            }
-                            Err(e) => eprintln!("[mbs] reveal read failed: {e}"),
-                        }
-                    }
-                }
-
+            }
             Message::Amogus(msg) => match msg {
                 AmogusMessage::Dismiss => {
                     if self.is_standalone { std::process::exit(0); }
