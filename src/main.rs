@@ -85,7 +85,9 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     // MUST be above the notif-surface spawn block, or the flag falls
     // through and boots the full bar.
     if args.iter().any(|a| a == "--screenshot") {
-        let annotate = args.iter().any(|a| a == "--annotate");
+        let quick = args.iter().any(|a| a == "--quick" || a == "--no-annotate");
+        // Default is now annotate. --quick restores the old capture-and-save.
+        let annotate = !quick && !args.iter().any(|a| a == "--no-annotate");
         let watermark_cli = args.iter()
             .position(|a| a == "--watermark")
             .and_then(|i| args.get(i + 1).cloned());
