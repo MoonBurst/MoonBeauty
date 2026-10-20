@@ -1,0 +1,22 @@
+# Personal data (contacts, notes, credentials, etc.)
+/resources/
+
+# Rust
+/target
+**/*.rs.bk
+
+# Nix
+result
+result-*
+.direnv/
+
+# Session backups
+.backups/
+*.bak.*
+*.broken*
+*.orig
+
+# Editor
+.idea/
+.vscode/
+*.swp

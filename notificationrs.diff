@@ -1,0 +1,81 @@
+--- a/src/overlays/notifications.rs
++++ b/src/overlays/notifications.rs
+@@
+-        let mut deck = Stack::new();
+-
+-        for (i, toast) in self.active_toasts.iter().enumerate() {
+-            let id = toast.id;
+-            let border_c = hex_to_color(&toast.border_color);
+-
+-            // 60FPS Cubic Ease-Out Slide-In Animation Curve
+-            let elapsed_ms = toast.created_at.elapsed().as_millis() as f32;
+-            let slide_ms = (settings.notif_slide_in_ms.max(50)) as f32;
+-            let progress = (elapsed_ms / slide_ms).min(1.0);
+-            let ease_out = 1.0 - (1.0 - progress).powi(3);
+-            let slide_offset = (1.0 - ease_out) * (card_w + 60.0);
+-
+-            // Stacking offset formula
+-            let y_step = card_h + (settings.notif_stack_overlap as f32);
+-            let y_pos = (i as f32) * y_step.max(10.0);
++        let from_right = settings.notif_corner.contains("right");
++
++        // Render oldest-first for positional stacking, but push in reverse so
++        // the oldest card is painted last and therefore sits on top of newer
++        // cards when the stack overlap is negative.
++        let mut deck = Stack::new();
++        let ordered: Vec<(usize, &NotificationToast)> =
++            self.active_toasts.iter().enumerate().collect();
++
++        for (i, toast) in ordered.into_iter().rev() {
++            let id = toast.id;
++            let border_c = hex_to_color(&toast.border_color);
++
++            // Multi-phase entrance animation:
++            //   1. slide horizontally in from the requested side
++            //   2. pause briefly
++            //   3. drop vertically into the resting slot
++            let elapsed_ms = toast.created_at.elapsed().as_millis() as f32;
++            let slide_ms = settings.notif_slide_in_ms.max(50) as f32;
++            let pause_ms = settings.notif_drop_pause_ms as f32;
++            let drop_ms = 250.0_f32;
++            let drop_dist = settings.notif_drop_distance_px as f32;
++
++            // Phase 1: horizontal slide (cubic ease-out)
++            let slide_progress = (elapsed_ms / slide_ms).min(1.0);
++            let slide_ease = 1.0 - (1.0 - slide_progress).powi(3);
++            let slide_travel = ((1.0 - slide_ease) * (card_w + 60.0)).round();
++
++            // Phase 3: vertical settle-drop (begins after slide + pause)
++            let drop_start = slide_ms + pause_ms;
++            let drop_progress = ((elapsed_ms - drop_start) / drop_ms).clamp(0.0, 1.0);
++            let drop_ease = 1.0 - (1.0 - drop_progress).powi(3);
++            let drop_extra = (1.0 - drop_ease) * (-drop_dist);
++
++            // Stacking slot (oldest at index 0 sits at the top of the stack)
++            let y_step = card_h + (settings.notif_stack_overlap as f32);
++            let slot_y = (i as f32) * y_step.max(10.0);
++            let y_pos = (slot_y + drop_extra).max(0.0);
+@@
+-            let positioned_toast = container(toast_card)
+-                .padding(Padding {
+-                    top: y_pos,
+-                    right: slide_offset,
+-                    bottom: 0.0,
+-                    left: 0.0,
+-                });
++            let (pad_right, pad_left) = if from_right {
++                (slide_travel, 0.0)
++            } else {
++                (0.0, slide_travel)
++            };
++
++            let positioned_toast = container(toast_card)
++                .padding(Padding {
++                    top: y_pos,
++                    right: pad_right,
++                    bottom: 0.0,
++                    left: pad_left,
++                });
+ 
+             deck = deck.push(positioned_toast);
+         }
