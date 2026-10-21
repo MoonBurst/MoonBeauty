@@ -62,6 +62,12 @@ pub struct SystemCollector {
     prev_net_time: std::time::Instant,
 }
 
+impl Default for SystemCollector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SystemCollector {
     pub fn new() -> Self {
         Self {
@@ -104,17 +110,26 @@ impl SystemCollector {
             }
         }
 
-        let mut usage_pct = 0;
-        if let Ok(loadavg) = fs::read_to_string("/proc/loadavg") {
-            if let Some(first) = loadavg.split_whitespace().next() {
-                if let Ok(val) = first.parse::<f32>() {
-                    let cores = std::thread::available_parallelism()
-                        .map(|c| c.get())
-                        .unwrap_or(1) as f32;
-                    usage_pct = ((val / cores) * 100.0).clamp(0.0, 100.0) as u8;
-                }
-            }
-        }
+        let read_stat = || {
+            let stat = fs::read_to_string("/proc/stat").unwrap_or_default();
+            let line = stat.lines().next().unwrap_or("");
+            let parts: Vec<u64> = line.split_whitespace().skip(1).filter_map(|x| x.parse().ok()).collect();
+            if parts.len() >= 4 {
+                let idle = parts[3] + parts[4]; // idle + iowait
+                let total: u64 = parts.iter().sum();
+                (idle, total)
+            } else { (0, 0) }
+        };
+        let (i1, t1) = read_stat();
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        let (i2, t2) = read_stat();
+        let usage_pct = if t2 > t1 {
+            let dt = t2 - t1;
+            let di = i2 - i1;
+            (100.0 * (dt.saturating_sub(di)) as f64 / dt as f64).clamp(0.0, 100.0) as u8
+        } else {
+            0
+        };
 
         let top_procs = Self::get_top_cpu_processes().await;
 

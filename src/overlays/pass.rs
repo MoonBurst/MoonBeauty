@@ -20,6 +20,12 @@ pub struct PassOverlay {
     pub filtered_keys: Vec<String>,
 }
 
+impl Default for PassOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PassOverlay {
     pub fn new() -> Self {
         let all_keys = Self::scan_passwords();

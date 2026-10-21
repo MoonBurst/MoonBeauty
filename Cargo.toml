@@ -19,7 +19,7 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "5.0"
 walkdir = "2.5"
 regex = "1.10"
-image = "0.25"
+image = { version = "0.25", default-features = false, features = ["png"] }
 sysinfo = "0.31"
 zbus = { version = "4.4", features = ["tokio"] }
 wayland-client = "0.31.15"
@@ -30,6 +30,6 @@ smithay-client-toolkit = "0.21.1"
 [profile.release]
 opt-level = 3
 lto = "thin"
-codegen-units = 1
+codegen-units = 16
 panic = "abort"
 strip = true

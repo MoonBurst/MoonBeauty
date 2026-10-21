@@ -2,6 +2,7 @@ use iced::widget::{container, row, Row, Stack};
 use iced::{Alignment, Element, Length};
 
 use super::capsules::{CapsuleAction, CapsuleRenderer};
+use crate::backend::TrayItem;
 use crate::backend::UnifiedTelemetry;
 use crate::config::settings::ShellSettings;
 use crate::config::theme::ShellTheme;
@@ -22,6 +23,8 @@ impl TopBar {
         settings: &ShellSettings,
         theme: &ShellTheme,
         telemetry: &'a UnifiedTelemetry,
+        tray_expanded: bool,
+        tray_items: &'a [TrayItem],
     ) -> Element<'a, TopBarMessage> {
         let spacing_px = settings.capsule_spacing as f32;
 
@@ -33,15 +36,22 @@ impl TopBar {
                     "right" => (SlantSide::Right, SlantSide::Right),
                     _ => (SlantSide::Left, SlantSide::Left), // Slant towards center
                 };
-                left_row = left_row.push(CapsuleRenderer::render(
-                    id,
-                    telemetry,
-                    theme,
-                    sl,
-                    sr,
-                    &settings.module_shape,
-                    TopBarMessage::Action,
-                ));
+                if id == "tray" && tray_expanded {
+                    left_row = left_row.push(CapsuleRenderer::render_tray_expanded(
+                        tray_items, theme, sl, sr, "left", TopBarMessage::Action,
+                    ));
+                } else {
+                    left_row = left_row.push(CapsuleRenderer::render(
+                        id,
+                        telemetry,
+                        theme,
+                        sl,
+                        sr,
+                        &settings.module_shape,
+                        "left",
+                        TopBarMessage::Action,
+                    ));
+                }
             }
         }
 
@@ -65,15 +75,22 @@ impl TopBar {
                     }
                 }
             };
-            center_row = center_row.push(CapsuleRenderer::render(
-                id,
-                telemetry,
-                theme,
-                sl,
-                sr,
-                &settings.module_shape,
-                TopBarMessage::Action,
-            ));
+            if id.as_str() == "tray" && tray_expanded {
+                center_row = center_row.push(CapsuleRenderer::render_tray_expanded(
+                    tray_items, theme, sl, sr, "center", TopBarMessage::Action,
+                ));
+            } else {
+                center_row = center_row.push(CapsuleRenderer::render(
+                    id,
+                    telemetry,
+                    theme,
+                    sl,
+                    sr,
+                    &settings.module_shape,
+                    "center",
+                    TopBarMessage::Action,
+                ));
+            }
         }
 
         let mut right_row = Row::new().spacing(spacing_px).align_y(Alignment::Center);
@@ -84,15 +101,22 @@ impl TopBar {
                     "right" => (SlantSide::Right, SlantSide::Right),
                     _ => (SlantSide::Right, SlantSide::Right), // Slant towards center
                 };
-                right_row = right_row.push(CapsuleRenderer::render(
-                    id,
-                    telemetry,
-                    theme,
-                    sl,
-                    sr,
-                    &settings.module_shape,
-                    TopBarMessage::Action,
-                ));
+                if id == "tray" && tray_expanded {
+                    right_row = right_row.push(CapsuleRenderer::render_tray_expanded(
+                        tray_items, theme, sl, sr, "right", TopBarMessage::Action,
+                    ));
+                } else {
+                    right_row = right_row.push(CapsuleRenderer::render(
+                        id,
+                        telemetry,
+                        theme,
+                        sl,
+                        sr,
+                        &settings.module_shape,
+                        "right",
+                        TopBarMessage::Action,
+                    ));
+                }
             }
         }
 

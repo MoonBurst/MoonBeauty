@@ -1,3 +1,4 @@
+pub mod alarm_tooltip;
 pub mod amogus;
 pub mod annotator;
 pub mod plate_watermark;
@@ -17,6 +18,9 @@ pub mod settings;
 pub mod todo;
 pub mod unicode;
 pub mod websearch;
+pub mod weather_tooltip;
+pub mod system_tooltip;
+pub mod tray_popup;
 
 pub use amogus::{AmogusMessage, AmogusOverlay};
 pub use annotator::{AnnotatorMessage, AnnotatorOverlay, save_annotated_image, slurp_region, grim_capture};
@@ -36,24 +40,6 @@ pub use settings::{SettingsMessage, SettingsOverlay};
 pub use todo::{TodoMessage, TodoOverlay};
 pub use unicode::{UnicodeMessage, UnicodeOverlay};
 pub use websearch::{WebSearchMessage, WebSearchOverlay};
-
-
-// ── blind_watermark DWT-DCT-SVD helpers ─────────────────────
-
-
-
-
-
-
-/// Embed a UTF-8 name into a PNG using blind_watermark's DWT-DCT-SVD pipeline.
-
-
-/// Extract by trying every plausible name length and validating printable ASCII.
-
-
-
-
-
 
 
 pub use plate_watermark::{add_plate_watermark, reveal};

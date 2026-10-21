@@ -1,5 +1,6 @@
 use std::process::Command;
 
+#[allow(dead_code)]
 pub fn focused_output() -> Option<String> {
     let out = Command::new("swaymsg")
         .args(["-t", "get_outputs", "-r"])

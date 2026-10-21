@@ -23,6 +23,12 @@ pub struct UnicodeOverlay {
     pub catalog: Vec<UnicodeEntry>,
 }
 
+impl Default for UnicodeOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UnicodeOverlay {
     pub fn new() -> Self {
         Self {

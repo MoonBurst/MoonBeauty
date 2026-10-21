@@ -34,6 +34,12 @@ pub struct RemindersOverlay {
     pub entries: Vec<ReminderEntry>,
 }
 
+impl Default for RemindersOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RemindersOverlay {
     pub fn new() -> Self {
         Self {
@@ -43,7 +49,7 @@ impl RemindersOverlay {
         }
     }
 
-    fn storage_path() -> PathBuf {
+    pub fn storage_path() -> PathBuf {
         let base = dirs::runtime_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
         base.join("moon_reminders.json")
     }
@@ -265,5 +271,15 @@ impl RemindersOverlay {
             .push(backdrop)
             .push(container(card).center_x(Length::Fill).center_y(Length::Fill))
             .into()
+    }
+}
+
+pub fn save_reminders(entries: &[ReminderEntry]) {
+    let path = RemindersOverlay::storage_path();
+    if let Ok(data) = serde_json::to_string_pretty(entries) {
+        let tmp = path.with_extension("tmp");
+        if std::fs::write(&tmp, data).is_ok() {
+            let _ = std::fs::rename(tmp, path);
+        }
     }
 }

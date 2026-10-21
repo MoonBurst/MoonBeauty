@@ -93,11 +93,10 @@ impl Program<Message> for SelectorCanvas {
                     }
                 }
             }
-            iced::widget::canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                if self.start.is_some() {
+            iced::widget::canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                if self.start.is_some() => {
                     return (Status::Captured, Some(Message::Release));
                 }
-            }
             _ => {}
         }
         (Status::Ignored, None)
@@ -218,7 +217,7 @@ impl Application for SelectorApp {
         iced::Task::none()
     }
 
-    fn view(&self) -> Element<Message> {
+    fn view(&self) -> Element<'_, Message> {
         let img = iced::widget::image(self.handle.clone())
             .width(Length::Fill)
             .height(Length::Fill)

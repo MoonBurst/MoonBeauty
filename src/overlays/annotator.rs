@@ -7,7 +7,7 @@
 //! - Enter: save (annotated+watermarked) then close. Always.
 
 use iced::widget::canvas::{self, Canvas, Frame, Geometry};
-use iced::widget::{button, container, scrollable, text, text_input, Column, Row, Stack};
+use iced::widget::{button, container, text, text_input, Column, Row, Stack};
 use iced::{event, mouse, Alignment, Color, Element, Length, Point, Rectangle, Size};
 use std::path::{Path, PathBuf};
 
@@ -95,6 +95,12 @@ pub struct AnnotatorOverlay {
     pub reveal_computing: bool,
 }
 
+impl Default for AnnotatorOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AnnotatorOverlay {
     pub fn new() -> Self {
         Self {
@@ -137,17 +143,6 @@ impl AnnotatorOverlay {
     }
 
     pub fn update(&mut self, msg: AnnotatorMessage) {
-        match &msg {
-            AnnotatorMessage::Pressed(p) | AnnotatorMessage::Moved(p) | AnnotatorMessage::Released(p) => {
-                eprintln!("[mbs-child] annotator.update: mouse {:?} at ({:.0},{:.0})",
-                    if matches!(msg, AnnotatorMessage::Pressed(_)) { "PRESS" }
-                    else if matches!(msg, AnnotatorMessage::Moved(_)) { "MOVE" }
-                    else { "RELEASE" },
-                    p.x, p.y);
-            }
-            AnnotatorMessage::SetTool(t) => eprintln!("[mbs-child] annotator.update: SetTool {:?}", t),
-            _ => {}
-        }
         match msg {
             AnnotatorMessage::Pressed(p) if !self.reveal_mode => self.on_press(p),
             AnnotatorMessage::Moved(p) if !self.reveal_mode => self.on_move(p),
@@ -683,29 +678,16 @@ impl canvas::Program<AnnotatorMessage> for OverlayCanvas {
         if let canvas::Event::Mouse(m) = event {
             match m {
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
-                    eprintln!("[mbs-child] CANVAS RAW PRESS pos={:?} bounds={:?}",
-                        cursor.position(), bounds);
                     if let Some(p) = cursor.position_in(bounds) {
                         let img = to_img(p);
                         if inside_img(img) {
                             return (event::Status::Captured, Some(AnnotatorMessage::Pressed(img)));
                         }
-                        eprintln!("[mbs-child] press OUTSIDE image: img=({:.0},{:.0}) dr=({:.0},{:.0} {:.0}x{:.0})",
-                            img.x, img.y, dr.x, dr.y, dr.width, dr.height);
                         return (event::Status::Ignored, None);
                     }
                 }
                 mouse::Event::CursorMoved { .. } => {
-                    if let Some(p) = cursor.position_in(bounds) {
-                        {
-                            use std::sync::atomic::{AtomicU32, Ordering};
-                            static M: AtomicU32 = AtomicU32::new(0);
-                            let n = M.fetch_add(1, Ordering::Relaxed);
-                            if n < 5000 {
-                                eprintln!("[mbs-child] CANVAS MOVE #{} raw=({:.0},{:.0})", n, p.x, p.y);
-                            }
-                        }
-                        return (event::Status::Ignored, Some(AnnotatorMessage::Moved(clamp_img(to_img(p)))));
+                    if let Some(p) = cursor.position_in(bounds) {                        return (event::Status::Ignored, Some(AnnotatorMessage::Moved(clamp_img(to_img(p)))));
                     }
                 }
                 mouse::Event::ButtonReleased(mouse::Button::Left) => {
@@ -749,13 +731,6 @@ fn draw_ann<F: Fn(Point) -> Point>(frame: &mut Frame, a: &Annotation, to_disp: &
             frame.fill_rectangle(Point::new(x, y + h - sw), Size::new(w, sw), r);
             frame.fill_rectangle(Point::new(x, y), Size::new(sw, h), r);
             frame.fill_rectangle(Point::new(x + w - sw, y), Size::new(sw, h), r);
-        }
-        Tool::Redact => {
-            let p1 = sp(a.start); let p2 = sp(a.end);
-            let x = p1.x.min(p2.x); let y = p1.y.min(p2.y);
-            let w = (p2.x - p1.x).abs().max(4.0);
-            let h = (p2.y - p1.y).abs().max(4.0);
-            frame.fill_rectangle(Point::new(x, y), Size::new(w, h), Color::from_rgb(0.0, 0.0, 0.0));
         }
         Tool::Redact => {
             let p1 = sp(a.start); let p2 = sp(a.end);
@@ -1012,7 +987,6 @@ pub fn compose_annotations(source: &Path, annotations: &[Annotation], out: &Path
                     "-draw".into(), format!("polyline {}", pts.join(" ")),
                 ]);
             }
-                _ => {},
             }
     }
     args.push(out.to_str().unwrap_or("").into());
@@ -1032,7 +1006,6 @@ pub fn save_annotated_image(
     std::fs::create_dir_all(&save_dir).map_err(|e| format!("mkdir: {e}"))?;
     
     let stamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
-    let date_str = chrono::Local::now().format("%Y-%m-%d").to_string();
     let time_str = chrono::Local::now().format("%H-%M").to_string();
 
     let composed_bytes = if annotations.is_empty() {
@@ -1110,7 +1083,7 @@ pub fn save_annotated_image(
                     }
                     let _ = child.wait();
 
-                    let cache_dir = dirs::cache_dir().unwrap_or_else(|| std::env::temp_dir());
+                    let cache_dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
                     let _ = std::fs::create_dir_all(&cache_dir);
                     let map_path = cache_dir.join("mbs-clip-names.txt");
 

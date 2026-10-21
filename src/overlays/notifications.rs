@@ -77,6 +77,12 @@ pub struct NotificationOverlay {
     pub stack_anim_start: Instant,
 }
 
+impl Default for NotificationOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NotificationOverlay {
     pub fn new() -> Self {
         Self {
@@ -181,13 +187,18 @@ impl NotificationOverlay {
             tts_spoken: false,
         };
 
-        // Do-not-disturb: save to history, but no toast, no sound, no TTS.
+        // Do-not-disturb: save to history and held queue; do not show or speak yet.
         if dnd_active() {
-            self.history.insert(0, item);
+            eprintln!("[dnd] holding notification back while paused: {:?}", summary);
+            self.history.insert(0, item.clone());
             if self.history.len() > 80 {
                 self.history.truncate(80);
             }
             self.save_history();
+            let mut held = load_held_notifs();
+            held.push(item);
+            save_held_notifs(&held);
+            eprintln!("[dnd] total notifications held: {}", held.len());
             return;
         }
         if self.active_toasts.len() >= 4 {
@@ -445,7 +456,6 @@ impl NotificationOverlay {
         };
 
         let from_right = settings.notif_corner.contains("right");
-        let _margin_x = settings.notif_margin_x as f32;
 
         // Render oldest-first for positional stacking, but push in reverse so
         // the oldest card is painted last and therefore sits on top of newer
@@ -511,7 +521,6 @@ impl NotificationOverlay {
             } else {
                 strip_margin
             };
-            if elapsed_ms < 400.0 {            }
 
             // Phase 3: vertical settle-drop (begins after slide + pause)
             let drop_start = slide_ms + pause_ms;
@@ -742,9 +751,6 @@ fn rand_id() -> u32 {
 }
 
 // ── do-not-disturb flag ────────────────────────────────────────────────────
-// A flag file in the runtime dir, shared between the bar process (which
-// toggles it) and the --notif-surface process (which checks it per
-// notification). Cleared automatically on logout/reboot.
 pub fn dnd_flag_path() -> PathBuf {
     let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(dir).join("moon-beauty-shell-dnd")
@@ -757,11 +763,53 @@ pub fn dnd_active() -> bool {
 /// Flips the flag; returns the new state (true = notifications paused).
 pub fn toggle_dnd() -> bool {
     let p = dnd_flag_path();
-    if p.exists() {
+    let state = if p.exists() {
         let _ = fs::remove_file(&p);
+        eprintln!("[dnd] flag file removed: {:?}", p);
         false
     } else {
         let _ = fs::write(&p, b"1");
+        eprintln!("[dnd] flag file created: {:?}", p);
         true
+    };
+    state
+}
+
+pub fn held_notifs_path() -> PathBuf {
+    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(dir).join("moon-beauty-shell-held-notifs.json")
+}
+
+pub fn load_held_notifs() -> Vec<NotificationToast> {
+    let p = held_notifs_path();
+    if p.exists() {
+        if let Ok(content) = fs::read_to_string(&p) {
+            if let Ok(list) = serde_json::from_str::<Vec<NotificationToast>>(&content) {
+                return list;
+            }
+        }
     }
+    Vec::new()
+}
+
+pub fn save_held_notifs(toasts: &[NotificationToast]) {
+    let p = held_notifs_path();
+    if toasts.is_empty() {
+        let _ = fs::remove_file(&p);
+    } else if let Ok(json) = serde_json::to_string(toasts) {
+        let tmp = p.with_extension("tmp");
+        if fs::write(&tmp, json).is_ok() {
+            let _ = fs::rename(tmp, p);
+        }
+    }
+}
+
+pub fn held_notifs_count() -> usize {
+    load_held_notifs().len()
+}
+
+pub fn take_held_notifs() -> Vec<NotificationToast> {
+    let list = load_held_notifs();
+    let _ = fs::remove_file(held_notifs_path());
+    list
 }

@@ -6,6 +6,7 @@ pub mod mpris;
 pub mod notif_dbus;
 pub mod podman_twitch;
 pub mod system;
+pub mod tray_watcher;
 pub mod weather;
 
 pub use audio::{AudioBackend, AudioStatus};
@@ -15,6 +16,7 @@ pub use mpris::{MprisBackend, MprisTrack};
 pub use podman_twitch::{PodmanBackend, PodmanStatus, WatcherDetails};
 pub use system::{BatteryMetrics, CpuMetrics, GpuMetrics, NetMetrics, RamMetrics, SystemCollector};
 pub use weather::{WeatherAlert, WeatherBackend, WeatherData};
+pub use tray_watcher::{TrayItem, fetch_tray_items, activate_tray_item, context_menu_tray_item};
 
 #[derive(Debug, Clone)]
 pub struct UnifiedTelemetry {

@@ -40,6 +40,12 @@ pub struct ClipboardOverlay {
     pub preview_image_path: Option<String>,
 }
 
+impl Default for ClipboardOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClipboardOverlay {
     pub fn filtered_ids(&self) -> Vec<u64> {
         self.entries.iter()
@@ -59,7 +65,7 @@ impl ClipboardOverlay {
     }
 
     pub async fn reload() -> Vec<ClipItem> {
-        let cache_dir = dirs::cache_dir().unwrap_or_else(|| std::env::temp_dir());
+        let cache_dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
         let map_path = cache_dir.join("mbs-clip-names.txt");
         let mut name_map = std::collections::HashMap::new();
         
@@ -217,72 +223,8 @@ impl ClipboardOverlay {
         String::new()
     }
 
-    fn preview_view<'a>(&'a self, theme: &'a ShellTheme) -> Element<'a, ClipboardMessage> {
-        let body: Element<'a, ClipboardMessage> = if let Some(ref path) = self.preview_image_path {
-            container(
-                iced::widget::image(iced::widget::image::Handle::from_path(path.clone()))
-                    .width(Length::Fill)
-                    .height(Length::Fill),
-            )
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .padding(8)
-            .into()
-        } else if !self.preview_text.is_empty() {
-            container(
-                scrollable(
-                    text(&self.preview_text)
-                        .size(theme.font_size_normal)
-                        .color(theme.text),
-                )
-                .height(Length::Fill),
-            )
-            .padding(12)
-            .into()
-        } else {
-            container(
-                text("Select an entry to preview")
-                    .size(theme.font_size_normal)
-                    .color(theme.muted),
-            )
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .into()
-        };
-
-        let copy_btn: Element<'a, ClipboardMessage> = if let Some(id) = self.selected_id {
-            button(
-                text("📋 Copy Selected")
-                    .size(theme.font_size_normal)
-                    .color(theme.text),
-            )
-            .on_press(ClipboardMessage::CopyEntry(id))
-            .padding([8, 16])
-            .style(|_t, _s| button::Style {
-                background: Some(iced::Background::Color(theme.surface_alt)),
-                ..Default::default()
-            })
-            .into()
-        } else {
-            container(text("").size(1)).into()
-        };
-
-        container(
-            column![body, copy_btn].spacing(8).padding(6),
-        )
-        .width(Length::FillPortion(55))
-        .height(Length::Fill)
-        .style(|_t| container::Style {
-            background: Some(iced::Background::Color(theme.surface)),
-            border: iced::Border { color: theme.border, width: 1.0, radius: 8.0.into() },
-            ..Default::default()
-        })
-        .into()
-    }
-
     pub fn view<'a>(&'a self, theme: &'a ShellTheme, settings: &ShellSettings) -> Element<'a, ClipboardMessage> {
         let is_image_selected = self.selected_id.and_then(|id| self.entries.iter().find(|e| e.id == id)).map(|e| e.is_image).unwrap_or(false);
-        eprintln!("[clip-view] selected_id={:?}, is_image_selected={}", self.selected_id, is_image_selected);
 
         let (win_w, win_h) = settings.get_window_size("clipboard", 1000, 700);
         let cut = theme.overlay_cut as u16;

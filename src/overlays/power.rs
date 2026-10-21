@@ -26,6 +26,12 @@ pub struct PowerOverlay {
     pub confirming: Option<PowerAction>,
 }
 
+impl Default for PowerOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PowerOverlay {
     pub fn new() -> Self {
         Self { confirming: None }

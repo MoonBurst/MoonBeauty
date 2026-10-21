@@ -114,6 +114,36 @@ impl SettingsOverlay {
     }
 
     pub fn update(&mut self, message: SettingsMessage, settings: &mut ShellSettings) {
+        let should_persist = matches!(
+            &message,
+            SettingsMessage::Dismiss
+                | SettingsMessage::SaveSettings
+                | SettingsMessage::SelectTab(_)
+                | SettingsMessage::ToggleNotifications
+                | SettingsMessage::SelectNotifCorner(_)
+                | SettingsMessage::SelectNotifShape(_)
+                | SettingsMessage::SelectNotifScreen(_)
+                | SettingsMessage::SelectBarShape(_)
+                | SettingsMessage::SelectModuleShape(_)
+                | SettingsMessage::SelectSlantMode(_)
+                | SettingsMessage::AddNewProfile
+                | SettingsMessage::DeleteProfile(_)
+                | SettingsMessage::ToggleProfileSound(_)
+                | SettingsMessage::ToggleProfileTts(_)
+                | SettingsMessage::ProfileSummaryChanged(_, _)
+                | SettingsMessage::ProfileColorChanged(_, _)
+                | SettingsMessage::ProfileSoundPathChanged(_, _)
+                | SettingsMessage::ProfileTtsTemplateChanged(_, _)
+                | SettingsMessage::AddContentRule(_)
+                | SettingsMessage::DeleteContentRule(_, _)
+                | SettingsMessage::RulePatternChanged(_, _, _)
+                | SettingsMessage::RuleReadoutChanged(_, _, _)
+                | SettingsMessage::ToggleCapsuleVisible(_)
+                | SettingsMessage::MoveCapsuleTo(_, _)
+                | SettingsMessage::MoveCapsuleUp(_)
+                | SettingsMessage::MoveCapsuleDown(_)
+                | SettingsMessage::ColorChanged(_, _)
+        );
         match message {
             SettingsMessage::SelectTab(t) => self.active_tab = t,
 
@@ -338,7 +368,9 @@ impl SettingsOverlay {
             SettingsMessage::Dismiss => {}
         }
 
-        let _ = settings.save();
+        if should_persist {
+            let _ = settings.save();
+        }
     }
 
     pub fn view<'a>(&'a self, settings: &'a ShellSettings, theme: &'a ShellTheme) -> Element<'a, SettingsMessage> {

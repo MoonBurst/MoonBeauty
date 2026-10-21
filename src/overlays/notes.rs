@@ -30,6 +30,12 @@ pub struct NotesOverlay {
     pub notes: Vec<NoteItem>,
 }
 
+impl Default for NotesOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NotesOverlay {
     pub fn new() -> Self {
         Self {

@@ -7,7 +7,7 @@ use iced_layershell::Application;
 use moon_beauty_shell::backend::*;
 use moon_beauty_shell::bar::{CapsuleAction, TopBar, TopBarMessage};
 use moon_beauty_shell::config::{ShellSettings, ShellTheme};
-use moon_beauty_shell::ipc::{send_client_command, send_annotator_show, IpcCommand, OverlayTarget};
+use moon_beauty_shell::ipc::{send_client_command, IpcCommand, OverlayTarget};
 use moon_beauty_shell::overlays::*;
 use moon_beauty_shell::overlays::annotator::Tool;
 
@@ -367,12 +367,12 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             (false, true)  => Anchor::Bottom | Anchor::Right,
             (false, false) => Anchor::Bottom | Anchor::Left,
         };
-        let strip_w = (settings.notif_card_width as i32
+        let _strip_w = (settings.notif_card_width as i32
             + 2 * settings.notif_margin_x + 40).max(200) as u32;
-        let strip_h = (3 * settings.notif_card_height as i32
+        let _strip_h = (3 * settings.notif_card_height as i32
             + 2 * settings.notif_margin_x + 100).max(300) as u32;
         LayerShellSettings {
-            size: Some((strip_w, strip_h)),
+            size: Some((1, 1)),
             exclusive_zone: -1,
             anchor,
             layer: Layer::Overlay,
@@ -390,16 +390,6 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
             layer: Layer::Overlay,
             keyboard_interactivity: KeyboardInteractivity::Exclusive,
-            binded_output_name,
-            ..Default::default()
-        }
-    } else if standalone_target.as_ref() == Some(&OverlayTarget::Annotator) {
-        LayerShellSettings {
-            size: Some((1600, 1000)),
-            exclusive_zone: -1,
-            anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
-            layer: Layer::Overlay,
-            keyboard_interactivity: KeyboardInteractivity::OnDemand,
             binded_output_name,
             ..Default::default()
         }
@@ -424,6 +414,34 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             ..Default::default()
         }
     };
+
+        if args.iter().any(|a| a == "--sys-tooltip") {
+        match moon_beauty_shell::overlays::system_tooltip::run() {
+            Ok(()) => std::process::exit(0),
+            Err(e) => { eprintln!("[sys-tooltip] {e}"); std::process::exit(1); }
+        }
+    }
+
+    if args.iter().any(|a| a == "--tray-popup") {
+        match moon_beauty_shell::overlays::tray_popup::run() {
+            Ok(()) => std::process::exit(0),
+            Err(e) => { eprintln!("[tray-popup] {e}"); std::process::exit(1); }
+        }
+    }
+
+    if args.iter().any(|a| a == "--weather-tooltip") {
+        match moon_beauty_shell::overlays::weather_tooltip::run() {
+            Ok(()) => std::process::exit(0),
+            Err(e) => { eprintln!("[weather-tooltip] {e}"); std::process::exit(1); }
+        }
+    }
+
+    if args.iter().any(|a| a == "--alarm-tooltip") {
+        match moon_beauty_shell::overlays::alarm_tooltip::run() {
+            Ok(()) => std::process::exit(0),
+            Err(e) => { eprintln!("[alarm-tooltip] {e}"); std::process::exit(1); }
+        }
+    }
 
     MoonBeautyShellApp::run(Settings {
         layer_settings,
@@ -481,6 +499,7 @@ impl TryInto<iced_layershell::actions::LayershellCustomActionsWithInfo<()>> for 
 }
 
 pub struct MoonBeautyShellApp {
+    weather_tooltip_child: Option<std::process::Child>,
     settings: ShellSettings,
     theme: ShellTheme,
     telemetry: UnifiedTelemetry,
@@ -650,6 +669,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 bar_time: ClockBackend::get_bar_time(),
             },
             active_overlay: standalone_target,
+            weather_tooltip_child: None,
             is_standalone,
             system_collector: SystemCollector::new(),
             standalone_child: None,
@@ -661,7 +681,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 .and_then(|m| m.modified().ok()),
             window_w: 1920.0,
             notif_screen_at_startup,
-            notif_surface_size: if is_notif_surface { (10, 10) } else { (0, 0) },
+            notif_surface_size: if is_notif_surface { (1, 1) } else { (0, 0) },
 
             launcher: AppLauncher::new(),
             calc: CalculatorOverlay::new(),
@@ -754,6 +774,22 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                     }
                 }
                 if self.is_notif_surface {
+                    if !moon_beauty_shell::overlays::notifications::dnd_active() {
+                        let held = moon_beauty_shell::overlays::notifications::take_held_notifs();
+                        if !held.is_empty() {
+                            eprintln!("[dnd] unpaused! releasing {} held toast(s) to screen", held.len());
+                            for mut item in held {
+                                item.created_at = std::time::Instant::now();
+                                item.hold_reset_at = Some(std::time::Instant::now());
+                                item.exit_started_at = None;
+                                item.slot_shift_start = None;
+                                if self.notifs.active_toasts.len() >= 4 {
+                                    self.notifs.active_toasts.remove(0);
+                                }
+                                self.notifs.active_toasts.push(item);
+                            }
+                        }
+                    }
                     let big_w = (self.settings.notif_card_width as i32
                         + 2 * self.settings.notif_margin_x + 100)
                         .max(200) as u32;
@@ -761,7 +797,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                         + 2 * self.settings.notif_margin_x + 100)
                         .max(300) as u32;
                     let want = if self.notifs.active_toasts.is_empty() {
-                        (10u32, 10u32)
+                        (1u32, 1u32)
                     } else {
                         (big_w, big_h)
                     };
@@ -773,6 +809,22 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             }
             Message::TickClock => {
                 self.telemetry.bar_time = ClockBackend::get_bar_time();
+                let now = chrono::Local::now().timestamp();
+                let mut entries = moon_beauty_shell::overlays::reminders::RemindersOverlay::load();
+                let mut changed = false;
+                for e in entries.iter_mut() {
+                    if e.target_epoch <= now && !e.alerted {
+                        e.alerted = true;
+                        changed = true;
+                        let text = if e.text.is_empty() { "Timer Finished!".into() } else { e.text.clone() };
+                        let _ = std::process::Command::new("notify-send")
+                            .args(["-a", "Alarm", "-u", "critical", "⏰ Timer Complete!", &text])
+                            .spawn();
+                    }
+                }
+                if changed {
+                    moon_beauty_shell::overlays::reminders::save_reminders(&entries);
+                }
             }
             Message::TickToasts => {
                 self.notifs.tick_toasts(self.settings.notif_hold_duration_sec);
@@ -886,10 +938,65 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 if let TopBarMessage::Action(act) = msg {
                     match act {
                         CapsuleAction::OpenOverlay(id) => {
+                            eprintln!("[topbar-action] OpenOverlay: id = {:?}", id);
+
+                            // 1. DROPDOWN TOOLTIPS (Alarm, CPU, GPU, RAM, Weather, Tray)
+                            if matches!(id.as_str(), "weather" | "cpu" | "gpu" | "ram" | "tray" | "alarm") {
+                                // Toggle off if already open
+                                let running = self.weather_tooltip_child.as_mut()
+                                    .and_then(|c| c.try_wait().ok())
+                                    .is_some_and(|status| status.is_none());
+                                if running {
+                                    eprintln!("[tooltip] Already open; toggling off");
+                                    if let Some(mut c) = self.weather_tooltip_child.take() {
+                                        let _ = c.kill();
+                                        let _ = c.wait();
+                                    }
+                                    return Command::none();
+                                }
+                                self.weather_tooltip_child = None;
+
+                                let sw = get_screen_width();
+                                let cx = capsule_center_x(&self.settings, sw, &id);
+                                let exe = resolve_exe();
+                                let mut cmd = std::process::Command::new(&exe);
+
+                                if id == "alarm" {
+                                    cmd.arg("--alarm-tooltip");
+                                } else if id == "weather" {
+                                    cmd.arg("--weather-tooltip");
+                                } else if id == "tray" {
+                                    cmd.arg("--tray-popup");
+                                } else {
+                                    cmd.arg("--sys-tooltip").env("MBS_SYS_TARGET", &id);
+                                }
+
+                                let slant = if self.settings.bar_left.contains(&id) {
+                                    "left"
+                                } else if self.settings.bar_right.contains(&id) {
+                                    "right"
+                                } else {
+                                    "center"
+                                };
+                                cmd.env("MBS_CAPSULE_CX", cx.to_string())
+                                   .env("MBS_SCREEN_W", sw.to_string())
+                                   .env("MBS_WX_SLANT", slant);
+
+                                eprintln!("[tooltip] Spawning {:?} {:?} (cx={}, sw={}, slant={})", exe, cmd.get_args().collect::<Vec<_>>(), cx, sw, slant);
+                                match cmd.spawn() {
+                                    Ok(c) => {
+                                        eprintln!("[tooltip] Successfully spawned pid={}", c.id());
+                                        self.weather_tooltip_child = Some(c);
+                                    }
+                                    Err(e) => eprintln!("[tooltip] Failed to spawn: {e}"),
+                                }
+                                return Command::none();
+                            }
+
+                            // 2. FULLSCREEN / STANDALONE OVERLAYS (Settings, History, Power)
                             let mapped: Option<OverlayTarget> = match id.as_str() {
-                                "calendar" | "weather" | "clock" => Some(OverlayTarget::Settings),
-                                "alarm" => Some(OverlayTarget::Reminders),
-                                "unified" | "net" | "cpu" | "ram" => Some(OverlayTarget::Settings),
+                                "calendar" | "clock" => Some(OverlayTarget::Settings),
+                                "unified" | "net" => Some(OverlayTarget::Settings),
                                 "notify" => Some(OverlayTarget::NotificationsHistory),
                                 "battery" => Some(OverlayTarget::Power),
                                 _ => OverlayTarget::from_str(&id),
@@ -922,6 +1029,38 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                         }
                         CapsuleAction::ToggleSinkMute => {
                             return Command::perform(AudioBackend::toggle_sink_mute(), |_| Message::TopBar(TopBarMessage::Noop));
+                        }
+                        CapsuleAction::ToggleNotificationDnd => {
+                            let p = std::path::PathBuf::from("/dev/shm/mbs-dnd");
+                            let paused = if p.exists() {
+                                let _ = std::fs::remove_file(&p);
+                                false
+                            } else {
+                                let _ = std::fs::write(&p, b"1");
+                                true
+                            };
+                            self.settings.notifications_enabled = !paused;
+                            let _ = self.settings.save();
+
+                            let held_count = moon_beauty_shell::overlays::notifications::held_notifs_count();
+                            let msg = format!("[DND-CLICK] Toggled DND -> paused = {}, held_count = {}
+", paused, held_count);
+                            eprintln!("{}", msg);
+                            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/mbs-click.log") {
+                                use std::io::Write;
+                                let _ = f.write_all(msg.as_bytes());
+                            }
+
+                            let exe = resolve_exe();
+                            if paused {
+                                let _ = std::process::Command::new("pkill")
+                                    .args(["-f", "--", "--notif-surface"])
+                                    .status();
+                            } else {
+                                if held_count > 0 {
+                                    let _ = std::process::Command::new(exe).arg("--notif-surface").spawn();
+                                }
+                            }
                         }
                         CapsuleAction::ToggleSourceMute => {
                             return Command::perform(AudioBackend::toggle_source_mute(), |_| Message::TopBar(TopBarMessage::Noop));
@@ -1072,18 +1211,6 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 }
                 return Command::none();
             }
-            ClipboardMessage::DeleteEntry(id) => {
-                let _ = std::process::Command::new("cliphist")
-                    .args(["delete", &id.to_string()])
-                    .status();
-                self.clipboard.entries.retain(|e| e.id != id);
-                if self.clipboard.selected_id == Some(id) {
-                    self.clipboard.selected_id = None;
-                    self.clipboard.preview_text.clear();
-                    self.clipboard.preview_image_path = None;
-                }
-                return Command::none();
-            }
             ClipboardMessage::RunOcr(id) => {
                 eprintln!("[ocr] RunOcr triggered for id {}", id);
                 let is_img = self.clipboard.entries.iter().find(|e| e.id == id).map(|e| e.is_image).unwrap_or(false);
@@ -1153,7 +1280,6 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                     self.clipboard.preview_text = text;
                     self.clipboard.preview_image_path = image_path;
                 }
-                _ => {}
             },
             Message::Notes(msg) => match msg {
                 NotesMessage::Dismiss => {
@@ -1303,7 +1429,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                                     }
                                     let _ = child.wait();
 
-                                    let cache_dir = dirs::cache_dir().unwrap_or_else(|| std::env::temp_dir());
+                                    let cache_dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
                                     let map_path = cache_dir.join("mbs-clip-names.txt");
                                     let filename = out.file_name().unwrap_or_default().to_string_lossy().to_string();
 
@@ -1492,7 +1618,6 @@ impl iced_layershell::Application for MoonBeautyShellApp {
 
         let text_typing_sub = if self.annotator.text_editing.is_some() {
             iced::keyboard::on_key_press(|key, _mods| {
-                eprintln!("[debug-keys] received: {:?}", key);
                 match key {
                 iced::keyboard::Key::Character(c) => {
                     match c.as_str() {
@@ -1669,8 +1794,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             }
         }
 
-        let bar_view = TopBar::view(&self.settings, &self.theme, &self.telemetry).map(Message::TopBar);
-        let _ = &notifs_view;
+        let bar_view = TopBar::view(&self.settings, &self.theme, &self.telemetry, false, &[]).map(Message::TopBar);
         let base_content = Stack::new().push(bar_view);
 
         if let Some(overlay) = overlay_element {
@@ -1683,4 +1807,109 @@ impl iced_layershell::Application for MoonBeautyShellApp {
     fn theme(&self) -> Self::Theme {
         Theme::Dark
     }
+}
+
+
+fn capsule_min_width(id: &str) -> f32 {
+    match id {
+        "calendar" => 110.0,
+        "music" => 140.0,
+        "alarm" => 90.0,
+        "weather" => 95.0,
+        "unified" => 80.0,
+        "notify" => 120.0,
+        "clock" => 85.0,
+        "audio" => 95.0,
+        "mic" => 80.0,
+        "net" => 145.0,
+        "cpu" => 115.0,
+        "gpu" => 150.0,
+        "ram" => 105.0,
+        "battery" => 85.0,
+        _ => 80.0,
+    }
+}
+
+fn get_capsule_widths(s: &ShellSettings, list: &[String]) -> f32 {
+    list.iter()
+        .filter(|id| s.visible_capsules.get(*id).copied().unwrap_or(true))
+        .map(|id| capsule_min_width(id) + s.capsule_spacing as f32)
+        .sum()
+}
+
+fn capsule_center_x(s: &ShellSettings, sw: u32, target: &str) -> i32 {
+    let sw_f = sw as f32;
+    let sp = s.capsule_spacing as f32;
+
+    // 1. bar_left
+    let mut x = 16.0;
+    for id in &s.bar_left {
+        if !s.visible_capsules.get(id).copied().unwrap_or(true) { continue; }
+        let w = capsule_min_width(id);
+        if id == target { return (x + w / 2.0) as i32; }
+        x += w + sp;
+    }
+
+    // 2. bar_center
+    let center_w = get_capsule_widths(s, &s.bar_center);
+    let mut x = (sw_f - center_w) / 2.0;
+    for id in &s.bar_center {
+        if !s.visible_capsules.get(id).copied().unwrap_or(true) { continue; }
+        let w = capsule_min_width(id);
+        if id == target { return (x + w / 2.0) as i32; }
+        x += w + sp;
+    }
+
+    // 3. bar_right
+    let right_w = get_capsule_widths(s, &s.bar_right);
+    let mut x = sw_f - 16.0 - right_w;
+    for id in &s.bar_right {
+        if !s.visible_capsules.get(id).copied().unwrap_or(true) { continue; }
+        let w = capsule_min_width(id);
+        if id == target { return (x + w / 2.0) as i32; }
+        x += w + sp;
+    }
+
+    200
+}
+
+fn get_screen_width() -> u32 {
+    if let Ok(o) = std::process::Command::new("swaymsg")
+        .args(["-t", "get_outputs", "-r"]).output()
+    {
+        if o.status.success() {
+            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&o.stdout) {
+                if let Some(arr) = v.as_array() {
+                    for output in arr {
+                        if output.get("focused").and_then(|f| f.as_bool()) == Some(true) {
+                            if let Some(w) = output.get("rect")
+                                .and_then(|r| r.get("width"))
+                                .and_then(|w| w.as_u64())
+                            {
+                                return w as u32;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Ok(o) = std::process::Command::new("hyprctl")
+        .args(["monitors", "-j"]).output()
+    {
+        if o.status.success() {
+            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&o.stdout) {
+                if let Some(arr) = v.as_array() {
+                    for mon in arr {
+                        if mon.get("focused").and_then(|f| f.as_bool()) == Some(true) {
+                            if let Some(w) = mon.get("width").and_then(|w| w.as_u64()) {
+                                return w as u32;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    1920
 }

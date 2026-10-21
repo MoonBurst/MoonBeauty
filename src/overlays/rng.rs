@@ -39,6 +39,12 @@ pub struct RngOverlay {
     pub history: Vec<RollHistoryItem>,
 }
 
+impl Default for RngOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RngOverlay {
     pub fn new() -> Self {
         Self {
@@ -77,7 +83,7 @@ impl RngOverlay {
             let mut rolls = Vec::new();
 
             for _ in 0..count {
-                if Self::random_u32() % 2 == 0 {
+                if Self::random_u32().is_multiple_of(2) {
                     heads += 1;
                     rolls.push((1, true));
                 } else {
@@ -112,14 +118,14 @@ impl RngOverlay {
             .collect();
 
         if self.keep_mode == "kh" {
-            rolls.sort_by(|a, b| b.0.cmp(&a.0));
-            for i in 1..rolls.len() {
-                rolls[i].1 = false;
+            rolls.sort_by_key(|r| std::cmp::Reverse(r.0));
+            for r in rolls.iter_mut().skip(1) {
+                r.1 = false;
             }
         } else if self.keep_mode == "kl" {
-            rolls.sort_by(|a, b| a.0.cmp(&b.0));
-            for i in 1..rolls.len() {
-                rolls[i].1 = false;
+            rolls.sort_by_key(|a| a.0);
+            for r in rolls.iter_mut().skip(1) {
+                r.1 = false;
             }
         }
 

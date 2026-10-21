@@ -17,6 +17,12 @@ pub struct WebSearchOverlay {
     pub query: String,
 }
 
+impl Default for WebSearchOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WebSearchOverlay {
     pub fn new() -> Self {
         Self { query: String::new() }

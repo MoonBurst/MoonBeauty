@@ -33,6 +33,12 @@ pub struct AmogusOverlay {
     pub is_scanning: bool,
 }
 
+impl Default for AmogusOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AmogusOverlay {
     pub fn new() -> Self {
         let colors = [

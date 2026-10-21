@@ -163,7 +163,7 @@ impl Application for FragmentApp {
         }
     }
 
-    fn view(&self) -> Element<Message> {
+    fn view(&self) -> Element<'_, Message> {
         let img = iced::widget::image(self.handle.clone())
             .width(Length::Fill)
             .height(Length::Fill)

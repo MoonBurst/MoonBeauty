@@ -18,6 +18,12 @@ pub struct CalculatorOverlay {
     pub result_text: String,
 }
 
+impl Default for CalculatorOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CalculatorOverlay {
     pub fn new() -> Self {
         Self {

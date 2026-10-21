@@ -101,13 +101,6 @@ pub fn add_plate_watermark(bytes: &[u8], name: &str) -> Result<Vec<u8>, String> 
     result
 }
 
-/// Amplify the plate via B−G channel differencing. The plate is purple
-/// (100, 0, 255) at 0.008 alpha — this makes blue ~2 units higher than
-/// green wherever the plate was applied. Auto-level stretches that tiny
-/// signal to full 0-255 range for a legible reveal.
-
-
-
 /// Reveal the plate watermark by high-pass filtering the blue channel.
 ///
 /// Exact port of QuickshotEngine.lua's C.reveal():

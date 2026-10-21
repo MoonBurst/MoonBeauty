@@ -22,6 +22,12 @@ pub struct LockscreenOverlay {
     pub is_caps_lock: bool,
 }
 
+impl Default for LockscreenOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LockscreenOverlay {
     pub fn new() -> Self {
         Self {

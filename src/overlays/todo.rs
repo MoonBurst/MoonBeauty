@@ -49,6 +49,12 @@ pub struct TodoOverlay {
     pub new_task_text: String,
 }
 
+impl Default for TodoOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TodoOverlay {
     pub fn new() -> Self {
         let mut db = Self::load();

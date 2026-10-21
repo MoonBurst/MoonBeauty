@@ -33,6 +33,12 @@ pub struct AppLauncher {
     pub focus_requested: bool,
 }
 
+impl Default for AppLauncher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AppLauncher {
     pub fn new() -> Self {
         let mut all_apps = vec![
@@ -127,7 +133,7 @@ impl AppLauncher {
             }
         }
 
-        apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        apps.sort_by_key(|a| a.name.to_lowercase());
         let with_icons = apps.iter().filter(|a| a.icon_path.is_some()).count();
         eprintln!(
             "[launcher] {} .desktop files scanned ({} hidden), {} apps loaded, {} with icons",
@@ -297,7 +303,7 @@ impl AppLauncher {
                     background: iced::Background::Color(theme.surface),
                     border: iced::Border {
                         color: match status {
-                            text_input::Status::Focused { .. } => theme.focus,
+                            text_input::Status::Focused => theme.focus,
                             text_input::Status::Hovered => theme.muted,
                             _ => theme.border,
                         },

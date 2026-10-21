@@ -46,6 +46,12 @@ pub struct EmailOverlay {
     pub compose_body: String,
 }
 
+impl Default for EmailOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EmailOverlay {
     pub fn new() -> Self {
         Self {

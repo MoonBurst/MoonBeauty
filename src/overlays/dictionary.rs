@@ -48,6 +48,12 @@ struct ApiDef {
     definition: Option<String>,
 }
 
+impl Default for DictionaryOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DictionaryOverlay {
     pub fn new() -> Self {
         Self {
