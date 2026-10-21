@@ -281,6 +281,9 @@ impl ClipboardOverlay {
     }
 
     pub fn view<'a>(&'a self, theme: &'a ShellTheme, settings: &ShellSettings) -> Element<'a, ClipboardMessage> {
+        let is_image_selected = self.selected_id.and_then(|id| self.entries.iter().find(|e| e.id == id)).map(|e| e.is_image).unwrap_or(false);
+        eprintln!("[clip-view] selected_id={:?}, is_image_selected={}", self.selected_id, is_image_selected);
+
         let (win_w, win_h) = settings.get_window_size("clipboard", 1000, 700);
         let cut = theme.overlay_cut as u16;
 
@@ -359,6 +362,34 @@ impl ClipboardOverlay {
             .border(theme.danger, theme.control_border_width)
             .size(Length::Fixed(100.0), Length::Fixed(48.0));
 
+        let ocr_btn = button(
+            container(text("OCR").size(theme.font_size_overlay).color(if is_image_selected { theme.text } else { theme.muted }))
+                .center_y(Length::Fill)
+                .center_x(Length::Fill)
+        )
+        .on_press_maybe(Some(ClipboardMessage::RunOcr(
+            self.selected_id.unwrap_or(0)
+        )))
+        .height(Length::Fixed(48.0))
+        .width(Length::Fixed(80.0))
+        .style(move |_t, _s| button::Style {
+            background: Some(iced::Background::Color(Color::TRANSPARENT)),
+            border: iced::Border::default(),
+            ..Default::default()
+        });
+
+        let ocr_bg = ShapeBox::new()
+            .shape(ShapeType::Hexagon { cut })
+            .background(theme.background)
+            .border(if is_image_selected { theme.text } else { theme.border }, theme.control_border_width)
+            .size(Length::Fixed(80.0), Length::Fixed(48.0));
+
+        let ocr_bar = container(
+            Stack::new()
+                .push(ocr_bg.view())
+                .push(ocr_btn)
+        ).height(Length::Fixed(48.0)).width(Length::Fixed(80.0));
+
         let wipe_bar = container(
             Stack::new()
                 .push(wipe_bg.view())
@@ -366,7 +397,7 @@ impl ClipboardOverlay {
         ).height(Length::Fixed(48.0)).width(Length::Fixed(100.0));
 
         let input_row = container(
-            row![search_bar, wipe_bar].spacing(12).align_y(Alignment::Center)
+            row![search_bar, ocr_bar, wipe_bar].spacing(12).align_y(Alignment::Center)
         )
         .width(Length::Fill)
         .padding(Padding { top: 0.0, right: search_inward, bottom: 0.0, left: search_inward });

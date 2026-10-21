@@ -61,6 +61,7 @@ pub fn add_plate_watermark(bytes: &[u8], name: &str) -> Result<Vec<u8>, String> 
         "(".into(),
             "-size".into(), "240x220".into(),
             "xc:none".into(),
+            
             "-fill".into(), "rgba(100, 0, 255, 0.008)".into(),
             "-font".into(), "Liberation-Sans-Bold".into(),
             "-pointsize".into(), "20".into(),

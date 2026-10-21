@@ -286,6 +286,16 @@ impl Program<Message> for FragmentCanvas {
                     frame.fill_rectangle(Point::new(sx, ey - b), Size::new(w, b), border);
                     frame.fill_rectangle(Point::new(sx, sy), Size::new(b, h), border);
                     frame.fill_rectangle(Point::new(ex - b, sy), Size::new(b, h), border);
+                    
+                    // Live Dimensions HUD
+                    let dim_text = format!("{} x {}", w as u32, h as u32);
+                    frame.fill_text(iced::widget::canvas::Text {
+                        content: dim_text,
+                        position: Point::new(ex + 8.0, ey + 8.0),
+                        color: Color::WHITE,
+                        size: iced::Pixels(16.0),
+                        ..Default::default()
+                    });
                 }
             }
             _ => {

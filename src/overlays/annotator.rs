@@ -7,17 +7,17 @@
 //! - Enter: save (annotated+watermarked) then close. Always.
 
 use iced::widget::canvas::{self, Canvas, Frame, Geometry};
-use iced::widget::{button, container, text, text_input, Column, Row, Stack};
+use iced::widget::{button, container, scrollable, text, text_input, Column, Row, Stack};
 use iced::{event, mouse, Alignment, Color, Element, Length, Point, Rectangle, Size};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tool { Rect, Arrow, Pen, Redact }
+pub enum Tool { Rect, Ellipse, Arrow, Pen, Text, Counter, Redact }
 impl Tool {
     fn glyph(self) -> &'static str {
-        match self { Self::Rect=>"▭", Self::Arrow=>"↗", Self::Pen=>"✎", Self::Redact=>"█" }
+        match self { Self::Rect=>"Rect", Self::Ellipse=>"Circle", Self::Arrow=>"Arrow", Self::Pen=>"Pen", Self::Text=>"Text", Self::Counter=>"Num", Self::Redact=>"Redact" }
     }
-    pub fn all() -> [Self; 4] { [Self::Rect, Self::Arrow, Self::Pen, Self::Redact] }
+    pub fn all() -> [Self; 7] { [Self::Rect, Self::Ellipse, Self::Arrow, Self::Pen, Self::Text, Self::Counter, Self::Redact] }
 }
 
 #[derive(Debug, Clone)]
@@ -28,6 +28,9 @@ pub struct Annotation {
     pub points: Vec<Point>,
     pub color: Color,
     pub width: f32,
+    pub number: u32,
+    pub text: String,
+    pub font_size: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +50,16 @@ pub enum AnnotatorMessage {
     WatermarkInputChanged(String),
     ToggleReveal,
     RevealLoaded(Result<Vec<u8>, String>),
+    TextEditingChanged(String),
+    TextCommitted,
+    CharacterInput(String),
+    BackspacePressed,
+    CancelTextEditing,
+    ConfirmText,
+    CancelText,
+    FontSizeUp,
+    FontSizeDown,
+    NewLinePressed,
 }
 
 pub const PALETTE: [Color; 8] = [
@@ -58,6 +71,12 @@ pub const PALETTE: [Color; 8] = [
 
 pub struct AnnotatorOverlay {
     pub handle: Option<iced::widget::image::Handle>,
+    pub text_editing: Option<usize>,
+    pub text_buffer: String,
+    pub text_dragging: bool,
+    pub text_drag_offset: Point,
+    pub text_edit_original: Option<String>,
+    pub text_font_size: f32,
     pub image_size: Size,
     pub annotations: Vec<Annotation>,
     in_progress: Option<Annotation>,
@@ -80,6 +99,12 @@ impl AnnotatorOverlay {
     pub fn new() -> Self {
         Self {
             handle: None,
+            text_editing: None,
+            text_buffer: String::new(),
+            text_dragging: false,
+            text_drag_offset: Point::ORIGIN,
+            text_edit_original: None,
+            text_font_size: 20.0,
             image_size: Size::new(0.0, 0.0),
             annotations: Vec::new(),
             in_progress: None,
@@ -132,27 +157,198 @@ impl AnnotatorOverlay {
             AnnotatorMessage::Undo => { self.annotations.pop(); }
             AnnotatorMessage::ClearAll => self.annotations.clear(),
             AnnotatorMessage::WatermarkInputChanged(s) => self.watermark_input = s,
+
+            AnnotatorMessage::CharacterInput(s) => {
+                if let Some(idx) = self.text_editing {
+                    self.text_buffer.push_str(&s);
+                    if let Some(a) = self.annotations.get_mut(idx) {
+                        a.text = self.text_buffer.clone();
+                    }
+                }
+            }
+            AnnotatorMessage::BackspacePressed => {
+                if let Some(idx) = self.text_editing {
+                    self.text_buffer.pop();
+                    if let Some(a) = self.annotations.get_mut(idx) {
+                        a.text = self.text_buffer.clone();
+                    }
+                }
+            }
+            AnnotatorMessage::NewLinePressed => {
+                if let Some(idx) = self.text_editing {
+                    self.text_buffer.push('\n');
+                    if let Some(a) = self.annotations.get_mut(idx) {
+                        a.text = self.text_buffer.clone();
+                    }
+                }
+            }
+            AnnotatorMessage::ConfirmText => {
+                if let Some(idx) = self.text_editing.take() {
+                    if self.text_buffer.trim().is_empty() {
+                        self.annotations.remove(idx);
+                    } else if let Some(a) = self.annotations.get_mut(idx) {
+                        a.text = self.text_buffer.clone();
+                        a.font_size = self.text_font_size;
+                    }
+                }
+                self.text_edit_original = None;
+            }
+            AnnotatorMessage::CancelText => {
+                if let Some(idx) = self.text_editing.take() {
+                    match self.text_edit_original.take() {
+                        Some(original) => {
+                            // Resume-cancel: restore original text
+                            if let Some(a) = self.annotations.get_mut(idx) {
+                                a.text = original;
+                            }
+                        }
+                        None => {
+                            // New-cancel: remove the empty annotation
+                            self.annotations.remove(idx);
+                        }
+                    }
+                }
+                self.text_buffer.clear();
+            }
+            AnnotatorMessage::FontSizeUp => {
+                self.text_font_size = (self.text_font_size + 2.0).min(96.0);
+                if let Some(idx) = self.text_editing {
+                    if let Some(a) = self.annotations.get_mut(idx) {
+                        a.font_size = self.text_font_size;
+                    }
+                }
+            }
+            AnnotatorMessage::FontSizeDown => {
+                self.text_font_size = (self.text_font_size - 2.0).max(10.0);
+                if let Some(idx) = self.text_editing {
+                    if let Some(a) = self.annotations.get_mut(idx) {
+                        a.font_size = self.text_font_size;
+                    }
+                }
+            }
             _ => {}
         }
     }
 
     fn on_press(&mut self, p: Point) {
         eprintln!("[mbs-child] on_press ({:.0},{:.0}) tool={:?}", p.x, p.y, self.tool);
-        eprintln!("[mbs-child] on_press at ({:.0},{:.0}) — starting {:?}", p.x, p.y, self.tool);
+        
+        // If already editing text, check if click is inside the box (for drag)
+        if let Some(idx) = self.text_editing {
+            let in_box = if let Some(a) = self.annotations.get(idx) {
+                let font_size = a.font_size.max(10.0);
+                let line_height = font_size * 1.2;
+                let max_chars = a.text.lines().map(|l| l.chars().count()).max().unwrap_or(0).max(4);
+                let pad = 24.0;
+                let bw = (max_chars as f32 * font_size * 0.55) + pad * 2.0;
+                let bh = (a.text.lines().count() as f32).max(1.0) * line_height + pad * 2.0;
+                let bx = a.start.x - pad;
+                let by = a.start.y - pad;
+                p.x >= bx && p.x <= bx + bw && p.y >= by && p.y <= by + bh
+            } else {
+                false
+            };
+
+            if in_box {
+                self.text_dragging = true;
+                if let Some(a) = self.annotations.get(idx) {
+                    self.text_drag_offset = Point::new(p.x - a.start.x, p.y - a.start.y);
+                }
+                eprintln!("[mbs-child] Text drag started, offset=({:.0},{:.0})", self.text_drag_offset.x, self.text_drag_offset.y);
+                return;
+            }
+
+            // Click outside → commit current text and start new
+            if let Some(a) = self.annotations.get(idx) {
+                if a.text.trim().is_empty() {
+                    self.annotations.remove(idx);
+                }
+            }
+            self.text_editing = None;
+            self.text_buffer.clear();
+            self.text_edit_original = None;
+        }
+
+        // Text tool doesn't use drag; it opens a multiline editor at the click position
+        if self.tool == Tool::Text {
+            eprintln!("[mbs-child] Text tool pressed at ({:.0},{:.0})", p.x, p.y);
+                        // Hit-test existing text annotations (newest first = topmost)
+            for idx in (0..self.annotations.len()).rev() {
+                let a = &self.annotations[idx];
+                if a.tool != Tool::Text { continue; }
+                let font_size = a.font_size.max(10.0);
+                let line_height = font_size * 1.2;
+                let max_chars = a.text.lines().map(|l| l.chars().count()).max().unwrap_or(0).max(4);
+                let pad = 24.0;
+                let bw = (max_chars as f32 * font_size * 0.55) + pad * 2.0;
+                let bh = (a.text.lines().count() as f32).max(1.0) * line_height + pad * 2.0;
+                let bx = a.start.x - pad;
+                let by = a.start.y - pad;
+                if p.x >= bx && p.x <= bx + bw && p.y >= by && p.y <= by + bh {
+                    eprintln!("[mbs-child] Resuming text annotation idx={}", idx);
+                    self.text_buffer = a.text.clone();
+                    self.text_font_size = a.font_size;
+                    self.text_edit_original = Some(a.text.clone());
+                    self.text_editing = Some(idx);
+                    return;
+                }
+            }
+
+            // No existing hit — start a new text annotation
+            self.text_edit_original = None;
+            self.text_buffer = String::new();
+            self.text_font_size = 20.0;
+            let idx = self.annotations.len();
+            self.annotations.push(Annotation {
+                tool: Tool::Text,
+                start: p, end: p,
+                points: Vec::new(),
+                color: self.color, width: self.stroke_width,
+                number: 0,
+                text: String::new(),
+                font_size: self.text_font_size,
+            });
+            self.text_buffer = String::new();
+            self.text_font_size = 20.0;
+            self.text_editing = Some(idx);
+            eprintln!("[mbs-child] Text editing started, idx={}", idx);
+            return;
+        }
+        
         self.drawing = true;
+        let counter_num = self.annotations.iter().filter(|a| a.tool == Tool::Counter).count() as u32 + 1;
         self.in_progress = Some(Annotation {
             tool: self.tool, start: p, end: p,
             points: if self.tool == Tool::Pen { vec![p] } else { Vec::new() },
             color: self.color, width: self.stroke_width,
+            number: if self.tool == Tool::Counter { counter_num } else { 0 },
+            text: String::new(),
+            font_size: 0.0, // only used by Text tool
         });
     }
     fn on_move(&mut self, p: Point) {
+        if self.text_dragging {
+            if let Some(idx) = self.text_editing {
+                if let Some(a) = self.annotations.get_mut(idx) {
+                    a.start = Point::new(p.x - self.text_drag_offset.x, p.y - self.text_drag_offset.y);
+                }
+            }
+            return;
+        }
         if !self.drawing { return; }
-        if let Some(ref mut a) = self.in_progress {
-            if a.tool == Tool::Pen { a.points.push(p); } else { a.end = p; }
+        if let Some(ref mut ann) = self.in_progress {
+            if ann.tool == Tool::Pen {
+                ann.points.push(p); // Accumulate points for pen
+            } else {
+                ann.end = p; // Update end point for shapes
+            }
         }
     }
     fn on_release(&mut self, p: Point) {
+        if self.text_dragging {
+            self.text_dragging = false;
+            return;
+        }
         eprintln!("[mbs-child] on_release ({:.0},{:.0}) in_progress={}", p.x, p.y, self.in_progress.is_some());
         eprintln!("[mbs-child] on_release at ({:.0},{:.0}) — in_progress={}",
             p.x, p.y, self.in_progress.is_some());
@@ -161,6 +357,7 @@ impl AnnotatorOverlay {
             if a.tool != Tool::Pen { a.end = p; }
             let ok = match a.tool {
                 Tool::Pen => a.points.len() > 2,
+                Tool::Counter => true, // single-click is valid for counters
                 _ => (a.end.x - a.start.x).abs() > 0.5 || (a.end.y - a.start.y).abs() > 0.5,
             };
             if ok {
@@ -207,6 +404,8 @@ impl AnnotatorOverlay {
             annotations: if self.reveal_mode { Vec::new() } else { self.annotations.clone() },
             in_progress: if self.reveal_mode { None } else { self.in_progress.clone() },
             reveal_mode: self.reveal_mode,
+            text_editing: self.text_editing.is_some(),
+            editing_idx: self.text_editing,
         })
         .width(Length::Fill)
         .height(Length::Fill);
@@ -335,6 +534,15 @@ impl AnnotatorOverlay {
                 })
         };
 
+        let mut font_controls = Row::new().spacing(6).align_y(Alignment::Center);
+        if self.text_editing.is_some() {
+            font_controls = font_controls
+                .push(text(" | Font:").size(13).color(Color::WHITE))
+                .push(button(text("-").size(16)).on_press(AnnotatorMessage::FontSizeDown).padding([2, 8]))
+                .push(text(format!("{:.0}px", self.text_font_size)).size(14).color(Color::WHITE).width(Length::Fixed(45.0)))
+                .push(button(text("+").size(16)).on_press(AnnotatorMessage::FontSizeUp).padding([2, 8]));
+        }
+
         let toolbar = container(
             Column::new()
                 .push(Row::new()
@@ -342,6 +550,7 @@ impl AnnotatorOverlay {
                     .push(tool_row)
                     .push(text(" ").size(13))
                     .push(color_row)
+                    .push(font_controls) // <-- Added font controls here
                     .spacing(10).align_y(Alignment::Center))
                 .push(Row::new()
                     .push(text("Watermark:").size(13).color(Color::WHITE))
@@ -360,21 +569,26 @@ impl AnnotatorOverlay {
             ..Default::default()
         });
 
-        let status_bar = container(
-            text(self.status.clone()).size(12).color(Color::from_rgb(0.7, 0.7, 0.75))
-        )
-        .width(Length::Fill)
-        .padding([6, 14])
-        .style(|_t| container::Style {
-            background: Some(iced::Background::Color(Color::from_rgb(0.05, 0.05, 0.08))),
-            ..Default::default()
-        });
+        let status_bar = if self.text_editing.is_some() {
+            let hint = format!("[TEXT MODE] Drag the box to reposition · F2=place · Esc=cancel · [ ]=font ({:.0}px)", self.text_font_size);
+            container(text(hint).size(12).color(Color::WHITE))
+                .width(Length::Fill)
+                .padding([6, 14])
+                .style(|_t| container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgb(0.2, 0.2, 0.25))),
+                    ..Default::default()
+                })
+        } else {
+            container(text(self.status.clone()).size(12).color(Color::from_rgb(0.7, 0.7, 0.75)))
+                .width(Length::Fill)
+                .padding([6, 14])
+                .style(|_t| container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgb(0.05, 0.05, 0.08))),
+                    ..Default::default()
+                })
+        };
 
-        Column::new()
-            .push(toolbar)
-            .push(canvas_stack)
-            .push(status_bar)
-            .into()
+        Column::new().push(toolbar).push(canvas_stack).push(status_bar).into()
     }
 }
 
@@ -388,6 +602,8 @@ struct OverlayCanvas {
     annotations: Vec<Annotation>,
     in_progress: Option<Annotation>,
     reveal_mode: bool,
+    text_editing: bool,
+    editing_idx: Option<usize>,
 }
 
 fn compute_display_rect(bounds: Rectangle, image: Size) -> Option<Rectangle> {
@@ -414,11 +630,32 @@ impl canvas::Program<AnnotatorMessage> for OverlayCanvas {
             if !self.reveal_mode {
                 let scale = dr.width / self.image_size.width;
                 let to_disp = |p: Point| Point::new(dr.x + p.x * scale, dr.y + p.y * scale);
-                for ann in &self.annotations {
-                    draw_ann(&mut frame, ann, &to_disp, scale);
+                let redacts: Vec<(usize, Point, Point)> = self.annotations.iter()
+                    .enumerate()
+                    .filter(|(_, a)| a.tool == Tool::Redact)
+                    .map(|(i, a)| (i, to_disp(a.start), to_disp(a.end)))
+                    .collect();
+                for (idx, ann) in self.annotations.iter().enumerate() {
+                    draw_ann(&mut frame, ann, &to_disp, scale, &redacts, idx);
+                    if self.editing_idx == Some(idx) && ann.tool == Tool::Text {
+                        let p = to_disp(ann.start);
+                        let font_size = (ann.font_size * scale).max(8.0);
+                        let line_height = font_size * 1.2;
+                        let max_chars = ann.text.lines().map(|l| l.chars().count()).max().unwrap_or(1);
+                        let est_w = max_chars as f32 * font_size * 0.55 + 12.0;
+                        let est_h = (ann.text.lines().count() as f32).max(1.0) * line_height + 8.0;
+                        let bx = p.x - 6.0;
+                        let by = p.y - 4.0;
+                        let bc = Color::from_rgba(1.0, 1.0, 1.0, 0.6);
+                        let sw = 1.5;
+                        frame.fill_rectangle(Point::new(bx, by), Size::new(est_w, sw), bc);
+                        frame.fill_rectangle(Point::new(bx, by + est_h - sw), Size::new(est_w, sw), bc);
+                        frame.fill_rectangle(Point::new(bx, by), Size::new(sw, est_h), bc);
+                        frame.fill_rectangle(Point::new(bx + est_w - sw, by), Size::new(sw, est_h), bc);
+                    }
                 }
                 if let Some(a) = &self.in_progress {
-                    draw_ann(&mut frame, a, &to_disp, scale);
+                    draw_ann(&mut frame, a, &to_disp, scale, &redacts, self.annotations.len());
                 }
             }
         }
@@ -483,22 +720,31 @@ impl canvas::Program<AnnotatorMessage> for OverlayCanvas {
     }
 }
 
-fn draw_ann<F: Fn(Point) -> Point>(frame: &mut Frame, a: &Annotation, to_disp: &F, scale: f32) {
+fn draw_ann<F: Fn(Point) -> Point>(frame: &mut Frame, a: &Annotation, to_disp: &F, scale: f32, redacts: &[(usize, Point, Point)], ann_idx: usize) {
     let sp = to_disp;
     let sw = (a.width * scale).max(3.0);
     let r = a.color;
+
+    // Skip text/counter if a LATER redact covers its position.
+    // (Text always renders on top of shapes in iced — so we manually
+    //  hide it if a redact drawn afterward would have covered it.)
+    if matches!(a.tool, Tool::Counter | Tool::Text) {
+        let p = sp(a.start);
+        let covered = redacts.iter().any(|&(ridx, ra, rb)| {
+            ridx > ann_idx
+                && p.x >= ra.x.min(rb.x) && p.x <= ra.x.max(rb.x)
+                && p.y >= ra.y.min(rb.y) && p.y <= ra.y.max(rb.y)
+        });
+        if covered { return; }
+    }
+
     match a.tool {
         Tool::Rect => {
             let p1 = sp(a.start); let p2 = sp(a.end);
             let x = p1.x.min(p2.x); let y = p1.y.min(p2.y);
             let w = (p2.x - p1.x).abs().max(6.0);
             let h = (p2.y - p1.y).abs().max(6.0);
-            eprintln!("[mbs-child] RECT pixel=({:.0},{:.0}) {:.0}x{:.0} rgba=({:.2},{:.2},{:.2},{:.2})",
-                x, y, w, h, r.r, r.g, r.b, r.a);
-            // Solid fill
-            frame.fill_rectangle(Point::new(x, y), Size::new(w, h),
-                Color::from_rgba(r.r, r.g, r.b, 0.55));
-            // Border
+            frame.fill_rectangle(Point::new(x, y), Size::new(w, h), Color::from_rgba(r.r, r.g, r.b, 0.55));
             frame.fill_rectangle(Point::new(x, y), Size::new(w, sw), r);
             frame.fill_rectangle(Point::new(x, y + h - sw), Size::new(w, sw), r);
             frame.fill_rectangle(Point::new(x, y), Size::new(sw, h), r);
@@ -509,37 +755,105 @@ fn draw_ann<F: Fn(Point) -> Point>(frame: &mut Frame, a: &Annotation, to_disp: &
             let x = p1.x.min(p2.x); let y = p1.y.min(p2.y);
             let w = (p2.x - p1.x).abs().max(4.0);
             let h = (p2.y - p1.y).abs().max(4.0);
+            frame.fill_rectangle(Point::new(x, y), Size::new(w, h), Color::from_rgb(0.0, 0.0, 0.0));
+        }
+        Tool::Redact => {
+            let p1 = sp(a.start); let p2 = sp(a.end);
+            let x = p1.x.min(p2.x); let y = p1.y.min(p2.y);
+            let w = (p2.x - p1.x).abs().max(4.0);
+            let h = (p2.y - p1.y).abs().max(4.0);
+            // Draw redact as a massive black block. It covers other shapes.
             frame.fill_rectangle(Point::new(x, y), Size::new(w, h), Color::BLACK);
         }
         Tool::Arrow => {
             let p1 = sp(a.start); let p2 = sp(a.end);
             let dx = p2.x - p1.x; let dy = p2.y - p1.y;
-            let len = (dx * dx + dy * dy).sqrt();
-            if len < 1.0 { return; }
-            let steps = (len / 2.0).ceil() as i32;
-            for step in 0..=steps {
-                let f = step as f32 / steps as f32;
-                frame.fill_rectangle(
-                    Point::new(p1.x + dx * f - sw / 2.0, p1.y + dy * f - sw / 2.0),
-                    Size::new(sw, sw),
-                    r,
-                );
+            let ang = dy.atan2(dx);
+            let hl = (sw * 4.0).max(14.0);
+            let spread = 0.45;
+
+            // Arrow shaft (stops slightly before the tip)
+            let body_path = canvas::Path::new(|b| {
+                b.move_to(p1);
+                let bx = p2.x - hl * 0.6 * ang.cos();
+                let by = p2.y - hl * 0.6 * ang.sin();
+                b.line_to(Point::new(bx, by));
+            });
+            frame.stroke(&body_path, canvas::Stroke::default().with_color(r).with_width(sw).with_line_cap(canvas::LineCap::Round));
+
+            // Arrow head (triangle)
+            let head_path = canvas::Path::new(|b| {
+                b.move_to(p2);
+                b.line_to(Point::new(p2.x - hl * (ang - spread).cos(), p2.y - hl * (ang - spread).sin()));
+                b.line_to(Point::new(p2.x - hl * (ang + spread).cos(), p2.y - hl * (ang + spread).sin()));
+                b.close();
+            });
+            frame.fill(&head_path, r);
+        }
+        Tool::Text => {
+            if a.text.is_empty() { return; }
+            let p = sp(a.start);
+            let font_size = (a.font_size * scale).max(8.0);
+            let line_height = font_size * 1.2;
+            for (i, line) in a.text.lines().enumerate() {
+                frame.fill_text(canvas::Text {
+                    content: line.to_string(),
+                    position: Point::new(p.x, p.y + i as f32 * line_height),
+                    color: r,
+                    size: iced::Pixels(font_size),
+                    ..canvas::Text::default()
+                });
             }
-            let hs = sw * 3.0;
-            frame.fill_rectangle(Point::new(p2.x - hs / 2.0, p2.y - hs / 2.0),
-                Size::new(hs, hs), r);
+        }
+        Tool::Counter => {
+
+            let p = sp(a.start);
+            let radius = (sw * 3.0).max(14.0);
+            let path = canvas::Path::new(|b| {
+                b.circle(p, radius);
+            });
+            frame.fill(&path, r);
+            frame.stroke(&path, canvas::Stroke::default().with_color(Color::WHITE).with_width(2.5));
+
+            frame.fill_text(canvas::Text {
+                content: a.number.to_string(),
+                position: p, // Center of the circle
+                color: Color::WHITE,
+                size: iced::Pixels(radius * 1.2),
+                horizontal_alignment: iced::alignment::Horizontal::Center,
+                vertical_alignment: iced::alignment::Vertical::Center,
+                ..canvas::Text::default()
+            });
+        }        Tool::Ellipse => {
+            let p1 = sp(a.start); let p2 = sp(a.end);
+            let cx = (p1.x + p2.x) / 2.0;
+            let cy = (p1.y + p2.y) / 2.0;
+            let rx = ((p2.x - p1.x).abs() / 2.0).max(3.0);
+            let ry = ((p2.y - p1.y).abs() / 2.0).max(3.0);
+            let segments = 32;
+            let path = canvas::Path::new(|b| {
+                for i in 0..=segments {
+                    let theta = (i as f32 / segments as f32) * std::f32::consts::TAU;
+                    let x = cx + rx * theta.cos();
+                    let y = cy + ry * theta.sin();
+                    if i == 0 { b.move_to(Point::new(x, y)); }
+                    else { b.line_to(Point::new(x, y)); }
+                }
+            });
+            frame.stroke(&path, canvas::Stroke::default().with_color(r).with_width(sw));
         }
         Tool::Pen => {
             if a.points.len() < 2 { return; }
-            for p in &a.points {
-                let dp = sp(*p);
-                frame.fill_rectangle(
-                    Point::new(dp.x - sw / 2.0, dp.y - sw / 2.0),
-                    Size::new(sw, sw),
-                    r,
-                );
-            }
+            let path = canvas::Path::new(|b| {
+                b.move_to(sp(a.points[0]));
+                for p in &a.points[1..] {
+                    b.line_to(sp(*p));
+                }
+            });
+            frame.stroke(&path, canvas::Stroke::default().with_color(r).with_width(sw));
         }
+
+
     }
 }
 
@@ -563,8 +877,36 @@ pub fn magick_or_convert() -> Option<&'static str> {
     else { None }
 }
 
+fn find_annotation_font() -> Option<String> {
+    // Try fc-match first (works on NixOS, Arch, Debian, etc.)
+    if let Ok(out) = std::process::Command::new("fc-match")
+        .args(["-f", "%{file}", "sans-serif:bold"])
+        .output()
+    {
+        if out.status.success() {
+            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !path.is_empty() && std::path::Path::new(&path).exists() {
+                return Some(path);
+            }
+        }
+    }
+    // Fallback: check common font paths
+    for p in [
+        "/run/current-system/sw/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/run/current-system/sw/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    ] {
+        if std::path::Path::new(p).exists() {
+            return Some(p.to_string());
+        }
+    }
+    None
+}
+
 pub fn compose_annotations(source: &Path, annotations: &[Annotation], out: &Path) -> Result<(), String> {
     let Some(bin) = magick_or_convert() else { return Err("ImageMagick not installed".into()); };
+    let font_path = find_annotation_font();
     let mut args: Vec<String> = vec![source.to_str().unwrap_or("").into()];
     let color_arg = |c: Color| format!("rgba({},{},{},{})",
         (c.r*255.0) as u8, (c.g*255.0) as u8, (c.b*255.0) as u8, c.a);
@@ -608,6 +950,57 @@ pub fn compose_annotations(source: &Path, annotations: &[Annotation], out: &Path
                 args.extend(["-fill".into(), color_arg(a.color), "-stroke".into(), "none".into(),
                     "-draw".into(), format!("polygon {},{} {},{} {},{}", x2, y2, p1x, p1y, p2x, p2y)]);
             }
+            Tool::Text => {
+                if a.text.is_empty() { continue; }
+                if let Some(ref fp) = font_path {
+                    args.extend(["-font".into(), fp.clone()]);
+                }
+                args.extend([
+                    "-fill".into(), color_arg(a.color),
+                    "-stroke".into(), "none".into(),
+                    "-pointsize".into(), format!("{}", a.font_size as i32),
+                    "-gravity".into(), "NorthWest".into(),
+                    "-annotate".into(), format!("+{}+{}", a.start.x as i32, a.start.y as i32),
+                    a.text.clone(),
+                ]);
+            }
+            Tool::Counter => {
+                let (x, y) = (a.start.x as i32, a.start.y as i32);
+                let r = (a.width * 3.0).max(14.0) as i32;
+                args.extend([
+                    "-fill".into(), color_arg(a.color),
+                    "-stroke".into(), "white".into(),
+                    "-strokewidth".into(), "2".into(),
+                    "-draw".into(), format!("circle {},{} {},{}", x, y, x + r, y),
+                ]);
+                let font_size = (r as f32 * 1.2).max(12.0);
+                let text = a.number.to_string();
+                let char_offset_x = (text.len() as f32 * font_size * 0.25) as i32;
+                let char_offset_y = (font_size * 0.4) as i32;
+                if let Some(ref fp) = font_path {
+                    args.extend(["-font".into(), fp.clone()]);
+                }
+                args.extend([
+                    "-fill".into(), "white".into(),
+                    "-stroke".into(), "none".into(),
+                    "-pointsize".into(), format!("{}", font_size as i32),
+                    "-gravity".into(), "NorthWest".into(),
+                    "-annotate".into(), format!("+{}+{}", x - char_offset_x, y - char_offset_y),
+                    text,
+                ]);
+            }
+            Tool::Ellipse => {
+                let (x1, y1) = (a.start.x as i32, a.start.y as i32);
+                let (x2, y2) = (a.end.x as i32, a.end.y as i32);
+                let (lx, ty) = (x1.min(x2), y1.min(y2));
+                let (rx, by) = (x1.max(x2), y1.max(y2));
+                args.extend([
+                    "-stroke".into(), color_arg(a.color),
+                    "-strokewidth".into(), format!("{}", a.width as i32),
+                    "-fill".into(), "none".into(),
+                    "-draw".into(), format!("ellipse {},{} {},{} 0,360", (lx+rx)/2, (ty+by)/2, (rx-lx)/2, (by-ty)/2),
+                ]);
+            }
             Tool::Pen => {
                 if a.points.len() < 2 { continue; }
                 let pts: Vec<String> = a.points.iter()
@@ -619,7 +1012,8 @@ pub fn compose_annotations(source: &Path, annotations: &[Annotation], out: &Path
                     "-draw".into(), format!("polyline {}", pts.join(" ")),
                 ]);
             }
-        }
+                _ => {},
+            }
     }
     args.push(out.to_str().unwrap_or("").into());
     let ok = std::process::Command::new(bin).args(&args).status()
@@ -653,13 +1047,20 @@ pub fn save_annotated_image(
 
     let mut produced = Vec::new();
     
+    let date_str = chrono::Local::now().format("%Y-%m-%d").to_string();
     let names: Vec<String> = watermark
         .as_deref()
         .unwrap_or("")
         .split(',')
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
+        .map(|s| {
+            if !s.contains(&date_str) {
+                format!("{} {}", s, date_str)
+            } else {
+                s.to_string()
+            }
+        })
         .collect();
 
     let final_names = if names.is_empty() {
@@ -671,7 +1072,7 @@ pub fn save_annotated_image(
     for (i, name) in final_names.iter().enumerate() {
         // Stagger multiple saves so cliphist/wl-copy have time to register them
         if i > 0 {
-            std::thread::sleep(std::time::Duration::from_millis(25));
+            std::thread::sleep(std::time::Duration::from_millis(5));
         }
 
         let safe_name: String = name.chars()

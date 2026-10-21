@@ -9,6 +9,7 @@ use moon_beauty_shell::bar::{CapsuleAction, TopBar, TopBarMessage};
 use moon_beauty_shell::config::{ShellSettings, ShellTheme};
 use moon_beauty_shell::ipc::{send_client_command, send_annotator_show, IpcCommand, OverlayTarget};
 use moon_beauty_shell::overlays::*;
+use moon_beauty_shell::overlays::annotator::Tool;
 
 mod screenshot;
 
@@ -342,7 +343,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         let _ = std::process::Command::new("pkill")
             .args(["-f", "--", "moon-beauty-shell --notif-surface"])
             .status();
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(300));
         let exe = resolve_exe();
         let _ = std::process::Command::new(exe).arg("--notif-surface").spawn();
     }
@@ -389,6 +390,16 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
             layer: Layer::Overlay,
             keyboard_interactivity: KeyboardInteractivity::Exclusive,
+            binded_output_name,
+            ..Default::default()
+        }
+    } else if standalone_target.as_ref() == Some(&OverlayTarget::Annotator) {
+        LayerShellSettings {
+            size: Some((1600, 1000)),
+            exclusive_zone: -1,
+            anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
+            layer: Layer::Overlay,
+            keyboard_interactivity: KeyboardInteractivity::OnDemand,
             binded_output_name,
             ..Default::default()
         }
@@ -1073,6 +1084,52 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 }
                 return Command::none();
             }
+            ClipboardMessage::RunOcr(id) => {
+                eprintln!("[ocr] RunOcr triggered for id {}", id);
+                let is_img = self.clipboard.entries.iter().find(|e| e.id == id).map(|e| e.is_image).unwrap_or(false);
+                eprintln!("[ocr] entry found, is_image={}", is_img);
+                let tmp_path = std::env::temp_dir().join(format!("mbs-ocr-{}.png", id));
+                
+                // Do OCR synchronously — it's fast (~1s) and we're about to close anyway
+                if let Ok(out) = std::process::Command::new("cliphist")
+                    .args(["decode", &id.to_string()])
+                    .output()
+                {
+                    if !out.stdout.is_empty() && std::fs::write(&tmp_path, &out.stdout).is_ok() {
+                        // Clear LD_LIBRARY_PATH so tesseract uses its own
+                        // nix-store glibc (2.43) instead of the system glibc (2.42).
+                        // This prevents the 5.5.2-binary / 5.5.3-library mismatch.
+                        let tess_out = std::process::Command::new("tesseract")
+                            .args([tmp_path.to_str().unwrap(), "stdout"])
+                            .env_remove("LD_LIBRARY_PATH")
+                            .output();
+
+                        if let Ok(tess_out) = tess_out {
+                            let text = String::from_utf8_lossy(&tess_out.stdout).trim().to_string();
+                            if !text.is_empty() {
+                                eprintln!("[ocr] {} chars extracted", text.len());
+                                if let Ok(mut child) = std::process::Command::new("wl-copy")
+                                    .stdin(std::process::Stdio::piped())
+                                    .spawn()
+                                {
+                                    use std::io::Write;
+                                    if let Some(mut stdin) = child.stdin.take() {
+                                        let _ = stdin.write_all(text.as_bytes());
+                                    }
+                                    let _ = child.wait();
+                                }
+                            } else {
+                                eprintln!("[ocr] no text found — stderr: {}", String::from_utf8_lossy(&tess_out.stderr));
+                            }
+                        }
+                    }
+                }
+                let _ = std::fs::remove_file(&tmp_path);
+                
+                if self.is_standalone { std::process::exit(0); }
+                self.active_overlay = None;
+                return Command::none();
+            }
             ClipboardMessage::CopySelected => {
                 if let Some(id) = self.clipboard.selected_id {
                     if let Ok(out) = std::process::Command::new("cliphist").args(["decode", &id.to_string()]).output() {
@@ -1190,7 +1247,9 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 }
                 _ => self.web.update(msg),
             },
-            Message::Annotator(msg) => match msg {
+            Message::Annotator(msg) => {
+                let is_text_press = matches!(msg, AnnotatorMessage::Pressed(_)) && self.annotator.tool == Tool::Text;
+                match msg {
                 AnnotatorMessage::ToggleReveal => {
                     self.annotator.reveal_mode = !self.annotator.reveal_mode;
                     if !self.annotator.reveal_mode {
@@ -1218,6 +1277,75 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                     }
                 }
                 AnnotatorMessage::Save => {
+                if self.annotator.reveal_mode {
+                    if let Some(bytes) = self.annotator.reveal_bytes.clone() {
+                        let save_dir = dirs::picture_dir()
+                            .or_else(|| dirs::home_dir().map(|h| h.join("Pictures")))
+                            .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+                            .join("Screenshots");
+                        let _ = std::fs::create_dir_all(&save_dir);
+                        let time_str = chrono::Local::now().format("%Y-%m-%d %H-%M").to_string();
+                        let out = save_dir.join(format!("Revealed {}.png", time_str));
+                        
+                        match std::fs::write(&out, &bytes) {
+                            Ok(_) => {
+                                eprintln!("[annotator] saved revealed proof -> {:?}", out);
+
+                                // Copy the revealed image to clipboard and map its name
+                                if let Ok(mut child) = std::process::Command::new("wl-copy")
+                                    .args(["-t", "image/png"])
+                                    .stdin(std::process::Stdio::piped())
+                                    .spawn()
+                                {
+                                    use std::io::Write;
+                                    if let Some(mut stdin) = child.stdin.take() {
+                                        let _ = stdin.write_all(&bytes);
+                                    }
+                                    let _ = child.wait();
+
+                                    let cache_dir = dirs::cache_dir().unwrap_or_else(|| std::env::temp_dir());
+                                    let map_path = cache_dir.join("mbs-clip-names.txt");
+                                    let filename = out.file_name().unwrap_or_default().to_string_lossy().to_string();
+
+                                    let mut existing_clip_ids = std::collections::HashSet::new();
+                                    if let Ok(list_out) = std::process::Command::new("cliphist").args(["list"]).output() {
+                                        for line in String::from_utf8_lossy(&list_out.stdout).lines() {
+                                            if let Some((id_str, _)) = line.split_once('\t') {
+                                                if let Ok(id) = id_str.parse::<u64>() { existing_clip_ids.insert(id); }
+                                            }
+                                        }
+                                    }
+
+                                    for _ in 0..20 {
+                                        std::thread::sleep(std::time::Duration::from_millis(50));
+                                        if let Ok(list_out) = std::process::Command::new("cliphist").args(["list"]).output() {
+                                            let text = String::from_utf8_lossy(&list_out.stdout);
+                                            for line in text.lines() {
+                                                if let Some((id_str, _)) = line.split_once('\t') {
+                                                    if let Ok(id) = id_str.trim().parse::<u64>() {
+                                                        if !existing_clip_ids.contains(&id) {
+                                                            let entry = format!("{}\t{}\n", id, filename);
+                                                            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&map_path) {
+                                                                let _ = f.write_all(entry.as_bytes());
+                                                            }
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if self.is_standalone { std::process::exit(0); }
+                                self.active_overlay = None;
+                            }
+                            Err(e) => self.annotator.status = format!("Reveal save failed: {e}"),
+                        }
+                    } else {
+                        self.annotator.status = "Reveal not ready".into();
+                    }
+                } else {
                     let source = self.annotator.source_path.clone();
                     let annotations = self.annotator.annotations.clone();
                     let watermark = if self.annotator.watermark_input.is_empty() {
@@ -1237,12 +1365,18 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                         None => self.annotator.status = "Save failed: no source image".into(),
                     }
                 }
+                
+            }
                 AnnotatorMessage::Cancel => {
                     if self.is_standalone { std::process::exit(0); }
                     self.active_overlay = None;
                 }
                 AnnotatorMessage::Saved(_) | AnnotatorMessage::RevealLoaded(_) => {}
                 other => self.annotator.update(other),
+                }
+                if is_text_press {
+                    return iced::window::get_latest().and_then(iced::window::gain_focus);
+                }
             }
             Message::Amogus(msg) => match msg {
                 AmogusMessage::Dismiss => {
@@ -1356,16 +1490,79 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             iced::Subscription::none()
         };
 
-        let esc_sub = iced::keyboard::on_key_press(|key, _modifiers| {
-            if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
-                Some(Message::DismissActiveOverlay)
-            } else {
-                None
-            }
-        });
+        let text_typing_sub = if self.annotator.text_editing.is_some() {
+            iced::keyboard::on_key_press(|key, _mods| {
+                eprintln!("[debug-keys] received: {:?}", key);
+                match key {
+                iced::keyboard::Key::Character(c) => {
+                    match c.as_str() {
+                        "[" => Some(Message::Annotator(AnnotatorMessage::FontSizeDown)),
+                        "]" => Some(Message::Annotator(AnnotatorMessage::FontSizeUp)),
+                        _ => Some(Message::Annotator(AnnotatorMessage::CharacterInput(c.to_string()))),
+                    }
+                }
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::Space) => {
+                    Some(Message::Annotator(AnnotatorMessage::CharacterInput(" ".into())))
+                }
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => {
+                    Some(Message::Annotator(AnnotatorMessage::BackspacePressed))
+                }
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
+                    if _mods.control() {
+                        Some(Message::Annotator(AnnotatorMessage::NewLinePressed))
+                    } else {
+                        Some(Message::Annotator(AnnotatorMessage::ConfirmText))
+                    }
+                }
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::F2) => {
+                    Some(Message::Annotator(AnnotatorMessage::ConfirmText))
+                }
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
+                    Some(Message::Annotator(AnnotatorMessage::CancelText))
+                }
+                _ => None,
+                }
+            })
+        } else {
+            iced::Subscription::none()
+        };
+
+        let esc_sub = if self.annotator.text_editing.is_some() {
+            iced::keyboard::on_key_press(|key, _mods| match key {
+                iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
+                    Some(Message::Annotator(AnnotatorMessage::CancelText))
+                }
+                _ => None,
+            })
+        } else {
+            iced::keyboard::on_key_press(|key, _modifiers| {
+                if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
+                    Some(Message::DismissActiveOverlay)
+                } else {
+                    None
+                }
+            })
+        };
 
         // Enter → save when annotator overlay is active.
-        let enter_sub = if matches!(self.active_overlay, Some(OverlayTarget::Annotator)) {
+        let annotator_sub = if matches!(self.active_overlay, Some(OverlayTarget::Annotator)) && self.annotator.text_editing.is_none() {
+            iced::keyboard::on_key_press(|key, _mods| match key {
+                iced::keyboard::Key::Character(c) => match c.as_str() {
+                    "r" | "R" => Some(Message::Annotator(AnnotatorMessage::SetTool(Tool::Rect))),
+                    "o" | "O" | "c" | "C" => Some(Message::Annotator(AnnotatorMessage::SetTool(Tool::Ellipse))),
+                    "a" | "A" => Some(Message::Annotator(AnnotatorMessage::SetTool(Tool::Arrow))),
+                    "p" | "P" => Some(Message::Annotator(AnnotatorMessage::SetTool(Tool::Pen))),
+                    "t" | "T" => Some(Message::Annotator(AnnotatorMessage::SetTool(Tool::Text))),
+                    "n" | "N" => Some(Message::Annotator(AnnotatorMessage::SetTool(Tool::Counter))),
+                    _ => None,
+                },
+                _ => None,
+            })
+        } else {
+            iced::Subscription::none()
+        };
+
+        let enter_sub = if matches!(self.active_overlay, Some(OverlayTarget::Annotator)) && self.annotator.text_editing.is_none() {
             iced::keyboard::on_key_press(|key, _mods| match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
                     Some(Message::Annotator(AnnotatorMessage::Save))
@@ -1395,7 +1592,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
         let resize_sub = iced::window::resize_events()
             .map(|(_id, size)| Message::WindowResized(size.width));
         iced::Subscription::batch(vec![clock_sub, toast_sub, hw_sub, esc_sub,
-            enter_sub, ipc_sub, notif_sub, resize_sub, clip_sub])
+            enter_sub, ipc_sub, notif_sub, resize_sub, clip_sub, annotator_sub, text_typing_sub])
     }
 
     fn view(&self) -> Element<'_, Message> {
