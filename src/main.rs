@@ -488,11 +488,51 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         let _ = std::process::Command::new(exe).arg("--notif-surface").spawn();
     }
 
-    let binded_output_name = if settings.notif_screen_name != "Auto" && settings.notif_screen_name != "Auto (Primary)" && !settings.notif_screen_name.is_empty() {
+    let resolved_output: Option<String> = if settings.notif_screen_name != "Auto"
+        && settings.notif_screen_name != "Auto (Primary)"
+        && !settings.notif_screen_name.is_empty()
+    {
         Some(settings.notif_screen_name.clone())
     } else {
-        None
+        // Resolve ONCE at startup. Prefer primary; fall back to focused.
+        let primary = std::process::Command::new("swaymsg")
+            .args(["-t", "get_outputs", "-r"]).output().ok()
+            .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
+            .and_then(|v| {
+                let arr = v.as_array()?;
+                for o in arr {
+                    if o.get("primary").and_then(|p| p.as_bool()) == Some(true) {
+                        return o.get("name").and_then(|n| n.as_str()).map(String::from);
+                    }
+                }
+                None
+            });
+        let focused = std::process::Command::new("swaymsg")
+            .args(["-t", "get_outputs", "-r"]).output().ok()
+            .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
+            .and_then(|v| {
+                let arr = v.as_array()?;
+                for o in arr {
+                    if o.get("focused").and_then(|f| f.as_bool()) == Some(true) {
+                        return o.get("name").and_then(|n| n.as_str()).map(String::from);
+                    }
+                }
+                None
+            });
+        primary.or(focused)
     };
+    // Only the top-level bar process resolves MBS_OUTPUT.
+    // Child processes (tooltips, notif-surface, standalone overlays) inherit
+    // it via std::process env, guaranteeing they all agree on the target output.
+    if std::env::var("MBS_OUTPUT").is_err() {
+        if let Some(ref name) = resolved_output {
+            std::env::set_var("MBS_OUTPUT", name);
+            eprintln!("[bar] resolved binded_output_name → {} (parent)", name);
+        }
+    } else {
+        eprintln!("[child] MBS_OUTPUT inherited → {:?}", std::env::var("MBS_OUTPUT"));
+    }
+    let binded_output_name = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
 
     if is_notif_surface {
         eprintln!("[notif-surface] startup binded_output_name={:?}", binded_output_name);
@@ -573,6 +613,13 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         match moon_beauty_shell::overlays::weather_tooltip::run() {
             Ok(()) => std::process::exit(0),
             Err(e) => { eprintln!("[weather-tooltip] {e}"); std::process::exit(1); }
+        }
+    }
+
+    if args.iter().any(|a| a == "--info-tooltip") {
+        match moon_beauty_shell::overlays::info_tooltip::run() {
+            Ok(()) => std::process::exit(0),
+            Err(e) => { eprintln!("[info-tooltip] {e}"); std::process::exit(1); }
         }
     }
 
@@ -1120,7 +1167,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                             eprintln!("[topbar-action] OpenOverlay: id = {:?}", id);
 
                             // 1. DROPDOWN TOOLTIPS (Alarm, CPU, GPU, RAM, Weather, Tray)
-                            if matches!(id.as_str(), "weather" | "cpu" | "gpu" | "ram" | "tray" | "alarm") {
+                            if matches!(id.as_str(), "weather" | "cpu" | "gpu" | "ram" | "tray" | "alarm" | "calendar" | "music" | "unified" | "net" | "custom") {
                                 // Toggle off if already open
                                 let running = self.weather_tooltip_child.as_mut()
                                     .and_then(|c| c.try_wait().ok())
@@ -1135,7 +1182,12 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                                 }
                                 self.weather_tooltip_child = None;
 
-                                let sw = get_screen_width();
+                                let target_output = if self.settings.notif_screen_name != "Auto"
+                                    && self.settings.notif_screen_name != "Auto (Primary)"
+                                    && !self.settings.notif_screen_name.is_empty() {
+                                    Some(self.settings.notif_screen_name.as_str())
+                                } else { None };
+                                let sw = get_screen_width_for(target_output);
                                 let cx = capsule_center_x(&self.settings, sw, &id);
                                 let exe = resolve_exe();
                                 let mut cmd = std::process::Command::new(&exe);
@@ -1146,6 +1198,8 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                                     cmd.arg("--weather-tooltip");
                                 } else if id == "tray" {
                                     cmd.arg("--tray-popup");
+                                } else if matches!(id.as_str(), "calendar" | "music" | "unified" | "net" | "custom") {
+                                    cmd.arg("--info-tooltip").env("MBS_INFO_MODE", &id);
                                 } else {
                                     cmd.arg("--sys-tooltip").env("MBS_SYS_TARGET", &id);
                                 }
@@ -1157,11 +1211,49 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                                 } else {
                                     "center"
                                 };
-                                cmd.env("MBS_CAPSULE_CX", cx.to_string())
+                                let in_left = self.settings.bar_left.contains(&id);
+                                let in_center = self.settings.bar_center.contains(&id);
+                                let in_right = self.settings.bar_right.contains(&id);
+                                let (slant_l, slant_r): (&str, &str) = match self.settings.slant_mode.as_str() {
+                                    "left" => ("L", "L"),
+                                    "right" => ("R", "R"),
+                                    _ => {
+                                        if in_center {
+                                            let vis: Vec<&String> = self.settings.bar_center.iter()
+                                                .filter(|x| self.settings.visible_capsules.get(*x).copied().unwrap_or(true)).collect();
+                                            let k = vis.len() / 2;
+                                            match vis.iter().position(|x| **x == id) {
+                                                Some(i) if i == k => ("L", "R"),
+                                                Some(i) if i < k => ("L", "L"),
+                                                Some(_) => ("R", "R"),
+                                                None => ("L", "R"),
+                                            }
+                                        } else if in_right {
+                                            ("R", "R")
+                                        } else {
+                                            ("L", "L")
+                                        }
+                                    }
+                                };
+                                let cap_w = capsule_actual_width(&id);
+                                eprintln!(
+                                    "[spawn] id={:?} cap_w={:.1} cx={} sw={} in_L={} in_R={} in_C={} slant_mode={:?}",
+                                    id, cap_w, cx, sw,
+                                    self.settings.bar_left.contains(&id),
+                                    self.settings.bar_right.contains(&id),
+                                    self.settings.bar_center.contains(&id),
+                                    self.settings.slant_mode
+                                );
+                                let grow_right = if in_left { true } else if in_right { false } else { cx < (sw as i32) / 2 };
+                                
+                                cmd.env("MBS_TOOLTIP_W", cap_w.max(380.0).to_string())
+                                   .env("MBS_CAPSULE_CX", cx.to_string())
+                                   .env("MBS_CAPSULE_W", cap_w.to_string())
                                    .env("MBS_SCREEN_W", sw.to_string())
-                                   .env("MBS_WX_SLANT", slant);
+                                   .env("MBS_SLANT_L", slant_l)
+                                   .env("MBS_SLANT_R", slant_r);
 
-                                eprintln!("[tooltip] Spawning {:?} {:?} (cx={}, sw={}, slant={})", exe, cmd.get_args().collect::<Vec<_>>(), cx, sw, slant);
+                                eprintln!("[tooltip] Spawning {:?} {:?} (cx={}, sw={}, sl={}, sr={})", exe, cmd.get_args().collect::<Vec<_>>(), cx, sw, slant_l, slant_r);
                                 match cmd.spawn() {
                                     Ok(c) => {
                                         eprintln!("[tooltip] Successfully spawned pid={}", c.id());
@@ -2024,40 +2116,113 @@ fn get_capsule_widths(s: &ShellSettings, list: &[String]) -> f32 {
         .sum()
 }
 
+fn capsule_actual_width(id: &str) -> f32 {
+    moon_beauty_shell::bar::capsules::lookup_width(id).unwrap_or_else(|| capsule_min_width(id))
+}
+
+fn row_width(items: &[&String], sp: f32) -> f32 {
+    let n = items.len();
+    items.iter().enumerate().map(|(i, id)| {
+        let w = capsule_actual_width(id.as_str());
+        if i + 1 < n { w + sp } else { w }
+    }).sum()
+}
+
+fn resolve_primary_output() -> Option<String> {
+    let out = std::process::Command::new("swaymsg")
+        .args(["-t", "get_outputs", "-r"]).output().ok()?;
+    if !out.status.success() { return None; }
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    let arr = v.as_array()?;
+    // Prefer the output marked "primary"
+    for o in arr {
+        if o.get("primary").and_then(|p| p.as_bool()) == Some(true) {
+            if let Some(name) = o.get("name").and_then(|n| n.as_str()) {
+                return Some(name.to_string());
+            }
+        }
+    }
+    // Fallback: focused
+    for o in arr {
+        if o.get("focused").and_then(|f| f.as_bool()) == Some(true) {
+            if let Some(name) = o.get("name").and_then(|n| n.as_str()) {
+                return Some(name.to_string());
+            }
+        }
+    }
+    None
+}
+
 fn capsule_center_x(s: &ShellSettings, sw: u32, target: &str) -> i32 {
     let sw_f = sw as f32;
     let sp = s.capsule_spacing as f32;
+    let pad = 16.0;
+
+    let visible = |id: &String| s.visible_capsules.get(id).copied().unwrap_or(true);
+    let left_items: Vec<&String> = s.bar_left.iter().filter(|id| visible(id)).collect();
+    let center_items: Vec<&String> = s.bar_center.iter().filter(|id| visible(id)).collect();
+    let right_items: Vec<&String> = s.bar_right.iter().filter(|id| visible(id)).collect();
 
     // 1. bar_left
-    let mut x = 16.0;
-    for id in &s.bar_left {
-        if !s.visible_capsules.get(id).copied().unwrap_or(true) { continue; }
-        let w = capsule_min_width(id);
-        if id == target { return (x + w / 2.0) as i32; }
-        x += w + sp;
+    let mut x = pad;
+    for (i, id) in left_items.iter().enumerate() {
+        let w = capsule_actual_width(id.as_str());
+        if id.as_str() == target { return (x + w / 2.0) as i32; }
+        x += w + if i + 1 < left_items.len() { sp } else { 0.0 };
     }
 
-    // 2. bar_center
-    let center_w = get_capsule_widths(s, &s.bar_center);
-    let mut x = (sw_f - center_w) / 2.0;
-    for id in &s.bar_center {
-        if !s.visible_capsules.get(id).copied().unwrap_or(true) { continue; }
-        let w = capsule_min_width(id);
-        if id == target { return (x + w / 2.0) as i32; }
-        x += w + sp;
+    // 2. bar_center — account for asymmetric left/right widths
+    let left_w = row_width(&left_items, sp);
+    let right_w = row_width(&right_items, sp);
+    let center_w = row_width(&center_items, sp);
+    let avail = sw_f - 2.0 * pad;
+    let fill_w = ((avail - left_w - center_w - right_w) / 2.0).max(0.0);
+    let mut x = pad + left_w + fill_w;
+    for (i, id) in center_items.iter().enumerate() {
+        let w = capsule_actual_width(id.as_str());
+        if id.as_str() == target { return (x + w / 2.0) as i32; }
+        x += w + if i + 1 < center_items.len() { sp } else { 0.0 };
     }
 
     // 3. bar_right
-    let right_w = get_capsule_widths(s, &s.bar_right);
-    let mut x = sw_f - 16.0 - right_w;
-    for id in &s.bar_right {
-        if !s.visible_capsules.get(id).copied().unwrap_or(true) { continue; }
-        let w = capsule_min_width(id);
-        if id == target { return (x + w / 2.0) as i32; }
-        x += w + sp;
+    let mut x = pad + avail - right_w;
+    for (i, id) in right_items.iter().enumerate() {
+        let w = capsule_actual_width(id.as_str());
+        if id.as_str() == target { return (x + w / 2.0) as i32; }
+        x += w + if i + 1 < right_items.len() { sp } else { 0.0 };
     }
 
     200
+}
+
+fn get_screen_width_for(output: Option<&str>) -> u32 {
+    if let Ok(o) = std::process::Command::new("swaymsg")
+        .args(["-t", "get_outputs", "-r"]).output()
+    {
+        if o.status.success() {
+            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&o.stdout) {
+                if let Some(arr) = v.as_array() {
+                    if let Some(name) = output {
+                        for out in arr {
+                            if out.get("name").and_then(|n| n.as_str()) == Some(name) {
+                                if let Some(w) = out.get("rect").and_then(|r| r.get("width")).and_then(|w| w.as_u64()) {
+                                    return if w > 0 { w as u32 } else { 1920 };
+                                }
+                            }
+                        }
+                    }
+                    for out in arr {
+                        if out.get("focused").and_then(|f| f.as_bool()) == Some(true) {
+                            if let Some(w) = out.get("rect").and_then(|r| r.get("width")).and_then(|w| w.as_u64()) {
+                                return if w > 0 { w as u32 } else { 1920 };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    1920
 }
 
 fn get_screen_width() -> u32 {
@@ -2073,7 +2238,7 @@ fn get_screen_width() -> u32 {
                                 .and_then(|r| r.get("width"))
                                 .and_then(|w| w.as_u64())
                             {
-                                return w as u32;
+                                return if w > 0 { w as u32 } else { 1920 };
                             }
                         }
                     }
@@ -2090,7 +2255,7 @@ fn get_screen_width() -> u32 {
                     for mon in arr {
                         if mon.get("focused").and_then(|f| f.as_bool()) == Some(true) {
                             if let Some(w) = mon.get("width").and_then(|w| w.as_u64()) {
-                                return w as u32;
+                                return if w > 0 { w as u32 } else { 1920 };
                             }
                         }
                     }

@@ -1,4 +1,5 @@
 use iced::widget::{button, container, text, tooltip, MouseArea, Row, Stack};
+use std::sync::{Mutex, OnceLock};
 use iced::{Alignment, Color, Element, Length};
 
 use crate::backend::UnifiedTelemetry;
@@ -58,6 +59,22 @@ fn label<'a, Message: 'a>(
     r.into()
 }
 
+static CAPSULE_WIDTHS: OnceLock<Mutex<std::collections::HashMap<String, f32>>> = OnceLock::new();
+
+fn widths_map() -> &'static Mutex<std::collections::HashMap<String, f32>> {
+    CAPSULE_WIDTHS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+pub fn record_width(id: &str, w: f32) {
+    if let Ok(mut m) = widths_map().lock() {
+        m.insert(id.to_string(), w);
+    }
+}
+
+pub fn lookup_width(id: &str) -> Option<f32> {
+    widths_map().lock().ok().and_then(|m| m.get(id).copied())
+}
+
 pub struct CapsuleRenderer;
 
 impl CapsuleRenderer {
@@ -98,7 +115,7 @@ impl CapsuleRenderer {
                     display
                 };
                 let elem = label::<Message>(&[(truncated, theme.text)], theme.font_size_normal);
-                (elem, CapsuleAction::TogglePlayPause, theme.border)
+                (elem, CapsuleAction::OpenOverlay("music".into()), theme.border)
             }
             "alarm" => {
                 let entries = crate::overlays::reminders::RemindersOverlay::load();
@@ -278,7 +295,7 @@ impl CapsuleRenderer {
             "custom" => {
                 let col = theme.text;
                 let elem = label::<Message>(&[("Custom".to_string(), col)], theme.font_size_normal);
-                (elem, CapsuleAction::ToggleCustomMode, col)
+                (elem, CapsuleAction::OpenOverlay("custom".into()), col)
             }
             "tray" => {
                 let arrow = match region {
@@ -297,6 +314,7 @@ impl CapsuleRenderer {
 
         let text_w = LABEL_W.with(|w| w.get());
         let min_width = text_w + theme.slant_width * 2.0 + 24.0;
+        record_width(id, min_width);
 
         let border_color = if border_color == theme.border { theme.text } else { border_color };
 

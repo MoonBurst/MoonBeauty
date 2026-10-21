@@ -6,6 +6,7 @@ pub mod calc;
 pub mod clipboard;
 pub mod dictionary;
 pub mod email;
+pub mod info_tooltip;
 pub mod launcher;
 pub mod lockscreen;
 pub mod notes;
@@ -21,6 +22,7 @@ pub mod websearch;
 pub mod weather_tooltip;
 pub mod system_tooltip;
 pub mod tray_popup;
+pub mod tooltip_anim;
 
 pub use amogus::{AmogusMessage, AmogusOverlay};
 pub use annotator::{AnnotatorMessage, AnnotatorOverlay, save_annotated_image, slurp_region, grim_capture};

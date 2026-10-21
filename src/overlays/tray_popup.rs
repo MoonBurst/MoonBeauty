@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, row, text, MouseArea, Stack};
+use iced::widget::{button, column, container, horizontal_space, row, text, MouseArea, Space, Stack};
 use iced::{Alignment, Color, Element, Length, Task, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
@@ -10,11 +10,8 @@ use crate::config::theme::ShellTheme;
 use crate::config::ShellSettings;
 use crate::style::shape_box::{ShapeBox, ShapeType, SlantSide};
 
-const W: u32 = 300;
 const H: u32 = 380;
 const W_START: f32 = 100.0;
-const H_START: f32 = 48.0;
-const ANIM_MS: f32 = 320.0;
 const AUTO_MS: u128 = 25_000;
 
 #[derive(Debug, Clone)]
@@ -28,11 +25,7 @@ pub struct TrayItem {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Tick,
-    Dismiss,
-    ItemsLoaded(Vec<TrayItem>),
-    Activate(TrayItem),
-    ContextMenu(TrayItem),
+    Tick, Dismiss, ItemsLoaded(Vec<TrayItem>), Activate(TrayItem), ContextMenu(TrayItem),
 }
 
 impl TryInto<iced_layershell::actions::LayershellCustomActionsWithInfo<()>> for Message {
@@ -45,7 +38,10 @@ impl TryInto<iced_layershell::actions::LayershellCustomActionsWithInfo<()>> for 
 pub struct App {
     opened: Instant,
     grow_right: bool,
-    slant_mode: String,
+    w: u32,
+    w_start: f32,
+    slant_l: SlantSide,
+    slant_r: SlantSide,
     items: Vec<TrayItem>,
     loaded: bool,
 }
@@ -59,14 +55,17 @@ impl Application for App {
     fn new(_: ()) -> (Self, Task<Message>) {
         let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|s| s.parse().ok()).unwrap_or(200);
         let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|s| s.parse().ok()).unwrap_or(1920);
-        let grow_right = cx < sw / 2;
-        let slant_mode = std::env::var("MBS_WX_SLANT").unwrap_or_else(|_| "left".into());
+        let grow_right = std::env::var("MBS_GROW_RIGHT").map(|v| v == "1").unwrap_or_else(|_| cx < sw / 2);
+        let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
+        let w_start: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(W_START);
+        let sl_str = std::env::var("MBS_SLANT_L").unwrap_or_else(|_| "L".into());
+        let sr_str = std::env::var("MBS_SLANT_R").unwrap_or_else(|_| "L".into());
+        let slant_l = if sl_str == "R" { SlantSide::Right } else { SlantSide::Left };
+        let slant_r = if sr_str == "R" { SlantSide::Right } else { SlantSide::Left };
+
         let app = Self {
-            opened: Instant::now(),
-            grow_right,
-            slant_mode,
-            items: Vec::new(),
-            loaded: false,
+            opened: Instant::now(), grow_right, w, w_start, slant_l, slant_r,
+            items: Vec::new(), loaded: false,
         };
         let task = Task::perform(fetch_tray_items(), Message::ItemsLoaded);
         (app, task)
@@ -75,47 +74,30 @@ impl Application for App {
     fn namespace(&self) -> String { "mbs-tray-tip".into() }
 
     fn style(&self, _theme: &Self::Theme) -> iced_layershell::Appearance {
-        iced_layershell::Appearance {
-            background_color: Color::TRANSPARENT,
-            text_color: Color::WHITE,
-        }
+        iced_layershell::Appearance { background_color: Color::TRANSPARENT, text_color: Color::WHITE }
     }
 
     fn update(&mut self, m: Message) -> Task<Message> {
         match m {
-            Message::Tick => {
-                if self.opened.elapsed().as_millis() > AUTO_MS { std::process::exit(0); }
-            }
-            Message::ItemsLoaded(items) => {
-                eprintln!("[tray-popup] loaded {} item(s)", items.len());
-                self.items = items;
-                self.loaded = true;
-            }
+            Message::Tick => { if self.opened.elapsed().as_millis() > AUTO_MS { std::process::exit(0); } }
+            Message::ItemsLoaded(items) => { self.items = items; self.loaded = true; }
             Message::Activate(item) => {
-                eprintln!("[tray-popup] activate {}/{}", item.bus, item.path);
                 std::thread::spawn(move || {
-                    let rt = tokio::runtime::Builder::new_current_thread()
-                        .enable_all().build().ok();
+                    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().ok();
                     if let Some(rt) = rt {
                         rt.block_on(async move {
-                            if let Err(e) = call_sni_method(&item.bus, &item.path, "Activate").await {
-                                eprintln!("[tray-popup] Activate failed: {e}");
-                            }
+                            let _ = call_sni_method(&item.bus, &item.path, "Activate").await;
                         });
                     }
                 });
                 std::process::exit(0);
             }
             Message::ContextMenu(item) => {
-                eprintln!("[tray-popup] context menu {}/{}", item.bus, item.path);
                 std::thread::spawn(move || {
-                    let rt = tokio::runtime::Builder::new_current_thread()
-                        .enable_all().build().ok();
+                    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().ok();
                     if let Some(rt) = rt {
                         rt.block_on(async move {
-                            if let Err(e) = call_sni_method(&item.bus, &item.path, "ContextMenu").await {
-                                eprintln!("[tray-popup] ContextMenu failed: {e}");
-                            }
+                            let _ = call_sni_method(&item.bus, &item.path, "ContextMenu").await;
                         });
                     }
                 });
@@ -127,115 +109,67 @@ impl Application for App {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let t = (self.opened.elapsed().as_millis() as f32 / ANIM_MS).min(1.0);
-
-        let w_phase = (t / 0.35).min(1.0);
-        let w_ease = 1.0 - (1.0 - w_phase).powi(3);
-        let anim_w = W_START + (W as f32 - W_START) * w_ease;
-
-        let h_phase = ((t - 0.25) / 0.75).clamp(0.0, 1.0);
-        let h_ease = 1.0 - (1.0 - h_phase).powi(3);
-        let anim_h = H_START + (H as f32 - H_START) * h_ease;
-
         let settings = ShellSettings::load();
         let theme = ShellTheme::from_settings(&settings);
-
-        let slant = (theme.slant_width * (H_START / settings.bar_height as f32)).max(0.0);
-        let (sl, sr) = match self.slant_mode.as_str() {
-            "right"  => (SlantSide::Right, SlantSide::Right),
-            "center" => (SlantSide::Left,  SlantSide::Right),
-            _        => (SlantSide::Left,  SlantSide::Left),
-        };
+        let anim = crate::overlays::tooltip_anim::compute(self.opened.elapsed().as_millis() as f32, self.w_start, self.w as f32, H as f32);
+        let slant = (theme.slant_width * (anim.h / settings.bar_height as f32)).max(0.0);
 
         let bg_shape = ShapeBox::new()
-            .shape(ShapeType::Slant { left: sl, right: sr })
+            .shape(ShapeType::Slant { left: self.slant_l, right: self.slant_r })
             .background(theme.background)
             .border(theme.text, theme.control_border_width)
             .slant_width(slant)
-            .size(Length::Fixed(anim_w), Length::Fixed(anim_h));
+            .size(Length::Fixed(self.w as f32), Length::Fixed(anim.h));
 
-        let body: Element<Message> = if !self.loaded {
+        let body: Element<'_, Message> = if !self.loaded {
             container(text("Loading tray items…").size(13).color(theme.muted))
                 .padding(16).center_x(Length::Fill).into()
         } else if self.items.is_empty() {
             column![
                 text("No tray items registered").size(13).color(theme.muted),
                 text("Start a tray app (Steam, CoreCtrl, music player, …)").size(11).color(theme.muted),
-            ]
-            .spacing(6)
-            .padding(16)
-            .into()
+            ].spacing(6).padding(16).into()
         } else {
-            let _hover_bg = theme.surface_alt;
             let text_color = theme.text;
             let icon_color = theme.success;
-
-            let mut col = column![].spacing(2).width(Length::Fill);
+            let mut col: iced::widget::Column<'_, Message> = iced::widget::Column::new().spacing(2).width(Length::Fill);
             for item in &self.items {
                 let label = if !item.title.is_empty() { item.title.clone() } else { item.id.clone() };
-                let icon_elem: Element<Message> = if let Some(path) = &item.icon_path {
+                let icon_elem: Element<'_, Message> = if let Some(path) = &item.icon_path {
                     iced::widget::image(iced::widget::image::Handle::from_path(path.clone()))
-                        .width(Length::Fixed(22.0))
-                        .height(Length::Fixed(22.0))
-                        .into()
+                        .width(Length::Fixed(22.0)).height(Length::Fixed(22.0)).into()
                 } else {
                     text("●").size(18).color(icon_color).into()
                 };
 
                 let row_inner = container(
-                    row![
-                        icon_elem,
-                        text(label).size(13).color(text_color).width(Length::Fill),
-                    ]
-                    .spacing(10)
-                    .align_y(Alignment::Center)
-                    .padding([8, 10]),
-                )
-                .width(Length::Fill);
+                    row![icon_elem, text(label).size(13).color(text_color).width(Length::Fill)]
+                        .spacing(10).align_y(Alignment::Center).padding([8, 10]),
+                ).width(Length::Fill);
 
-                let interactive = MouseArea::new(row_inner)
+                let interactive: Element<'_, Message> = MouseArea::new(row_inner)
                     .on_press(Message::Activate(item.clone()))
-                    .on_right_press(Message::ContextMenu(item.clone()));
-
+                    .on_right_press(Message::ContextMenu(item.clone()))
+                    .into();
                 col = col.push(interactive);
             }
             container(col).padding(6).into()
         };
 
-        let clip_align = if self.grow_right {
-            iced::alignment::Horizontal::Left
-        } else {
-            iced::alignment::Horizontal::Right
-        };
+        let body_fixed: Element<'_, Message> = container(body)
+            .width(Length::Fixed(self.w as f32))
+            .height(Length::Fixed(H as f32))
+            .into();
+        let clipped = crate::overlays::tooltip_anim::clip_content(body_fixed, anim.w, anim.h, self.grow_right);
+        let inner: Element<'_, Message> = Stack::new().push(bg_shape.view()).push(clipped).into();
+        let positioned: Element<'_, Message> = container(crate::overlays::tooltip_anim::align_to_side(inner, self.grow_right)).into();
 
-        let clipped = container(body)
-            .width(Length::Fixed(anim_w))
-            .height(Length::Fixed(anim_h))
-            .clip(true)
-            .align_x(clip_align)
-            .align_y(iced::alignment::Vertical::Top);
-
-        let inner = Stack::new().push(bg_shape.view()).push(clipped);
-
-        let positioned = container(inner)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(clip_align)
-            .align_y(iced::alignment::Vertical::Top)
-            .style(|_| container::Style {
-                background: Some(iced::Background::Color(Color::TRANSPARENT)),
-                ..Default::default()
-            });
-
-        let catcher = button(container(row![]).width(Length::Fill).height(Length::Fill))
+        let catcher: Element<'_, Message> = button(container(Space::new(Length::Fill, Length::Fill)))
             .on_press(Message::Dismiss)
             .padding(0)
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(|_t, _s| button::Style {
-                background: Some(iced::Background::Color(Color::TRANSPARENT)),
-                ..Default::default()
-            });
+            .into();
 
         Stack::new().push(catcher).push(positioned).into()
     }
@@ -243,58 +177,27 @@ impl Application for App {
     fn subscription(&self) -> iced::Subscription<Message> {
         iced::Subscription::batch([
             iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
-            iced::keyboard::on_key_press(|k, _| {
-                if k == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
-                    Some(Message::Dismiss)
-                } else { None }
-            }),
+            iced::keyboard::on_key_press(|k, _| if k == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) { Some(Message::Dismiss) } else { None }),
         ])
     }
-
     fn theme(&self) -> Theme { Theme::Dark }
 }
 
-// ── D-Bus helpers ────────────────────────────────────────────────────
-
 fn parse_registered(s: &str) -> Option<(String, String)> {
-    if let Some(idx) = s.find('/') {
-        Some((s[..idx].to_string(), s[idx..].to_string()))
-    } else if !s.is_empty() {
-        Some((s.to_string(), "/StatusNotifierItem".to_string()))
-    } else {
-        None
-    }
+    if let Some(idx) = s.find('/') { Some((s[..idx].to_string(), s[idx..].to_string())) }
+    else if !s.is_empty() { Some((s.to_string(), "/StatusNotifierItem".to_string())) }
+    else { None }
 }
 
 async fn fetch_tray_items() -> Vec<TrayItem> {
-    let conn = match zbus::Connection::session().await {
-        Ok(c) => c,
-        Err(e) => { eprintln!("[tray-popup] session bus: {e}"); return Vec::new(); }
-    };
-
-    let watcher = match zbus::Proxy::new(
-        &conn,
-        "org.kde.StatusNotifierWatcher",
-        "/StatusNotifierWatcher",
-        "org.kde.StatusNotifierWatcher",
-    ).await {
-        Ok(p) => p,
-        Err(e) => { eprintln!("[tray-popup] watcher proxy: {e}"); return Vec::new(); }
-    };
-
-    let raw_items: Vec<String> = match watcher.get_property("RegisteredStatusNotifierItems").await {
-        Ok(v) => v,
-        Err(e) => { eprintln!("[tray-popup] RegisteredStatusNotifierItems: {e}"); return Vec::new(); }
-    };
-    eprintln!("[tray-popup] registered: {:?}", raw_items);
+    let conn = match zbus::Connection::session().await { Ok(c) => c, Err(_) => return Vec::new() };
+    let watcher = match zbus::Proxy::new(&conn, "org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher", "org.kde.StatusNotifierWatcher").await { Ok(p) => p, Err(_) => return Vec::new() };
+    let raw_items: Vec<String> = match watcher.get_property("RegisteredStatusNotifierItems").await { Ok(v) => v, Err(_) => return Vec::new() };
 
     let mut out = Vec::new();
     for raw in raw_items {
         let Some((bus, path)) = parse_registered(&raw) else { continue };
-        let proxy = match zbus::Proxy::new(&conn, bus.as_str(), path.as_str(), "org.kde.StatusNotifierItem").await {
-            Ok(p) => p,
-            Err(e) => { eprintln!("[tray-popup] {} proxy: {e}", raw); continue; }
-        };
+        let proxy = match zbus::Proxy::new(&conn, bus.as_str(), path.as_str(), "org.kde.StatusNotifierItem").await { Ok(p) => p, Err(_) => continue };
 
         let id: String = proxy.get_property("Id").await.unwrap_or_default();
         let title: String = proxy.get_property("Title").await.unwrap_or_default();
@@ -310,8 +213,6 @@ async fn fetch_tray_items() -> Vec<TrayItem> {
                 }
             }
         }
-
-        eprintln!("[tray-popup]   {} -> id={:?} title={:?} icon={:?}", raw, id, title, icon_path);
         out.push(TrayItem { bus, path, id, title, icon_path });
     }
     out
@@ -327,17 +228,11 @@ async fn call_sni_method(bus: &str, path: &str, method: &str) -> Result<(), Box<
 fn resolve_icon(icon_name: &str) -> Option<String> {
     use std::path::Path;
     if icon_name.is_empty() { return None; }
-    if icon_name.starts_with('/') {
-        return if Path::new(icon_name).exists() { Some(icon_name.to_string()) } else { None };
-    }
+    if icon_name.starts_with('/') { return if Path::new(icon_name).exists() { Some(icon_name.to_string()) } else { None }; }
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
     let roots = [
-        PathBuf::from("/run/current-system/sw/share/icons/hicolor"),
-        PathBuf::from("/usr/share/icons/hicolor"),
-        PathBuf::from("/usr/local/share/icons/hicolor"),
-        home.join(".local/share/icons/hicolor"),
-        home.join(".local/share/flatpak/exports/share/icons/hicolor"),
-        home.join(".nix-profile/share/icons/hicolor"),
+        PathBuf::from("/run/current-system/sw/share/icons/hicolor"), PathBuf::from("/usr/share/icons/hicolor"),
+        home.join(".local/share/icons/hicolor"), home.join(".nix-profile/share/icons/hicolor"),
     ];
     let sizes = ["48x48", "64x64", "128x128", "256x256", "512x512", "scalable", "symbolic"];
     let exts = ["png", "svg", "xpm"];
@@ -349,25 +244,14 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
             }
         }
     }
-    for pix in ["/run/current-system/sw/share/pixmaps", "/usr/share/pixmaps"] {
-        for ext in &exts {
-            let p = PathBuf::from(pix).join(format!("{}.{}", icon_name, ext));
-            if p.exists() { return Some(p.to_string_lossy().into_owned()); }
-        }
-    }
     None
 }
 
 fn save_pixmap(id: &str, w: u32, h: u32, data: &[u8]) -> Option<String> {
-    if w == 0 || h == 0 { return None; }
-    if data.len() != (w as usize * h as usize * 4) { return None; }
+    if w == 0 || h == 0 || data.len() != (w as usize * h as usize * 4) { return None; }
     let mut rgba = Vec::with_capacity(data.len());
-    // SNI pixmap format is ARGB32 in network byte order: [A, R, G, B]
-    for chunk in data.as_chunks::<4>().0 {
-        rgba.push(chunk[1]); // R
-        rgba.push(chunk[2]); // G
-        rgba.push(chunk[3]); // B
-        rgba.push(chunk[0]); // A
+    for chunk in data.chunks_exact(4) {
+        rgba.push(chunk[1]); rgba.push(chunk[2]); rgba.push(chunk[3]); rgba.push(chunk[0]);
     }
     let img: image::RgbaImage = image::ImageBuffer::from_raw(w, h, rgba)?;
     let safe: String = id.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
@@ -377,28 +261,31 @@ fn save_pixmap(id: &str, w: u32, h: u32, data: &[u8]) -> Option<String> {
 }
 
 pub fn run() -> Result<(), iced_layershell::Error> {
+    let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
+    eprintln!("[tip-output] raw={:?} parsed={:?}", std::env::var("MBS_OUTPUT"), output);
     let s = ShellSettings::load();
+    let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
     let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
     let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1920);
     let grow_right = cx < sw / 2;
-
+    let cap_w: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(W_START);
+    let half_start = (cap_w / 2.0) as i32;
     let bar_h = s.bar_height as i32;
-    let half_start = (W_START / 2.0) as i32;
+    let sl_str = std::env::var("MBS_SLANT_L").unwrap_or_else(|_| "L".into());
+    let sr_str = std::env::var("MBS_SLANT_R").unwrap_or_else(|_| "L".into());
+    let sw_cap = s.slant_width;
+    let sw_tip = s.slant_width * (H as f32 / s.bar_height as f32);
+    let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
 
     let (anchor, margin) = if grow_right {
-        (Anchor::Top | Anchor::Left, (bar_h, 0, 0, (cx - half_start).max(0)))
+        let sl_left = sl_str == "L";
+        let shift = if sl_left { sw_cap } else { 0.0 };
+        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, ((cx - half_start) as f32 + shift).max(0.0).min((sw - w as i32).max(0) as f32) as i32))
     } else {
-        (Anchor::Top | Anchor::Right, (bar_h, (sw - cx - half_start).max(0), 0, 0))
+        let sr_right = sr_str == "R";
+        let shift = if sr_right { sw_cap } else { 0.0 };
+        (Anchor::Top | Anchor::Right, (margin_top, ((sw - cx - half_start) as f32 + shift).max(0.0).min((sw - w as i32).max(0) as f32) as i32, 0, 0))
     };
-
-    let layer = LayerShellSettings {
-        size: Some((W, H)),
-        exclusive_zone: -1,
-        anchor,
-        layer: Layer::Overlay,
-        keyboard_interactivity: KeyboardInteractivity::OnDemand,
-        margin,
-        ..Default::default()
-    };
+    let layer = LayerShellSettings { size: Some((w, H)), exclusive_zone: -1, anchor, layer: Layer::Overlay, keyboard_interactivity: KeyboardInteractivity::OnDemand, binded_output_name: output, margin, ..Default::default() };
     App::run(Settings { layer_settings: layer, ..Default::default() })
 }
