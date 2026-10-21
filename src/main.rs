@@ -53,6 +53,99 @@ fn send_ipc_sync(cmd: &IpcCommand) -> Result<String, Box<dyn std::error::Error +
 }
 
 
+fn notification_candidates(app_name: &str, desktop_entry: Option<&str>) -> Vec<String> {
+    use std::collections::HashSet;
+    let lower = app_name.to_lowercase();
+    let mut cand_set: HashSet<String> = HashSet::new();
+    cand_set.insert(lower.clone());
+    cand_set.insert(lower.replace(' ', "-"));
+    cand_set.insert(lower.replace(' ', "_"));
+    cand_set.insert(lower.replace(' ', ""));
+    if let Some(de) = desktop_entry {
+        let de_clean = de.trim_end_matches(".desktop").to_lowercase();
+        cand_set.insert(de_clean);
+    }
+    cand_set.into_iter().filter(|s| !s.is_empty()).collect()
+}
+
+fn is_app_focused(candidates: &[String]) -> bool {
+    let Some(focused) = focused_app_id() else { return false; };
+    candidates.iter().any(|c| focused.eq_ignore_ascii_case(c))
+}
+
+fn focus_notification_app(app_name: &str, desktop_entry: Option<&str>) -> bool {
+    use std::collections::HashSet;
+
+    let lower = app_name.to_lowercase();
+    let mut cand_set: HashSet<String> = HashSet::new();
+    cand_set.insert(lower.clone());
+    cand_set.insert(lower.replace(' ', "-"));
+    cand_set.insert(lower.replace(' ', "_"));
+    cand_set.insert(lower.replace(' ', ""));
+    if let Some(de) = desktop_entry {
+        let de_clean = de.trim_end_matches(".desktop").to_string();
+        cand_set.insert(de_clean.clone());
+        cand_set.insert(de_clean.to_lowercase());
+    }
+    let candidates: Vec<String> = cand_set.into_iter().filter(|s| !s.is_empty()).collect();
+    eprintln!("[focus] app={:?} entry={:?} candidates={:?}", app_name, desktop_entry, candidates);
+
+    if std::env::var("SWAYSOCK").is_ok() {
+        for cand in &candidates {
+            let _ = std::process::Command::new("swaymsg")
+                .args(["-t", "command", &format!("[app_id=\"{}\"] focus", cand.trim())])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+
+                .status();
+        }
+        if let Some(focused) = focused_app_id() {
+            for cand in &candidates {
+                if focused.eq_ignore_ascii_case(cand) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    if let Some(de) = desktop_entry {
+        let de_clean = de.trim_end_matches(".desktop");
+        let ok = std::process::Command::new("gtk-launch")
+            .arg(de_clean)
+            .status().map(|s| s.success()).unwrap_or(false);
+        if ok { return true; }
+    }
+
+    let _ = std::process::Command::new("gtk-launch")
+        .arg(&candidates[0]).status();
+    false
+}
+
+fn focused_app_id() -> Option<String> {
+    let out = std::process::Command::new("swaymsg")
+        .args(["-t", "get_tree", "-r"])
+        .stderr(std::process::Stdio::null())
+        .output().ok()?;
+    if !out.status.success() { return None; }
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    fn walk(node: &serde_json::Value) -> Option<String> {
+        if node.get("focused").and_then(|f| f.as_bool()) == Some(true) {
+            if let Some(app_id) = node.get("app_id").and_then(|a| a.as_str()) {
+                if !app_id.is_empty() { return Some(app_id.to_string()); }
+            }
+        }
+        for key in ["nodes", "floating_nodes"] {
+            if let Some(nodes) = node.get(key).and_then(|n| n.as_array()) {
+                for child in nodes {
+                    if let Some(r) = walk(child) { return Some(r); }
+                }
+            }
+        }
+        None
+    }
+    walk(&v)
+}
+
 fn resolve_exe() -> std::path::PathBuf {
     std::env::current_exe()
         .ok()
@@ -81,6 +174,53 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         eprintln!();
         eprintln!("        Update your keybinds accordingly.");
         std::process::exit(2);
+    }
+
+    // Notification CLI actions
+    if args.iter().any(|a| a == "--activate-latest-notif") {
+        let runtime = std::env::var("XDG_RUNTIME_DIR")
+            .unwrap_or_else(|_| format!("/tmp/user-{}", std::process::id()));
+        let cmd_path = std::path::PathBuf::from(runtime)
+            .join("moon-beauty-shell-notif-cmd");
+        match std::fs::write(&cmd_path, b"activate-latest") {
+            Ok(_) => std::process::exit(0),
+            Err(e) => { eprintln!("[activate-latest] write {:?}: {e}", cmd_path); std::process::exit(1); }
+        }
+    }
+    if args.iter().any(|a| a == "--dismiss-notif") {
+        let runtime = std::env::var("XDG_RUNTIME_DIR")
+            .unwrap_or_else(|_| format!("/tmp/user-{}", std::process::id()));
+        let cmd_path = std::path::PathBuf::from(runtime)
+            .join("moon-beauty-shell-notif-cmd");
+        match std::fs::write(&cmd_path, b"dismiss") {
+            Ok(_) => std::process::exit(0),
+            Err(e) => { eprintln!("[dismiss-notif] write {:?}: {e}", cmd_path); std::process::exit(1); }
+        }
+    }
+    if args.iter().any(|a| a == "--notif-history") {
+        match send_ipc_sync(&IpcCommand::ToggleHistory) {
+            Ok(_) => std::process::exit(0),
+            Err(e) => { eprintln!("[notif-history] IPC failed: {e}"); std::process::exit(1); }
+        }
+    }
+
+    // Generic IPC toggle: moon-beauty-shell --toggle <overlay>
+    // e.g. sway: bindsym $mod+Tab exec moon-beauty-shell --toggle history
+    if let Some(idx) = args.iter().position(|a| a == "--toggle") {
+        let target_str = args.get(idx + 1).cloned().unwrap_or_default();
+        match OverlayTarget::from_str(&target_str) {
+            Some(target) => match send_ipc_sync(&IpcCommand::Toggle(target)) {
+                Ok(_) => std::process::exit(0),
+                Err(e) => {
+                    eprintln!("[toggle] IPC failed: {e}");
+                    std::process::exit(1);
+                }
+            },
+            None => {
+                eprintln!("[toggle] unknown target: {}", target_str);
+                std::process::exit(2);
+            }
+        }
     }
 
     // ── Screenshot CLI ────────────────────────────────────────────────
@@ -769,11 +909,52 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                     while let Ok(n) = rx.try_recv() {
                         let is_test = n.app_name == "Diagnostics";
                         self.notifs.push_notification(
-                            &n.app_name, &n.summary, &n.body, n.is_urgent, is_test, &self.settings,
+                            &n.app_name, &n.summary, &n.body, n.is_urgent, is_test,
+                            n.desktop_entry.as_deref(),
+                            n.actions.clone(),
+                            &self.settings,
                         );
                     }
                 }
                 if self.is_notif_surface {
+                    // CLI notification control (see --activate-latest-notif / --dismiss-notif)
+                    let runtime = std::env::var("XDG_RUNTIME_DIR")
+                        .unwrap_or_else(|_| format!("/tmp/user-{}", std::process::id()));
+                    let cmd_path = std::path::PathBuf::from(&runtime)
+                        .join("moon-beauty-shell-notif-cmd");
+                    if let Ok(cmd) = std::fs::read_to_string(&cmd_path) {
+                        let _ = std::fs::remove_file(&cmd_path);
+                        match cmd.trim() {
+                            "dismiss" => {
+                                if let Some(first) = self.notifs.active_toasts.first().cloned() {
+                                    self.notifs.update(NotifMessage::DismissToast(first.id));
+                                }
+                            }
+                            "activate-latest" => {
+                                if let Some(t) = self.notifs.active_toasts.last().cloned() {
+                                    let app = t.app_name.clone();
+                                    let entry = t.desktop_entry.clone();
+                                    let nid = t.id;
+                                    self.notifs.update(NotifMessage::DismissToast(t.id));
+                                    std::thread::spawn(move || {
+                                        moon_beauty_shell::backend::notif_dbus::emit_action_invoked(nid, "default");
+                                        std::thread::sleep(std::time::Duration::from_millis(200));
+                                        let matches = notification_candidates(&app, entry.as_deref());
+                                        if !is_app_focused(&matches) {
+                                            let ok = focus_notification_app(&app, entry.as_deref());
+                                            eprintln!("[activate-latest] fallback app={:?} entry={:?} ok={}", app, entry, ok);
+                                        } else {
+                                            eprintln!("[activate-latest] client self-focused app={:?}", app);
+                                        }
+                                    });
+                                } else {
+                                    eprintln!("[activate-latest] no active toast");
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+
                     if !moon_beauty_shell::overlays::notifications::dnd_active() {
                         let held = moon_beauty_shell::overlays::notifications::take_held_notifs();
                         if !held.is_empty() {
@@ -859,14 +1040,12 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             }
             Message::IpcReceived(cmd) => match cmd {
                 IpcCommand::Toggle(target) => {
-                    if matches!(target, OverlayTarget::Launcher | OverlayTarget::Clipboard | OverlayTarget::NotificationsHistory | OverlayTarget::Settings) {
-                        eprintln!("[ipc] toggle {:?}", target);
-                        self.toggle_standalone(target);
-                    } else if self.active_overlay == Some(target.clone()) {
-                        self.active_overlay = None;
-                    } else {
-                        self.active_overlay = Some(target);
-                    }
+                    // Every overlay runs as a standalone child so it gets
+                    // keyboard=Exclusive from its layer surface. The bar's own
+                    // layer is KeyboardInteractivity::None, so in-bar overlays
+                    // cannot receive keystrokes.
+                    eprintln!("[ipc] toggle {:?} (standalone)", target);
+                    self.toggle_standalone(target);
                 }
                 IpcCommand::Open(target, arg) => {
                     if matches!(target, OverlayTarget::Launcher | OverlayTarget::Clipboard | OverlayTarget::NotificationsHistory | OverlayTarget::Settings) {
@@ -1031,35 +1210,24 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                             return Command::perform(AudioBackend::toggle_sink_mute(), |_| Message::TopBar(TopBarMessage::Noop));
                         }
                         CapsuleAction::ToggleNotificationDnd => {
-                            let p = std::path::PathBuf::from("/dev/shm/mbs-dnd");
-                            let paused = if p.exists() {
-                                let _ = std::fs::remove_file(&p);
-                                false
-                            } else {
-                                let _ = std::fs::write(&p, b"1");
-                                true
-                            };
+                            let paused = moon_beauty_shell::overlays::notifications::toggle_dnd();
                             self.settings.notifications_enabled = !paused;
                             let _ = self.settings.save();
+                            eprintln!("[dnd] paused={}", paused);
 
-                            let held_count = moon_beauty_shell::overlays::notifications::held_notifs_count();
-                            let msg = format!("[DND-CLICK] Toggled DND -> paused = {}, held_count = {}
-", paused, held_count);
-                            eprintln!("{}", msg);
-                            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/mbs-click.log") {
-                                use std::io::Write;
-                                let _ = f.write_all(msg.as_bytes());
-                            }
-
-                            let exe = resolve_exe();
-                            if paused {
-                                let _ = std::process::Command::new("pkill")
-                                    .args(["-f", "--", "--notif-surface"])
-                                    .status();
-                            } else {
-                                if held_count > 0 {
-                                    let _ = std::process::Command::new(exe).arg("--notif-surface").spawn();
-                                }
+                            // The notif-surface owns org.freedesktop.Notifications
+                            // and writes held-notifs.json. It must stay alive
+                            // while paused to receive + hold. Only respawn if
+                            // it died for some unrelated reason.
+                            let running = std::process::Command::new("pgrep")
+                                .args(["-f", "--", "moon-beauty-shell --notif-surface"])
+                                .output()
+                                .map(|o| !o.stdout.is_empty())
+                                .unwrap_or(false);
+                            if !running {
+                                let exe = resolve_exe();
+                                let _ = std::process::Command::new(exe).arg("--notif-surface").spawn();
+                                eprintln!("[dnd] respawned notif-surface");
                             }
                         }
                         CapsuleAction::ToggleSourceMute => {
@@ -1533,6 +1701,25 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 NotifMessage::DismissDrawer => {
                     if self.is_standalone { std::process::exit(0); }
                     self.active_overlay = None;
+                }
+                NotifMessage::ActivateToast(id) => {
+                    if let Some(t) = self.notifs.active_toasts.iter().find(|t| t.id == id).cloned() {
+                        let app = t.app_name.clone();
+                        let entry = t.desktop_entry.clone();
+                        let nid = t.id;
+                        self.notifs.update(NotifMessage::DismissToast(id));
+                        std::thread::spawn(move || {
+                            moon_beauty_shell::backend::notif_dbus::emit_action_invoked(nid, "default");
+                            std::thread::sleep(std::time::Duration::from_millis(200));
+                            let matches = notification_candidates(&app, entry.as_deref());
+                            if !is_app_focused(&matches) {
+                                let ok = focus_notification_app(&app, entry.as_deref());
+                                eprintln!("[activate-toast] fallback app={:?} entry={:?} ok={}", app, entry, ok);
+                            } else {
+                                eprintln!("[activate-toast] client self-focused app={:?}", app);
+                            }
+                        });
+                    }
                 }
                 _ => self.notifs.update(msg),
             },

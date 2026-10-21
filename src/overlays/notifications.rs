@@ -1,5 +1,5 @@
 use chrono::Local;
-use iced::widget::{button, column, container, row, scrollable, text, Stack};
+use iced::widget::{button, column, container, row, scrollable, text, MouseArea, Stack};
 use iced::{Alignment, Color, Element, Length, Padding};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -25,6 +25,10 @@ pub struct NotificationToast {
     pub text_color: String,
     #[serde(default)]
     pub avatar_path: Option<String>,
+    #[serde(default)]
+    pub desktop_entry: Option<String>,
+    #[serde(default)]
+    pub actions: Vec<String>,
     #[serde(skip, default = "Instant::now")]
     pub created_at: Instant,
     #[serde(skip)]
@@ -58,6 +62,7 @@ fn default_toast_text_color() -> String { "#f7f700".to_string() }
 #[derive(Debug, Clone)]
 pub enum NotifMessage {
     DismissToast(u32),
+    ActivateToast(u32),
     ClearHistory,
     DeleteHistory(u32),
     ToggleHistoryDrawer,
@@ -129,6 +134,8 @@ impl NotificationOverlay {
         body: &str,
         is_urgent: bool,
         is_test: bool,
+        desktop_entry: Option<&str>,
+        actions: Vec<String>,
         settings: &ShellSettings,
     ) {
         let id = rand_id();
@@ -175,6 +182,8 @@ impl NotificationOverlay {
             border_color,
             text_color,
             avatar_path,
+            desktop_entry: desktop_entry.map(|s| s.to_string()),
+            actions,
             created_at: Instant::now(),
             exit_started_at: None,
             hold_reset_at: None,
@@ -427,6 +436,14 @@ impl NotificationOverlay {
                     }
                 }
             }
+            NotifMessage::ActivateToast(id) => {
+                let now = Instant::now();
+                for t in self.active_toasts.iter_mut() {
+                    if t.id == id && t.exit_started_at.is_none() {
+                        t.exit_started_at = Some(now);
+                    }
+                }
+            }
             NotifMessage::ClearHistory => {
                 self.history.clear();
                 self.save_history();
@@ -581,15 +598,25 @@ impl NotificationOverlay {
             } else {
                 container(text("")).width(Length::Fixed(0.0)).into()
             };
-            let content = row![
-                icon_badge,
-                avatar,
-                column![
-                    text(&toast.summary).size(settings.notif_summary_size).bold().color(toast_text_color).width(Length::Fill),
-                    text(&toast.body).size(settings.notif_body_size).color(toast_text_color).width(Length::Fill),
+            let toast_body = MouseArea::new(
+                row![
+                    icon_badge,
+                    avatar,
+                    column![
+                        text(&toast.summary).size(settings.notif_summary_size).bold().color(toast_text_color).width(Length::Fill),
+                        text(&toast.body).size(settings.notif_body_size).color(toast_text_color).width(Length::Fill),
+                    ]
+                    .width(Length::Fill)
+                    .spacing(2),
                 ]
+                .spacing(12)
+                .align_y(Alignment::Center)
                 .width(Length::Fill)
-                .spacing(2),
+            )
+            .on_press(NotifMessage::ActivateToast(id));
+
+            let content = row![
+                toast_body,
                 button(text("✕").size(12).color(theme.muted))
                     .on_press(NotifMessage::DismissToast(id))
                     .padding(4)
@@ -802,14 +829,39 @@ pub fn save_held_notifs(toasts: &[NotificationToast]) {
             let _ = fs::rename(tmp, p);
         }
     }
+    let mut g = held_cache().lock().unwrap();
+    g.count = toasts.len();
+    g.fetched_at = Instant::now();
+}
+
+struct HeldCache {
+    count: usize,
+    fetched_at: Instant,
+}
+static HELD_CACHE: std::sync::OnceLock<std::sync::Mutex<HeldCache>> =
+    std::sync::OnceLock::new();
+
+fn held_cache() -> &'static std::sync::Mutex<HeldCache> {
+    HELD_CACHE.get_or_init(|| std::sync::Mutex::new(HeldCache {
+        count: 0,
+        fetched_at: Instant::now() - std::time::Duration::from_secs(60),
+    }))
 }
 
 pub fn held_notifs_count() -> usize {
-    load_held_notifs().len()
+    let mut g = held_cache().lock().unwrap();
+    if g.fetched_at.elapsed() > std::time::Duration::from_secs(1) {
+        g.count = load_held_notifs().len();
+        g.fetched_at = Instant::now();
+    }
+    g.count
 }
 
 pub fn take_held_notifs() -> Vec<NotificationToast> {
     let list = load_held_notifs();
     let _ = fs::remove_file(held_notifs_path());
+    let mut g = held_cache().lock().unwrap();
+    g.count = 0;
+    g.fetched_at = Instant::now();
     list
 }

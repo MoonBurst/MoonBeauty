@@ -9,6 +9,8 @@ pub struct IncomingNotification {
     pub summary: String,
     pub body: String,
     pub is_urgent: bool,
+    pub desktop_entry: Option<String>,
+    pub actions: Vec<String>,
 }
 
 pub struct NotifServer {
@@ -30,7 +32,7 @@ impl NotifServer {
         _app_icon: String,
         summary: String,
         body: String,
-        _actions: Vec<String>,
+        actions: Vec<String>,
         hints: HashMap<String, OwnedValue>,
         _expire_timeout: i32,
     ) -> u32 {
@@ -40,8 +42,15 @@ impl NotifServer {
             .and_then(|v| u8::try_from(v).ok())
             .map(|u| u == 2)
             .unwrap_or(false);
+        let desktop_entry = hints
+            .get("desktop-entry")
+            .or_else(|| hints.get("desktop_entry"))
+            .and_then(|v| match &**v {
+                zbus::zvariant::Value::Str(s) => Some(s.as_str().to_string()),
+                _ => None,
+            });
         let _ = self.tx.send(IncomingNotification {
-            id, app_name, summary, body, is_urgent,
+            id, app_name, summary, body, is_urgent, desktop_entry, actions,
         });
         id
     }
@@ -62,6 +71,44 @@ impl NotifServer {
     }
 }
 
+use std::sync::OnceLock;
+static DBUS_CONN: OnceLock<zbus::Connection> = OnceLock::new();
+
+pub fn emit_action_invoked(id: u32, key: &str) {
+    let Some(conn) = DBUS_CONN.get().cloned() else {
+        eprintln!("[action-invoked] daemon connection not ready");
+        return;
+    };
+    let key_owned = key.to_string();
+    std::thread::spawn(move || {
+        let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        else { return; };
+        rt.block_on(async move {
+            let body = (id, key_owned.clone());
+            let r = conn.emit_signal(
+                None::<&str>,
+                "/org/freedesktop/Notifications",
+                "org.freedesktop.Notifications",
+                "ActionInvoked",
+                &body,
+            ).await;
+            match r {
+                Ok(_) => eprintln!("[action-invoked] sent id={} key={:?}", id, key_owned),
+                Err(e) => eprintln!("[action-invoked] emit failed: {e}"),
+            }
+            let _ = conn.emit_signal(
+                None::<&str>,
+                "/org/freedesktop/Notifications",
+                "org.freedesktop.Notifications",
+                "NotificationClosed",
+                &(id, 2u32),
+            ).await;
+        });
+    });
+}
+
 pub fn spawn(tx: Sender<IncomingNotification>) {
     std::thread::spawn(move || {
         let rt = match tokio::runtime::Builder::new_current_thread()
@@ -80,10 +127,10 @@ pub fn spawn(tx: Sender<IncomingNotification>) {
                 .build()
                 .await;
             match conn {
-                Ok(_c) => {
+                Ok(c) => {
                     eprintln!("[notif_dbus] org.freedesktop.Notifications owned");
+                    let _ = DBUS_CONN.set(c.clone());
                     std::future::pending::<()>().await;
-                    let _ = _c;
                 }
                 Err(e) => eprintln!("[notif_dbus] serve failed: {e}"),
             }
