@@ -2,6 +2,17 @@ use iced::widget::{button, column, container, row, scrollable, slider, text, tex
 use iced::{Alignment, Color, Element, Length, Padding};
 
 use crate::config::settings::{ContentRule, FriendProfile, ShellSettings};
+
+/// Unbuffered debug — writes to /tmp/mbs-settings-dbg.log immediately.
+/// Works even when stderr is buffered (which it is for child processes).
+fn mbs_dbg(msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true).append(true).open("/tmp/mbs-settings-dbg.log")
+    {
+        let _ = writeln!(f, "{}", msg);
+    }
+}
 use crate::config::theme::{hex_to_color, ShellTheme};
 use crate::style::shape_box::{ShapeBox, ShapeType};
 use crate::style::TextExt;
@@ -26,6 +37,11 @@ pub enum SettingsMessage {
     OverlayFontSize(u16),
     TooltipFontSize(u16),
     SlantWidth(u32),
+    TooltipDropMs(u32),
+    TooltipExpandMs(u32),
+    TooltipWidthPx(u32),
+    TooltipHeightPx(u32),
+    TooltipPauseMs(u32),
     BorderWidth(u32),
     ControlBorderWidth(u32),
     CapsuleSpacing(i32),
@@ -92,9 +108,19 @@ pub enum SettingsMessage {
     WindowHeight(String, u32),
     OverlayCut(u32),
     OverlayAngle(u32),
+    TooltipSizeWidth(String, u32),
+    TooltipSizeHeight(String, u32),
+    ResetTooltipSize(String),
+    AlarmSoundChanged(String),
+    AlarmSoundDurationChanged(u32),
+    AlarmSoundVolumeChanged(u32),
+    TestAlarmSound,
+    ImportAlarmSound,
 
     SaveSettings,
     TestNotification,
+    ToggleEditModule(String),
+    SelectBarMonitor(String),
     Dismiss,
 }
 
@@ -102,6 +128,10 @@ pub struct SettingsOverlay {
     pub active_tab: SettingsTab,
     pub selected_screen: String,
     pub selected_profile: usize,
+    last_save: std::time::Instant,
+    pub editing_module: Option<String>,
+    preview_child: Option<std::process::Child>,
+    last_preview: std::time::Instant,
 }
 
 impl SettingsOverlay {
@@ -110,10 +140,15 @@ impl SettingsOverlay {
             active_tab: SettingsTab::Notifications,
             selected_screen: "Auto (Primary)".into(),
             selected_profile: 0,
+            last_save: std::time::Instant::now(),
+            editing_module: None,
+            preview_child: None,
+            last_preview: std::time::Instant::now() - std::time::Duration::from_secs(60),
         }
     }
 
     pub fn update(&mut self, message: SettingsMessage, settings: &mut ShellSettings) {
+        mbs_dbg(&format!("[dbg-update-entry] {:?}", std::mem::discriminant(&message)));
         let should_persist = matches!(
             &message,
             SettingsMessage::Dismiss
@@ -145,13 +180,53 @@ impl SettingsOverlay {
                 | SettingsMessage::ColorChanged(_, _)
         );
         match message {
-            SettingsMessage::SelectTab(t) => self.active_tab = t,
+            SettingsMessage::SelectBarMonitor(s) => {
+                settings.bar_monitor = s.clone();
+                let _ = settings.save();
+                if let Ok(exe) = std::env::current_exe() {
+                    let _ = std::process::Command::new(exe).arg("--restart-bar").spawn();
+                }
+            },
+            SettingsMessage::TooltipSizeWidth(id, w) => {
+                let def = (settings.tooltip_width_px, settings.tooltip_height_px);
+                let new_w = w.clamp(200, 1200);
+                let (changed, wv, hv) = {
+                    let e = settings.tooltip_sizes.entry(id.clone()).or_insert(def);
+                    let ch = e.0 != new_w;
+                    if ch { e.0 = new_w; }
+                    (ch, e.0, e.1)
+                };
+                if changed {
+                    let _ = settings.save();
+                    self.spawn_tooltip_preview(&id, wv, hv, settings);
+                }
+            }
+            SettingsMessage::TooltipSizeHeight(id, h) => {
+                let def = (settings.tooltip_width_px, settings.tooltip_height_px);
+                let new_h = h.clamp(100, 1000);
+                let (changed, wv, hv) = {
+                    let e = settings.tooltip_sizes.entry(id.clone()).or_insert(def);
+                    let ch = e.1 != new_h;
+                    if ch { e.1 = new_h; }
+                    (ch, e.0, e.1)
+                };
+                if changed {
+                    let _ = settings.save();
+                    self.spawn_tooltip_preview(&id, wv, hv, settings);
+                }
+            },SettingsMessage::ResetTooltipSize(id) => { self.kill_preview(); settings.tooltip_sizes.remove(&id); }
+            SettingsMessage::SelectTab(t) => { self.kill_preview(); self.active_tab = t; }
 
             SettingsMessage::BarHeight(v) => settings.bar_height = v.clamp(28, 90),
             SettingsMessage::GlobalFontSize(v) => settings.global_font_size = v.clamp(8, 32),
             SettingsMessage::OverlayFontSize(v) => settings.overlay_font_size = v.clamp(10, 36),
             SettingsMessage::TooltipFontSize(v) => settings.tooltip_font_size = v.clamp(8, 28),
             SettingsMessage::SlantWidth(v) => settings.slant_width = (v as f32).clamp(0.0, 40.0),
+            SettingsMessage::TooltipDropMs(v) => settings.tooltip_drop_ms = v.clamp(50, 1000),
+            SettingsMessage::TooltipExpandMs(v) => settings.tooltip_expand_ms = v.clamp(50, 1000),
+            SettingsMessage::TooltipWidthPx(v) => settings.tooltip_width_px = v.clamp(200, 1000),
+            SettingsMessage::TooltipHeightPx(v) => settings.tooltip_height_px = v.clamp(100, 1000),
+            SettingsMessage::TooltipPauseMs(v) => settings.tooltip_pause_ms = v.clamp(0, 1000),
             SettingsMessage::BorderWidth(v) => settings.global_border_width = (v as f32).clamp(1.0, 12.0),
             SettingsMessage::ControlBorderWidth(v) => settings.control_border_width = (v as f32).clamp(1.0, 8.0),
             SettingsMessage::CapsuleSpacing(v) => settings.capsule_spacing = v.clamp(-50, 40),
@@ -360,16 +435,158 @@ impl SettingsOverlay {
             SettingsMessage::OverlayAngle(v) => {
                 settings.overlay_angle = v.clamp(5, 85);
             }
-
-            SettingsMessage::TestNotification => {
+SettingsMessage::TestNotification => {
                 settings.friend_profiles = crate::config::settings::load_friend_profiles();
             }
-            SettingsMessage::SaveSettings => {}
-            SettingsMessage::Dismiss => {}
+            SettingsMessage::ToggleEditModule(id) => {
+                mbs_dbg(&format!("[dbg-toggle-FIRED] id={:?}", id));
+                mbs_dbg(&format!("[toggle] FIRED id={:?} current={:?}", id, self.editing_module));
+                if self.editing_module.as_deref() == Some(&id) {
+                    self.editing_module = None;
+                } else {
+                    self.editing_module = Some(id);
+                }
+                mbs_dbg(&format!("[toggle] new value={:?}", self.editing_module));
+            }
+SettingsMessage::AlarmSoundChanged(v) => {
+    settings.alarm_sound = if v.trim().is_empty() { None } else { Some(v) };
+}
+SettingsMessage::AlarmSoundDurationChanged(v) => {
+    settings.alarm_sound_duration_sec = v.clamp(1, 60);
+}
+SettingsMessage::TestAlarmSound => {
+                if let Some(sound) = &settings.alarm_sound {
+                    let path = if std::path::Path::new(sound).is_absolute() {
+                        std::path::PathBuf::from(sound)
+                    } else {
+                        std::path::PathBuf::from("resources").join(sound)
+                    };
+                    let path_str = path.to_string_lossy().to_string();
+                    let dur = settings.alarm_sound_duration_sec;
+                    let vol_pct = settings.alarm_sound_volume;
+                    // pw-play needs fractional volume (0.0-1.0), NOT percent (6)
+                    let vol_f = (vol_pct as f32) / 100.0;
+                    let cmd = format!(
+                        r#"timeout {}s pw-play --volume={:.2} "{}" 2>/dev/null"#,
+                        dur, vol_f, path_str
+                    );
+                    let _ = std::process::Command::new("sh").arg("-c").arg(cmd).spawn();
+                }
+            }
+SettingsMessage::SaveSettings => {}
+            SettingsMessage::AlarmSoundVolumeChanged(v) => {
+
+                settings.alarm_sound_volume = v.clamp(0, 100);
+
+            }
+
+            SettingsMessage::ImportAlarmSound => {
+                let output = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg("zenity --file-selection --title='Select alarm sound' 2>/dev/null || kdialog --getopenfilename . 2>/dev/null || yad --file 2>/dev/null")
+                    .output();
+                if let Ok(out) = output {
+                    let path_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    if !path_str.is_empty() {
+                        let src = std::path::Path::new(&path_str);
+                        if let Some(filename) = src.file_name().and_then(|f| f.to_str()) {
+                            let _ = std::fs::create_dir_all("resources");
+                            let dest = std::path::PathBuf::from("resources").join(filename);
+                            if std::fs::copy(src, &dest).is_ok() {
+                                settings.alarm_sound = Some(filename.to_string());
+                                let _ = settings.save();
+                            }
+                        }
+                    }
+                }
+            }
+            SettingsMessage::Dismiss => { self.kill_preview(); }
         }
 
-        if should_persist {
+        // Commit to disk: immediately on explicit save-worthy events, or
+        // 300ms after the last slider tick (rate-limited so a full slider
+        // drag writes at most ~3×/sec instead of 60×/sec).
+        let rate_limited = self.last_save.elapsed() >= std::time::Duration::from_millis(300);
+        if should_persist || rate_limited {
             let _ = settings.save();
+            self.last_save = std::time::Instant::now();
+        }
+    }
+
+    fn spawn_tooltip_preview(&mut self, id: &str, w: u32, h: u32, settings: &ShellSettings) {
+        // Debounce: skip if we spawned within last 80ms
+        if self.last_preview.elapsed() < std::time::Duration::from_millis(80) {
+            return;
+        }
+        self.last_preview = std::time::Instant::now();
+
+        // Kill existing preview
+        if let Some(mut c) = self.preview_child.take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+
+        let exe = match std::env::current_exe() {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+
+        let (arg, extra_env): (&str, Option<(&str, String)>) = match id {
+            "weather" => ("--weather-tooltip", None),
+            "tray" => ("--tray-popup", None),
+            "alarm" => ("--alarm-tooltip", None),
+            "cpu" | "gpu" | "ram" => ("--sys-tooltip", Some(("MBS_SYS_TARGET", id.to_string()))),
+            "calendar" | "music" | "unified" | "net" | "custom" => {
+                ("--info-tooltip", Some(("MBS_INFO_MODE", id.to_string())))
+            }
+            _ => return,
+        };
+
+        let id_owned = id.to_string();
+        let (sl, sr, grow_right) = if settings.bar_left.contains(&id_owned) {
+            ("L", "L", "1")
+        } else if settings.bar_right.contains(&id_owned) {
+            ("R", "R", "0")
+        } else {
+            ("L", "R", "1")
+        };
+
+        // Approximate bar position — settings doesn't know the exact capsule cx.
+        let preview_cx = 400i32;
+        let preview_sw = 1920i32;
+        let preview_cap_w = 150i32;
+
+        let mut cmd = std::process::Command::new(exe);
+        cmd.arg(arg);
+        cmd.env("MBS_TOOLTIP_W", w.to_string())
+           .env("MBS_TOOLTIP_H", h.to_string())
+           .env("MBS_TOOLTIP_DROP_MS", settings.tooltip_drop_ms.to_string())
+           .env("MBS_TOOLTIP_EXPAND_MS", settings.tooltip_expand_ms.to_string())
+           .env("MBS_TOOLTIP_PAUSE_MS", settings.tooltip_pause_ms.to_string())
+           .env("MBS_CAPSULE_CX", preview_cx.to_string())
+           .env("MBS_CAPSULE_W", preview_cap_w.to_string())
+           .env("MBS_SCREEN_W", preview_sw.to_string())
+           .env("MBS_SLANT_L", sl)
+           .env("MBS_SLANT_R", sr)
+           .env("MBS_GROW_RIGHT", grow_right)
+           .env("MBS_OUTPUT", &settings.bar_monitor);
+
+        if let Some((k, v)) = extra_env {
+            cmd.env(k, v);
+        }
+
+        match cmd.spawn() {
+            Ok(child) => {
+                self.preview_child = Some(child);
+            }
+            Err(e) => eprintln!("[preview] spawn failed: {e}"),
+        }
+    }
+
+    fn kill_preview(&mut self) {
+        if let Some(mut c) = self.preview_child.take() {
+            let _ = c.kill();
+            let _ = c.wait();
         }
     }
 
@@ -965,37 +1182,64 @@ impl SettingsOverlay {
                         })
                 };
 
-                let bg_bar_row = row![
+                // ── Monitor picker ────────────────────────────────
+                let monitors = ["All", "DP-1", "DP-2", "HDMI-A-1", "HDMI-A-2"];
+                let mut mon_row: iced::widget::Row<'a, SettingsMessage> = iced::widget::Row::new()
+                    .spacing(8).align_y(Alignment::Center)
+                    .push(text("Bar Monitor:").size(scale_sz(0.85)).bold().color(theme.text));
+                for m in monitors {
+                    let is_sel = settings.bar_monitor == m;
+                    let m_str = m.to_string();
+                    let btn = button(
+                        text(m).size(scale_sz(0.65)).bold()
+                            .color(if is_sel { Color::BLACK } else { theme.text })
+                    )
+                    .on_press(SettingsMessage::SelectBarMonitor(m_str))
+                    .padding([3, 10])
+                    .style(move |_t, _s| button::Style {
+                        background: Some(iced::Background::Color(
+                            if is_sel { theme.text } else { Color::TRANSPARENT }
+                        )),
+                        border: iced::Border {
+                            color: if is_sel { theme.text } else { theme.border },
+                            width: 1.0, radius: 4.0.into()
+                        },
+                        ..Default::default()
+                    });
+                    mon_row = mon_row.push(btn);
+                }
+
+                let bg_bar_row: Element<'a, SettingsMessage> = row![
                     text("Background Bar Shape:").size(scale_sz(0.85)).bold().color(theme.text),
                     mk_toggle("SLANT", settings.bar_shape == "slant", SettingsMessage::SelectBarShape("slant".into())),
                     mk_toggle("HEXAGON", settings.bar_shape == "hexagon", SettingsMessage::SelectBarShape("hexagon".into())),
                     mk_toggle("ROUNDED", settings.bar_shape == "rounded", SettingsMessage::SelectBarShape("rounded".into())),
                     mk_toggle("FLAT", settings.bar_shape == "flat", SettingsMessage::SelectBarShape("flat".into())),
-                ].spacing(8).align_y(Alignment::Center).width(Length::Fill);
+                ].spacing(8).align_y(Alignment::Center).width(Length::Fill).into();
 
-                let module_slants_row = row![
+                let module_slants_row: Element<'a, SettingsMessage> = row![
                     text("Module Slants:").size(scale_sz(0.85)).bold().color(theme.text),
-                    mk_toggle("LEFT (\\)", settings.slant_mode == "left", SettingsMessage::SelectSlantMode("left".into())),
-                    mk_toggle("CENTER (/\\/)", settings.slant_mode == "center" || settings.slant_mode == "symmetric" || settings.slant_mode == "sym", SettingsMessage::SelectSlantMode("center".into())),
-                    mk_toggle("RIGHT (/)", settings.slant_mode == "right", SettingsMessage::SelectSlantMode("right".into())),
-                ].spacing(8).align_y(Alignment::Center).width(Length::Fill);
+                    mk_toggle("LEFT", settings.slant_mode == "left", SettingsMessage::SelectSlantMode("left".into())),
+                    mk_toggle("CENTER", settings.slant_mode == "center" || settings.slant_mode == "symmetric" || settings.slant_mode == "sym", SettingsMessage::SelectSlantMode("center".into())),
+                    mk_toggle("RIGHT", settings.slant_mode == "right", SettingsMessage::SelectSlantMode("right".into())),
+                ].spacing(8).align_y(Alignment::Center).width(Length::Fill).into();
 
-                let module_shape_row = row![
+                let module_shape_row: Element<'a, SettingsMessage> = row![
                     text("Module Shape:").size(scale_sz(0.85)).bold().color(theme.text),
                     mk_toggle("SLANT", settings.module_shape == "slant", SettingsMessage::SelectModuleShape("slant".into())),
                     mk_toggle("HEXAGON", settings.module_shape == "hexagon", SettingsMessage::SelectModuleShape("hexagon".into())),
                     mk_toggle("ROUNDED", settings.module_shape == "rounded", SettingsMessage::SelectModuleShape("rounded".into())),
                     mk_toggle("FLAT", settings.module_shape == "flat", SettingsMessage::SelectModuleShape("flat".into())),
-                ].spacing(8).align_y(Alignment::Center).width(Length::Fill);
+                ].spacing(8).align_y(Alignment::Center).width(Length::Fill).into();
 
-                let top_sliders = column![
+                let top_sliders: Element<'a, SettingsMessage> = column![
                     row![
                         column![
                             row![text("Top Bar Height").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.bar_height)).size(scale_sz(0.8)).bold().color(theme.text)],
                             slider(28..=90, settings.bar_height, SettingsMessage::BarHeight).width(Length::Fill),
                         ].spacing(3).width(Length::FillPortion(1)),
                         column![
-                            row![text("Global Font Size (Bar)").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.global_font_size)).size(scale_sz(0.8)).bold().color(theme.text)],
+                            row![text("Global Font Size").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.global_font_size)).size(scale_sz(0.8)).bold().color(theme.text)],
                             slider(8..=32, settings.global_font_size, SettingsMessage::GlobalFontSize).width(Length::Fill),
                         ].spacing(3).width(Length::FillPortion(1)),
                     ].spacing(20).width(Length::Fill),
@@ -1009,34 +1253,66 @@ impl SettingsOverlay {
                             slider(0..=40, settings.slant_width as u32, SettingsMessage::SlantWidth).width(Length::Fill),
                         ].spacing(3).width(Length::FillPortion(1)),
                     ].spacing(20).width(Length::Fill),
+                ].spacing(12).width(Length::Fill).into();
+
+                let anim_sliders: Element<'a, SettingsMessage> = column![
                     row![
                         column![
-                            row![text("Tooltip Text Size").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tooltip_font_size)).size(scale_sz(0.8)).bold().color(theme.text)],
-                            slider(8..=28, settings.tooltip_font_size, SettingsMessage::TooltipFontSize).width(Length::Fill),
+                            row![text("Tooltip Drop Speed").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}ms", settings.tooltip_drop_ms)).size(scale_sz(0.8)).bold().color(theme.text)],
+                            slider(5..=100, (settings.tooltip_drop_ms / 10).max(5).min(100), |v: u32| SettingsMessage::TooltipDropMs(v * 10)).width(Length::Fill),
                         ].spacing(3).width(Length::FillPortion(1)),
-                        row![].width(Length::FillPortion(1)),
+                        column![
+                            row![text("Tooltip Expand Speed").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}ms", settings.tooltip_expand_ms)).size(scale_sz(0.8)).bold().color(theme.text)],
+                            slider(5..=100, (settings.tooltip_expand_ms / 10).max(5).min(100), |v: u32| SettingsMessage::TooltipExpandMs(v * 10)).width(Length::Fill),
+                        ].spacing(3).width(Length::FillPortion(1)),
                     ].spacing(20).width(Length::Fill),
-                ].spacing(12).width(Length::Fill);
+                    row![
+                        column![
+                            row![text("Tooltip Pause Time").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}ms", settings.tooltip_pause_ms)).size(scale_sz(0.8)).bold().color(theme.text)],
+                            slider(0..=100, (settings.tooltip_pause_ms / 10).min(100), |v: u32| SettingsMessage::TooltipPauseMs(v * 10)).width(Length::Fill),
+                        ].spacing(3).width(Length::FillPortion(1)),
+                        column![].width(Length::FillPortion(1)),
+                    ].spacing(20).width(Length::Fill),
+                ].spacing(12).width(Length::Fill).into();
+
 
                 let render_row = |id_str: &str, is_visible: bool| -> Element<'a, SettingsMessage> {
                     let id = id_str.to_string();
+                    let (w_val, h_val) = settings.tooltip_size(id_str);
+                    let id_w = id_str.to_string();
+                    let id_h = id_str.to_string();
+                    let id_reset = id_str.to_string();
+                    let has_override = settings.tooltip_sizes.contains_key(id_str);
+
                     let up = button(text("▲").size(scale_sz(0.6)).color(theme.text))
                         .on_press(SettingsMessage::MoveCapsuleUp(id.clone()))
                         .padding([2, 6])
                         .style(move |_t, _s| button::Style { background: None, border: iced::Border::default(), ..Default::default() });
-                    
                     let down = button(text("▼").size(scale_sz(0.6)).color(theme.text))
                         .on_press(SettingsMessage::MoveCapsuleDown(id.clone()))
                         .padding([2, 6])
                         .style(move |_t, _s| button::Style { background: None, border: iced::Border::default(), ..Default::default() });
 
-                    let edit_btn = button(text("Edit").size(scale_sz(0.65)).color(theme.background))
-                        .padding([4, 8])
-                        .style(move |_t, _s| button::Style {
-                            background: Some(iced::Background::Color(theme.text)),
-                            border: iced::Border { color: theme.text, width: 1.0, radius: 4.0.into() },
-                            ..Default::default()
-                        });
+                    let (min_w, min_h): (u32, u32) = match id_str {
+                        "alarm" => (400, 280), "calendar" => (380, 260), "music" => (380, 280),
+                        "unified" => (380, 260), "net" => (380, 260), _ => (280, 200),
+                    };
+                    let size_controls = row![
+                        text("W:").size(scale_sz(0.6)).color(theme.muted),
+                        slider(min_w..=1200, w_val, move |v| SettingsMessage::TooltipSizeWidth(id_w.clone(), v)).width(Length::Fixed(100.0)),
+                        text(format!("{}", w_val)).size(scale_sz(0.6)).color(theme.text).width(Length::Fixed(35.0)),
+                        text("H:").size(scale_sz(0.6)).color(theme.muted),
+                        slider(min_h..=1000, h_val, move |v| SettingsMessage::TooltipSizeHeight(id_h.clone(), v)).width(Length::Fixed(100.0)),
+                        text(format!("{}", h_val)).size(scale_sz(0.6)).color(theme.text).width(Length::Fixed(35.0)),
+                        button(text(if has_override { "×" } else { "·" }).size(scale_sz(0.7)).color(if has_override { theme.danger } else { theme.muted }))
+                            .on_press(SettingsMessage::ResetTooltipSize(id_reset))
+                            .padding([2, 6])
+                            .style(move |_t, _s| button::Style {
+                                background: Some(iced::Background::Color(theme.background)),
+                                border: iced::Border { color: if has_override { theme.danger } else { theme.border }, width: 1.0, radius: 3.0.into() },
+                                ..Default::default()
+                            }),
+                    ].spacing(4).align_y(Alignment::Center);
 
                     let btn_text = if is_visible { "HIDE" } else { "SHOW" };
                     let btn_bg = if is_visible { theme.danger } else { theme.success };
@@ -1048,42 +1324,87 @@ impl SettingsOverlay {
                             border: iced::Border { color: btn_bg, width: 1.0, radius: 4.0.into() },
                             ..Default::default()
                         });
-
                     let mk_move = |lbl: &'static str, target: &'static str| {
                         button(text(lbl).size(scale_sz(0.55)).color(theme.text))
                             .on_press(SettingsMessage::MoveCapsuleTo(id.clone(), target.into()))
                             .padding([2, 4])
-                            .style(move |_t, _s| button::Style { background: Some(iced::Background::Color(theme.background)), border: iced::Border { color: theme.text, width: 1.0, radius: 3.0.into() }, ..Default::default() })
+                            .style(move |_t, _s| button::Style {
+                                background: Some(iced::Background::Color(theme.background)),
+                                border: iced::Border { color: theme.text, width: 1.0, radius: 3.0.into() },
+                                ..Default::default()
+                            })
                     };
-
                     let controls = row![
                         mk_move("L", "left"), mk_move("C", "center"), mk_move("R", "right"),
-                        edit_btn,
                         toggle_btn
                     ].spacing(4).align_y(Alignment::Center);
 
-                    container(
-                        row![
-                            row![up, down].spacing(4),
-                            text(id_str.to_uppercase()).size(scale_sz(0.7)).bold().color(theme.text),
-                            row![].width(Length::Fill),
-                            controls
-                        ].spacing(8).align_y(Alignment::Center)
-                    )
-                    .padding([6, 10])
-                    .width(Length::Fill)
-                    .style(move |_t| container::Style {
-                        border: iced::Border { color: theme.text, width: 1.0, radius: 6.0.into() },
-                        ..Default::default()
-                    }).into()
+                    let base_row = row![
+                        row![up, down].spacing(4),
+                        text(id_str.to_uppercase()).size(scale_sz(0.7)).bold().color(theme.text).width(Length::Fixed(110.0)),
+                        size_controls,
+                        row![].width(Length::Fill),
+                        controls
+                    ].spacing(8).align_y(Alignment::Center);
+
+                    let mut content_col = column![base_row].spacing(8).width(Length::Fill);
+
+                    if id_str == "alarm" {
+                        let audio_ui = column![
+                            row![
+                                text("Sound:").size(scale_sz(0.7)).color(theme.muted).width(Length::Fixed(55.0)),
+                                text_input("filename.mp3", settings.alarm_sound.as_deref().unwrap_or(""))
+                                    .on_input(SettingsMessage::AlarmSoundChanged)
+                                    .padding(4)
+                                    .size(scale_sz(0.7))
+                                    .width(Length::Fill),
+                                button(text("Import").size(scale_sz(0.65)).bold().color(theme.text))
+                                    .on_press(SettingsMessage::ImportAlarmSound)
+                                    .padding([4, 8])
+                                    .style(move |_t, _s| button::Style {
+                                        background: Some(iced::Background::Color(theme.background)),
+                                        border: iced::Border { color: theme.text, width: 1.0, radius: 4.0.into() },
+                                        ..Default::default()
+                                    }),
+                                button(text("Test").size(scale_sz(0.65)).bold().color(theme.text))
+                                    .on_press(SettingsMessage::TestAlarmSound)
+                                    .padding([4, 8])
+                                    .style(move |_t, _s| button::Style {
+                                        background: Some(iced::Background::Color(theme.background)),
+                                        border: iced::Border { color: theme.text, width: 1.0, radius: 4.0.into() },
+                                        ..Default::default()
+                                    }),
+                            ].spacing(8).align_y(Alignment::Center),
+                            row![
+                                text("Duration:").size(scale_sz(0.7)).color(theme.muted).width(Length::Fixed(55.0)),
+                                slider(1..=60, settings.alarm_sound_duration_sec, SettingsMessage::AlarmSoundDurationChanged).width(Length::Fill),
+                                text(format!("{}s", settings.alarm_sound_duration_sec)).size(scale_sz(0.7)).color(theme.text).width(Length::Fixed(25.0)),
+                            ].spacing(8).align_y(Alignment::Center),
+                            row![
+                                text("Volume:").size(scale_sz(0.7)).color(theme.muted).width(Length::Fixed(55.0)),
+                                slider(0..=100, settings.alarm_sound_volume, SettingsMessage::AlarmSoundVolumeChanged).width(Length::Fill),
+                                text(format!("{}%", settings.alarm_sound_volume)).size(scale_sz(0.7)).color(theme.text).width(Length::Fixed(25.0)),
+                            ].spacing(8).align_y(Alignment::Center),
+                        ].spacing(6).width(Length::Fill);
+                        
+                        content_col = content_col.push(audio_ui);
+                    }
+
+                    container(content_col)
+                        .padding([8, 10])
+                        .width(Length::Fill)
+                        .style(move |_t| container::Style {
+                            border: iced::Border { color: theme.text, width: 1.0, radius: 6.0.into() },
+                            ..Default::default()
+                        })
+                        .into()
                 };
 
-                let section_header = |title: &'static str, color: Color| {
+                                let section_header = |title: &'static str, color: Color| {
                     container(
                         row![
                             text(title).size(scale_sz(0.85)).bold().color(color),
                             row![].width(Length::Fill),
-                            text(" \\ \\").size(scale_sz(0.85)).color(color)
                         ]
                     )
                     .padding([4, 12])
@@ -1093,7 +1414,7 @@ impl SettingsOverlay {
                     }).width(Length::Fill)
                 };
 
-                let mut sections = column![].spacing(16).width(Length::Fill);
+                let mut sections: iced::widget::Column<'a, SettingsMessage> = iced::widget::Column::new().spacing(16).width(Length::Fill);
 
                 sections = sections.push(section_header("LEFT BAR SECTION", theme.success));
                 for id in &settings.bar_left {
@@ -1101,21 +1422,18 @@ impl SettingsOverlay {
                         sections = sections.push(render_row(id, true));
                     }
                 }
-
                 sections = sections.push(section_header("CENTER BAR SECTION", theme.success));
                 for id in &settings.bar_center {
                     if settings.visible_capsules.get(id).copied().unwrap_or(true) {
                         sections = sections.push(render_row(id, true));
                     }
                 }
-
                 sections = sections.push(section_header("RIGHT BAR SECTION", theme.success));
                 for id in &settings.bar_right {
                     if settings.visible_capsules.get(id).copied().unwrap_or(true) {
                         sections = sections.push(render_row(id, true));
                     }
                 }
-
                 sections = sections.push(section_header("HIDDEN MODULES", theme.danger));
                 for id_str in all_capsules {
                     let id = id_str.to_string();
@@ -1123,7 +1441,6 @@ impl SettingsOverlay {
                     let in_left = settings.bar_left.contains(&id);
                     let in_center = settings.bar_center.contains(&id);
                     let in_right = settings.bar_right.contains(&id);
-
                     if !is_vis || (!in_left && !in_center && !in_right) {
                         sections = sections.push(render_row(id_str, false));
                     }
@@ -1133,20 +1450,21 @@ impl SettingsOverlay {
                     scrollable(
                         column![
                             text("BAR GEOMETRY, CAPSULE SHAPES & LAYOUT").size(scale_sz(1.0)).bold().color(theme.success),
+                            mon_row,
                             bg_bar_row,
                             module_slants_row,
                             module_shape_row,
                             top_sliders,
-                            sections
+                            anim_sliders,
+                            sections,
                         ].spacing(16).width(Length::Fill)
                     )
                     .height(Length::Fill)
                     .width(Length::Fill)
                 )
                 .padding(iced::Padding {
-                    top: 0.0,
-                    right: 0.0,
-                    bottom: (settings.overlay_cut as f32) + 16.0, // Dynamic padding based on chamfer size
+                    top: 0.0, right: 0.0,
+                    bottom: (settings.overlay_cut as f32) + 16.0,
                     left: 0.0,
                 })
                 .width(Length::Fill)

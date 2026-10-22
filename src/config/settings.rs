@@ -127,6 +127,18 @@ pub struct ShellSettings {
     pub tooltip_font_size: u16,
     #[serde(default = "default_slant_width", alias = "slantWidth")]
     pub slant_width: f32,
+    #[serde(default = "default_tooltip_drop_ms", alias = "tooltipDropMs")]
+    pub tooltip_drop_ms: u32,
+    #[serde(default = "default_tooltip_expand_ms", alias = "tooltipExpandMs")]
+    pub tooltip_expand_ms: u32,
+    #[serde(default = "default_tooltip_width_px", alias = "tooltipWidthPx")]
+    pub tooltip_width_px: u32,
+    #[serde(default = "default_tooltip_height_px", alias = "tooltipHeightPx")]
+    pub tooltip_height_px: u32,
+    #[serde(default = "default_tooltip_pause_ms", alias = "tooltipPauseMs")]
+    pub tooltip_pause_ms: u32,
+    #[serde(default, alias = "tooltipSizes")]
+    pub tooltip_sizes: HashMap<String, (u32, u32)>,
     #[serde(default = "default_slant_mode", alias = "slantStyleMode")]
     pub slant_mode: String,
     #[serde(default = "default_bar_shape", alias = "barShapeStyle")]
@@ -156,6 +168,8 @@ pub struct ShellSettings {
     pub notif_shape: String,
     #[serde(default = "default_notif_screen", alias = "notifScreenName")]
     pub notif_screen_name: String,
+    #[serde(default = "default_bar_monitor", alias = "barMonitor")]
+    pub bar_monitor: String,
     #[serde(default = "default_notif_baseline", alias = "notifBaselineY")]
     pub notif_baseline_y: i32,
     #[serde(default = "default_notif_margin_x", alias = "notifMarginX")]
@@ -178,6 +192,12 @@ pub struct ShellSettings {
     pub notif_body_size: u16,
     #[serde(default = "default_excluded", alias = "notifExcludedStr")]
     pub notif_excluded: String,
+    #[serde(default, alias = "alarmSound")]
+    pub alarm_sound: Option<String>,
+    #[serde(default = "default_alarm_sound_duration", alias = "alarmSoundDurationSec")]
+    pub alarm_sound_duration_sec: u32,
+    #[serde(default = "default_alarm_sound_volume", alias = "alarmSoundVolume")]
+    pub alarm_sound_volume: u32,
 
     #[serde(default = "load_friend_profiles", alias = "friendProfiles")]
     pub friend_profiles: Vec<FriendProfile>,
@@ -217,6 +237,11 @@ fn default_font_size() -> u16 { 14 }
 fn default_overlay_font_size() -> u16 { 16 }
 fn default_tooltip_font_size() -> u16 { 14 }
 fn default_slant_width() -> f32 { 12.0 }
+fn default_tooltip_drop_ms() -> u32 { 180 }
+fn default_tooltip_expand_ms() -> u32 { 162 }
+fn default_tooltip_width_px() -> u32 { 380 }
+fn default_tooltip_height_px() -> u32 { 300 }
+fn default_tooltip_pause_ms() -> u32 { 0 }
 fn default_slant_mode() -> String { "symmetric".to_string() }
 fn default_bar_shape() -> String { "slant".to_string() }
 fn default_global_border_width() -> f32 { 3.0 }
@@ -231,6 +256,7 @@ fn default_notif_volume() -> u32 { 50 }
 fn default_notif_corner() -> String { "top-right".to_string() }
 fn default_notif_shape() -> String { "hex".to_string() }
 fn default_notif_screen() -> String { "Auto (Primary)".to_string() }
+fn default_bar_monitor() -> String { "All".to_string() }
 fn default_notif_baseline() -> i32 { 340 }
 fn default_notif_margin_x() -> i32 { 0 }
 fn default_notif_overlap() -> i32 { -20 }
@@ -242,6 +268,8 @@ fn default_drop_distance() -> u32 { 50 }
 fn default_summary_size() -> u16 { 24 }
 fn default_body_size() -> u16 { 22 }
 fn default_excluded() -> String { "greenclip, copyq".to_string() }
+fn default_alarm_sound_duration() -> u32 { 5 }
+fn default_alarm_sound_volume() -> u32 { 100 }
 fn default_overlay_cut() -> u32 { 24 }
 fn default_overlay_angle() -> u32 { 45 }
 
@@ -271,6 +299,12 @@ impl Default for ShellSettings {
             overlay_font_size: default_overlay_font_size(),
             tooltip_font_size: default_tooltip_font_size(),
             slant_width: default_slant_width(),
+            tooltip_drop_ms: default_tooltip_drop_ms(),
+            tooltip_expand_ms: default_tooltip_expand_ms(),
+            tooltip_width_px: default_tooltip_width_px(),
+            tooltip_height_px: default_tooltip_height_px(),
+            tooltip_pause_ms: default_tooltip_pause_ms(),
+            tooltip_sizes: HashMap::new(),
             slant_mode: default_slant_mode(),
             bar_shape: default_bar_shape(),
             module_shape: "slant".into(),
@@ -285,6 +319,7 @@ impl Default for ShellSettings {
             notif_corner: default_notif_corner(),
             notif_shape: default_notif_shape(),
             notif_screen_name: default_notif_screen(),
+            bar_monitor: default_bar_monitor(),
             notif_baseline_y: default_notif_baseline(),
             notif_margin_x: default_notif_margin_x(),
             notif_stack_overlap: default_notif_overlap(),
@@ -296,6 +331,9 @@ impl Default for ShellSettings {
             notif_summary_size: default_summary_size(),
             notif_body_size: default_body_size(),
             notif_excluded: default_excluded(),
+            alarm_sound: None,
+            alarm_sound_duration_sec: default_alarm_sound_duration(),
+            alarm_sound_volume: default_alarm_sound_volume(),
             friend_profiles: load_friend_profiles(),
             bar_left: default_bar_left(),
             bar_center: default_bar_center(),
@@ -326,6 +364,11 @@ impl ShellSettings {
         config_dir.join("moon-beauty-shell").join("settings.json")
     }
 
+    pub fn tooltip_size(&self, id: &str) -> (u32, u32) {
+        self.tooltip_sizes.get(id).copied()
+            .unwrap_or((self.tooltip_width_px, self.tooltip_height_px))
+    }
+
     pub fn get_window_size(&self, id: &str, def_w: u32, def_h: u32) -> (f32, f32) {
         if let Some(win) = self.standalone_windows.get(id) {
             (win.width as f32, win.height as f32)
@@ -353,6 +396,8 @@ impl ShellSettings {
     }
 
     pub fn save(&self) -> Result<(), std::io::Error> {
+        eprintln!("[save] writing tooltip_sizes={:?} bar_monitor={:?}",
+            self.tooltip_sizes, self.bar_monitor);
         let path = Self::config_path();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -363,6 +408,7 @@ impl ShellSettings {
         fs::rename(tmp_path, &path)?;
 
         let _ = save_friend_profiles(&self.friend_profiles);
+        eprintln!("[save] OK -> {:?}", path);
         Ok(())
     }
 }

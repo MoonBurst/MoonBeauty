@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, horizontal_space, row, text, MouseArea, Space, Stack};
+use iced::widget::{button, column, container, row, text, MouseArea, Space, Stack};
 use iced::{Alignment, Color, Element, Length, Task, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
@@ -8,9 +8,8 @@ use std::time::Instant;
 
 use crate::config::theme::ShellTheme;
 use crate::config::ShellSettings;
-use crate::style::shape_box::{ShapeBox, ShapeType, SlantSide};
+use crate::style::shape_box::SlantSide;
 
-const H: u32 = 380;
 const W_START: f32 = 100.0;
 const AUTO_MS: u128 = 25_000;
 
@@ -39,11 +38,16 @@ pub struct App {
     opened: Instant,
     grow_right: bool,
     w: u32,
+    h: u32,
+    drop_ms: f32,
+    expand_ms: f32,
     w_start: f32,
     slant_l: SlantSide,
+    #[allow(dead_code)]
     slant_r: SlantSide,
     items: Vec<TrayItem>,
     loaded: bool,
+    closing_at: Option<Instant>,
 }
 
 impl Application for App {
@@ -56,7 +60,12 @@ impl Application for App {
         let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|s| s.parse().ok()).unwrap_or(200);
         let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|s| s.parse().ok()).unwrap_or(1920);
         let grow_right = std::env::var("MBS_GROW_RIGHT").map(|v| v == "1").unwrap_or_else(|_| cx < sw / 2);
-        let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
+        let _h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
+    let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
+        let s = ShellSettings::load();
+        let h = s.tooltip_height_px;
+        let drop_ms = s.tooltip_drop_ms as f32;
+        let expand_ms = s.tooltip_expand_ms as f32;
         let w_start: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(W_START);
         let sl_str = std::env::var("MBS_SLANT_L").unwrap_or_else(|_| "L".into());
         let sr_str = std::env::var("MBS_SLANT_R").unwrap_or_else(|_| "L".into());
@@ -65,8 +74,8 @@ impl Application for App {
 
         let app = Self {
             opened: Instant::now(), grow_right, w, w_start, slant_l, slant_r,
-            items: Vec::new(), loaded: false,
-        };
+            items: Vec::new(), loaded: false, h, drop_ms, expand_ms,
+            closing_at: None,};
         let task = Task::perform(fetch_tray_items(), Message::ItemsLoaded);
         (app, task)
     }
@@ -79,7 +88,13 @@ impl Application for App {
 
     fn update(&mut self, m: Message) -> Task<Message> {
         match m {
-            Message::Tick => { if self.opened.elapsed().as_millis() > AUTO_MS { std::process::exit(0); } }
+            Message::Tick => { if let Some(t) = self.closing_at {
+                    if t.elapsed().as_millis() > (self.drop_ms * 1.9) as u128 {
+                        std::process::exit(0);
+                    }
+                } else if self.opened.elapsed().as_millis() > AUTO_MS {
+                    std::process::exit(0);
+                } }
             Message::ItemsLoaded(items) => { self.items = items; self.loaded = true; }
             Message::Activate(item) => {
                 std::thread::spawn(move || {
@@ -103,7 +118,7 @@ impl Application for App {
                 });
                 std::process::exit(0);
             }
-            Message::Dismiss => std::process::exit(0),
+            Message::Dismiss => { self.closing_at = Some(Instant::now()); }
         }
         Task::none()
     }
@@ -111,15 +126,41 @@ impl Application for App {
     fn view(&self) -> Element<'_, Message> {
         let settings = ShellSettings::load();
         let theme = ShellTheme::from_settings(&settings);
-        let anim = crate::overlays::tooltip_anim::compute(self.opened.elapsed().as_millis() as f32, self.w_start, self.w as f32, H as f32);
-        let slant = (theme.slant_width * (anim.h / settings.bar_height as f32)).max(0.0);
+        let anim = if let Some(t) = self.closing_at {
+            crate::overlays::tooltip_engine::compute_close(
+                t.elapsed().as_millis() as f32,
+                self.w_start,
+                self.w as f32,
+                self.h as f32,
+                theme.slant_width,
+                settings.bar_height as f32,
+                self.drop_ms,
+            )
+        } else {
+            crate::overlays::tooltip_engine::compute(
+                self.opened.elapsed().as_millis() as f32,
+            self.w_start,
+            self.w as f32,
+            self.h as f32,
+            theme.slant_width,
+            settings.bar_height as f32,
+            self.drop_ms,
+            self.expand_ms,
+        
+            )
+        };
+        let _slant = (theme.slant_width * (anim.h / settings.bar_height as f32)).max(0.0);
 
-        let bg_shape = ShapeBox::new()
-            .shape(ShapeType::Slant { left: self.slant_l, right: self.slant_r })
-            .background(theme.background)
-            .border(theme.text, theme.control_border_width)
-            .slant_width(slant)
-            .size(Length::Fixed(self.w as f32), Length::Fixed(anim.h));
+        let slant_h = theme.slant_width * (anim.h / settings.bar_height as f32);
+        let bg = crate::overlays::tooltip_engine::ParallelogramBg {
+            w: anim.w,
+            h: anim.h,
+            slant: slant_h,
+            slant_right: self.slant_l == SlantSide::Right,
+            background: theme.background,
+            border_color: theme.text,
+            border_width: theme.control_border_width,
+        };
 
         let body: Element<'_, Message> = if !self.loaded {
             container(text("Loading tray items…").size(13).color(theme.muted))
@@ -158,11 +199,11 @@ impl Application for App {
 
         let body_fixed: Element<'_, Message> = container(body)
             .width(Length::Fixed(self.w as f32))
-            .height(Length::Fixed(H as f32))
+            .height(Length::Fixed(self.h as f32))
             .into();
-        let clipped = crate::overlays::tooltip_anim::clip_content(body_fixed, anim.w, anim.h, self.grow_right);
-        let inner: Element<'_, Message> = Stack::new().push(bg_shape.view()).push(clipped).into();
-        let positioned: Element<'_, Message> = container(crate::overlays::tooltip_anim::align_to_side(inner, self.grow_right)).into();
+        let clipped = crate::overlays::tooltip_engine::clip_content(body_fixed, anim.w, anim.h, self.grow_right);
+        let inner: Element<'_, Message> = Stack::new().push(bg.view()).push(clipped).into();
+        let positioned: Element<'_, Message> = container(crate::overlays::tooltip_engine::align_to_side(inner, self.grow_right)).into();
 
         let catcher: Element<'_, Message> = button(container(Space::new(Length::Fill, Length::Fill)))
             .on_press(Message::Dismiss)
@@ -264,7 +305,8 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
     eprintln!("[tip-output] raw={:?} parsed={:?}", std::env::var("MBS_OUTPUT"), output);
     let s = ShellSettings::load();
-    let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
+    let h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
+    let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
     let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
     let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1920);
     let grow_right = cx < sw / 2;
@@ -272,9 +314,11 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     let half_start = (cap_w / 2.0) as i32;
     let bar_h = s.bar_height as i32;
     let sl_str = std::env::var("MBS_SLANT_L").unwrap_or_else(|_| "L".into());
-    let sr_str = std::env::var("MBS_SLANT_R").unwrap_or_else(|_| "L".into());
+    let sr_str = if grow_right { sl_str.clone() } else {
+        std::env::var("MBS_SLANT_R").unwrap_or_else(|_| "R".into())
+    };
     let sw_cap = s.slant_width;
-    let sw_tip = s.slant_width * (H as f32 / s.bar_height as f32);
+    let _sw_tip = s.slant_width * (h as f32 / s.bar_height as f32);
     let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
 
     let (anchor, margin) = if grow_right {
@@ -286,6 +330,6 @@ pub fn run() -> Result<(), iced_layershell::Error> {
         let shift = if sr_right { sw_cap } else { 0.0 };
         (Anchor::Top | Anchor::Right, (margin_top, ((sw - cx - half_start) as f32 + shift).max(0.0).min((sw - w as i32).max(0) as f32) as i32, 0, 0))
     };
-    let layer = LayerShellSettings { size: Some((w, H)), exclusive_zone: -1, anchor, layer: Layer::Overlay, keyboard_interactivity: KeyboardInteractivity::OnDemand, binded_output_name: output, margin, ..Default::default() };
+        let layer = LayerShellSettings { size: Some((w, h)), exclusive_zone: -1, anchor, layer: Layer::Overlay, keyboard_interactivity: KeyboardInteractivity::OnDemand, binded_output_name: output, margin, ..Default::default() };
     App::run(Settings { layer_settings: layer, ..Default::default() })
 }

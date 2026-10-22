@@ -22,6 +22,7 @@ pub enum CapsuleAction {
     ToggleTrayExpanded,
     TrayActivate(crate::backend::TrayItem),
     TrayContextMenu(crate::backend::TrayItem),
+    CancelTooltip(String),
 }
 
 thread_local! {
@@ -124,9 +125,9 @@ impl CapsuleRenderer {
                 let (txt, col) = if let Some(first) = active.iter().min_by_key(|e| e.target_epoch) {
                     let diff = (first.target_epoch - now).max(0);
                     let label = if diff >= 3600 {
-                        format!("⏰ {}h{}m", diff / 3600, (diff % 3600) / 60)
+                        format!("⏰ {}h {}m", diff / 3600, (diff % 3600) / 60)
                     } else if diff >= 60 {
-                        format!("⏰ {}m", diff / 60)
+                        format!("⏰ {}m {}s", diff / 60, diff % 60)
                     } else {
                         format!("⏰ {}s", diff)
                     };
@@ -338,15 +339,23 @@ impl CapsuleRenderer {
             .align_x(Alignment::Center)
             .align_y(Alignment::Center);
 
-        button(Stack::new().push(background_shape.view()).push(button_content))
+        let action_btn = button(Stack::new().push(background_shape.view()).push(button_content))
             .on_press(on_action(action))
             .padding(0)
             .width(Length::Fixed(min_width))
             .style(|_t, _s| button::Style {
                 background: None,
                 ..Default::default()
-            })
-            .into()
+            });
+
+        if id == "alarm" {
+            let id_str = id.to_string();
+            MouseArea::new(action_btn)
+                .on_right_press(on_action(CapsuleAction::CancelTooltip(id_str)))
+                .into()
+        } else {
+            action_btn.into()
+        }
     }
 
     pub fn render_tray_expanded<'a, Message: 'static + Clone>(

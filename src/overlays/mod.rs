@@ -22,7 +22,7 @@ pub mod websearch;
 pub mod weather_tooltip;
 pub mod system_tooltip;
 pub mod tray_popup;
-pub mod tooltip_anim;
+pub mod tooltip_engine;
 
 pub use amogus::{AmogusMessage, AmogusOverlay};
 pub use annotator::{AnnotatorMessage, AnnotatorOverlay, save_annotated_image, slurp_region, grim_capture};

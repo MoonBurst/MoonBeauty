@@ -11,6 +11,7 @@ use moon_beauty_shell::ipc::{send_client_command, IpcCommand, OverlayTarget};
 use moon_beauty_shell::overlays::*;
 use moon_beauty_shell::overlays::annotator::Tool;
 
+
 mod screenshot;
 
 fn detect_notif_surface(args: &[String]) -> bool {
@@ -202,6 +203,23 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             Ok(_) => std::process::exit(0),
             Err(e) => { eprintln!("[notif-history] IPC failed: {e}"); std::process::exit(1); }
         }
+    }
+
+    // Restart bar (used by Settings when changing monitor)
+    if args.iter().any(|a| a == "--restart-bar") {
+        // Kill ONLY the bar (end of argv is exactly "moon-beauty-shell"),
+        // and the orphaned tooltips that belong to it. NOT --settings,
+        // NOT --notif-surface, NOT --restart-bar itself.
+        let _ = std::process::Command::new("pkill")
+            .args(["-f", "target/release/moon-beauty-shell$"])
+            .status();
+        let _ = std::process::Command::new("pkill")
+            .args(["-f", "-sys-tooltip|-weather-tooltip|-alarm-tooltip|-tray-popup|-info-tooltip"])
+            .status();
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let exe = resolve_exe();
+        let _ = std::process::Command::new(exe).spawn();
+        std::process::exit(0);
     }
 
     // Generic IPC toggle: moon-beauty-shell --toggle <overlay>
@@ -575,12 +593,12 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         }
     } else if standalone_target.is_some() {
         LayerShellSettings {
-            size: Some((0, 0)),
+            size: Some((1600, 1000)),
             exclusive_zone: -1,
             anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
             layer: Layer::Overlay,
-            keyboard_interactivity: KeyboardInteractivity::Exclusive,
-            binded_output_name,
+            keyboard_interactivity: KeyboardInteractivity::OnDemand,
+            binded_output_name: None,
             ..Default::default()
         }
     } else {
@@ -590,7 +608,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             anchor: Anchor::Top | Anchor::Left | Anchor::Right,
             layer: Layer::Top,
             keyboard_interactivity: KeyboardInteractivity::None,
-            binded_output_name,
+            binded_output_name: match settings.bar_monitor.as_str() { "All" | "" => None, n => Some(n.to_string()) },
             ..Default::default()
         }
     };
@@ -1048,6 +1066,25 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                         let _ = std::process::Command::new("notify-send")
                             .args(["-a", "Alarm", "-u", "critical", "⏰ Timer Complete!", &text])
                             .spawn();
+                            
+                        if let Some(sound) = &self.settings.alarm_sound {
+                            let path = if std::path::Path::new(sound).is_absolute() {
+                                std::path::PathBuf::from(sound)
+                            } else {
+                                std::path::PathBuf::from("resources").join(sound)
+                            };
+                            if path.exists() {
+                                let path_str = path.to_string_lossy().to_string();
+                                let dur = self.settings.alarm_sound_duration_sec;
+                                let vol_pct = self.settings.alarm_sound_volume;
+                                let vol_f = (vol_pct as f32) / 100.0;
+                                let cmd = format!(
+                                    r#"timeout {}s pw-play --volume={:.2} "{}" 2>/dev/null"#,
+                                    dur, vol_f, path_str
+                                );
+                                let _ = std::process::Command::new("sh").arg("-c").arg(cmd).spawn();
+                            }
+                        }
                     }
                 }
                 if changed {
@@ -1203,14 +1240,6 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                                 } else {
                                     cmd.arg("--sys-tooltip").env("MBS_SYS_TARGET", &id);
                                 }
-
-                                let slant = if self.settings.bar_left.contains(&id) {
-                                    "left"
-                                } else if self.settings.bar_right.contains(&id) {
-                                    "right"
-                                } else {
-                                    "center"
-                                };
                                 let in_left = self.settings.bar_left.contains(&id);
                                 let in_center = self.settings.bar_center.contains(&id);
                                 let in_right = self.settings.bar_right.contains(&id);
@@ -1246,17 +1275,36 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                                 );
                                 let grow_right = if in_left { true } else if in_right { false } else { cx < (sw as i32) / 2 };
                                 
-                                cmd.env("MBS_TOOLTIP_W", cap_w.max(380.0).to_string())
-                                   .env("MBS_CAPSULE_CX", cx.to_string())
-                                   .env("MBS_CAPSULE_W", cap_w.to_string())
+                                let (tip_w, tip_h) = self.settings.tooltip_size(&id);
+                                eprintln!("[spawn-size] id={:?} tip_w={} tip_h={} (override={:?})",
+                                    id, tip_w, tip_h, self.settings.tooltip_sizes.get(&id));
+                                let tip_output = if self.settings.bar_monitor != "All"
+                                    && !self.settings.bar_monitor.is_empty()
+                                {
+                                    Some(self.settings.bar_monitor.clone())
+                                } else {
+                                    std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty())
+                                        .or_else(resolve_primary_output)
+                                };
+                                eprintln!("[spawn-output] id={:?} bar_monitor={:?} tip_output={:?}",
+                                    id, self.settings.bar_monitor, tip_output);
+                                if let Some(ref o) = tip_output {
+                                    cmd.env("MBS_OUTPUT", o);
+                                }
+                                                                                                                                cmd
+                                   .env("MBS_TOOLTIP_W", tip_w.max(cap_w as u32).to_string())
+                                   .env("MBS_TOOLTIP_H", tip_h.to_string())
+                                   .env("MBS_TOOLTIP_DROP_MS", self.settings.tooltip_drop_ms.to_string())
+                                   .env("MBS_TOOLTIP_EXPAND_MS", self.settings.tooltip_expand_ms.to_string())
                                    .env("MBS_SCREEN_W", sw.to_string())
                                    .env("MBS_SLANT_L", slant_l)
-                                   .env("MBS_SLANT_R", slant_r);
+                                   .env("MBS_SLANT_R", slant_r)
+                                   .env("MBS_GROW_RIGHT", if grow_right { "1" } else { "0" })
+                                   .env("MBS_CAPSULE_CX", cx.to_string())
+                                   .env("MBS_CAPSULE_W", cap_w.to_string());
 
-                                eprintln!("[tooltip] Spawning {:?} {:?} (cx={}, sw={}, sl={}, sr={})", exe, cmd.get_args().collect::<Vec<_>>(), cx, sw, slant_l, slant_r);
                                 match cmd.spawn() {
                                     Ok(c) => {
-                                        eprintln!("[tooltip] Successfully spawned pid={}", c.id());
                                         self.weather_tooltip_child = Some(c);
                                     }
                                     Err(e) => eprintln!("[tooltip] Failed to spawn: {e}"),
@@ -1320,6 +1368,18 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                                 let exe = resolve_exe();
                                 let _ = std::process::Command::new(exe).arg("--notif-surface").spawn();
                                 eprintln!("[dnd] respawned notif-surface");
+                            }
+                        }
+                        CapsuleAction::CancelTooltip(id) => {
+                            eprintln!("[topbar] CancelTooltip: {}", id);
+                            if let Some(mut c) = self.weather_tooltip_child.take() {
+                                let _ = c.kill();
+                                let _ = c.wait();
+                            }
+                            // Right-click on alarm capsule: wipe active timers
+                            if id == "alarm" {
+                                let _ = moon_beauty_shell::overlays::reminders::save_reminders(&[]);
+                                eprintln!("[topbar] cleared active timers");
                             }
                         }
                         CapsuleAction::ToggleSourceMute => {
@@ -1816,6 +1876,12 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 _ => self.notifs.update(msg),
             },
             Message::Settings(msg) => {
+                {
+                    let s = format!("{:?}", msg);
+                    let truncated = if s.len() > 120 { format!("{}…", &s[..120]) } else { s };
+                    let ts = self.settings.tooltip_sizes.len();
+                    let bm = &self.settings.bar_monitor;
+                }
                 let is_test = matches!(msg, SettingsMessage::TestNotification);
 
                 if is_test {
@@ -1829,6 +1895,8 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                             .spawn();
                     }
                 } else if matches!(msg, SettingsMessage::Dismiss) {
+                    // Persist before closing / exiting the settings process.
+                    let _ = self.settings.save();
                     if self.is_standalone { std::process::exit(0); }
                     self.active_overlay = None;
                 } else {
@@ -1857,6 +1925,10 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 _ => self.lockscreen.update(msg),
             },
             Message::DismissActiveOverlay => {
+                // Persist if we're closing the Settings overlay via Esc.
+                if matches!(self.active_overlay, Some(OverlayTarget::Settings)) {
+                    let _ = self.settings.save();
+                }
                 if self.is_standalone {
                     std::thread::spawn(|| {
                         std::thread::sleep(std::time::Duration::from_millis(200));
@@ -2000,6 +2072,11 @@ impl iced_layershell::Application for MoonBeautyShellApp {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        {
+            static ONCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            if !ONCE.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            }
+        }
         if self.is_notif_surface {
             let is_right_corner = self.settings.notif_corner.contains("right");
             let is_top_corner = self.settings.notif_corner.contains("top");
@@ -2069,6 +2146,9 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             if let Some(overlay) = overlay_element {
                 return Stack::new().push(overlay).push(notifs_view).into();
             } else {
+                eprintln!("[FATAL-EXIT] is_standalone=true but overlay_element=None");
+                eprintln!("[FATAL-EXIT] active_overlay = {:?}", self.active_overlay);
+                eprintln!("[FATAL-EXIT] is_notif_surface = {}", self.is_notif_surface);
                 std::process::exit(0);
             }
         }
@@ -2107,13 +2187,6 @@ fn capsule_min_width(id: &str) -> f32 {
         "battery" => 85.0,
         _ => 80.0,
     }
-}
-
-fn get_capsule_widths(s: &ShellSettings, list: &[String]) -> f32 {
-    list.iter()
-        .filter(|id| s.visible_capsules.get(*id).copied().unwrap_or(true))
-        .map(|id| capsule_min_width(id) + s.capsule_spacing as f32)
-        .sum()
 }
 
 fn capsule_actual_width(id: &str) -> f32 {
@@ -2214,47 +2287,6 @@ fn get_screen_width_for(output: Option<&str>) -> u32 {
                     for out in arr {
                         if out.get("focused").and_then(|f| f.as_bool()) == Some(true) {
                             if let Some(w) = out.get("rect").and_then(|r| r.get("width")).and_then(|w| w.as_u64()) {
-                                return if w > 0 { w as u32 } else { 1920 };
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    1920
-}
-
-fn get_screen_width() -> u32 {
-    if let Ok(o) = std::process::Command::new("swaymsg")
-        .args(["-t", "get_outputs", "-r"]).output()
-    {
-        if o.status.success() {
-            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&o.stdout) {
-                if let Some(arr) = v.as_array() {
-                    for output in arr {
-                        if output.get("focused").and_then(|f| f.as_bool()) == Some(true) {
-                            if let Some(w) = output.get("rect")
-                                .and_then(|r| r.get("width"))
-                                .and_then(|w| w.as_u64())
-                            {
-                                return if w > 0 { w as u32 } else { 1920 };
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if let Ok(o) = std::process::Command::new("hyprctl")
-        .args(["monitors", "-j"]).output()
-    {
-        if o.status.success() {
-            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&o.stdout) {
-                if let Some(arr) = v.as_array() {
-                    for mon in arr {
-                        if mon.get("focused").and_then(|f| f.as_bool()) == Some(true) {
-                            if let Some(w) = mon.get("width").and_then(|w| w.as_u64()) {
                                 return if w > 0 { w as u32 } else { 1920 };
                             }
                         }

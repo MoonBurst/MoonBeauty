@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, text_input, Stack};
+use iced::widget::{button, column, container, row, scrollable, text, Stack};
 use iced::{Alignment, Color, Element, Length, Padding, Task, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
@@ -9,15 +9,29 @@ use crate::config::theme::ShellTheme;
 use crate::config::ShellSettings;
 use crate::overlays::reminders::{save_reminders, ReminderEntry, RemindersOverlay};
 use crate::style::shape_box::{ShapeBox, ShapeType, SlantSide};
+use crate::style::TextExt;
 
-const H: u32 = 290;
+const H: u32 = 320;
 const W_START: f32 = 130.0;
 const AUTO_MS: u128 = 60_000;
 
+static ACTIVE_FIELD: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 #[derive(Debug, Clone)]
 pub enum Message {
-    Tick, TaskChanged(String), WhenChanged(String), QuickWhen(String),
-    AddTimer, DeleteTimer(u64), Dismiss,
+    Tick,
+    AdjCountdownH(bool), // true = increment
+    AdjCountdownM(bool),
+    StartCountdown,
+    AdjClockH(bool),
+    AdjClockM(bool),
+    ToggleAmPm,
+    SetClock,
+    DeleteTimer(u64),
+    Dismiss,
+    FocusNext,
+    FocusPrev,
+    InitialFocus,
 }
 
 impl TryInto<iced_layershell::actions::LayershellCustomActionsWithInfo<()>> for Message {
@@ -31,12 +45,21 @@ pub struct App {
     opened: Instant,
     grow_right: bool,
     w: u32,
-    w_start: f32,
+    h: u32,
+    drop_ms: f32,
+    expand_ms: f32,
     slant_l: SlantSide,
+    #[allow(dead_code)]
     slant_r: SlantSide,
-    task_text: String,
-    when_text: String,
     entries: Vec<ReminderEntry>,
+    cd_h: u32,
+    cd_m: u32,
+    clk_h: u32,
+    clk_m: u32,
+    is_pm: bool,
+    active_field: usize,
+    closing_at: Option<Instant>,
+    close_open_elapsed_ms: f32,
 }
 
 impl Application for App {
@@ -50,7 +73,9 @@ impl Application for App {
         let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|s| s.parse().ok()).unwrap_or(1920);
         let grow_right = std::env::var("MBS_GROW_RIGHT").map(|v| v == "1").unwrap_or_else(|_| cx < sw / 2);
         let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
-        let w_start: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(W_START);
+        let h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(H);
+        let drop_ms: f32 = std::env::var("MBS_TOOLTIP_DROP_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(220.0);
+        let expand_ms: f32 = std::env::var("MBS_TOOLTIP_EXPAND_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(260.0);
         let sl_str = std::env::var("MBS_SLANT_L").unwrap_or_else(|_| "L".into());
         let sr_str = std::env::var("MBS_SLANT_R").unwrap_or_else(|_| "L".into());
         let slant_l = if sl_str == "R" { SlantSide::Right } else { SlantSide::Left };
@@ -58,10 +83,25 @@ impl Application for App {
         let entries = RemindersOverlay::load();
 
         let app = Self {
-            opened: Instant::now(), grow_right, w, w_start, slant_l, slant_r,
-            task_text: String::new(), when_text: String::new(), entries,
+            opened: Instant::now(), grow_right, w, h, drop_ms, expand_ms,
+            slant_l, slant_r,
+            entries,
+            cd_h: 0,
+            cd_m: 5,
+            clk_h: 12,
+            clk_m: 0,
+            is_pm: true,
+            active_field: 0,
+            closing_at: None,
+            close_open_elapsed_ms: 0.0,
         };
-        (app, Task::none())
+        let focus_task = iced::Task::perform(
+            async {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            },
+            |_| Message::InitialFocus,
+        );
+        (app, focus_task)
     }
 
     fn namespace(&self) -> String { "mbs-alarm-tip".into() }
@@ -73,34 +113,96 @@ impl Application for App {
     fn update(&mut self, m: Message) -> Task<Message> {
         match m {
             Message::Tick => {
-                if self.opened.elapsed().as_millis() > AUTO_MS { std::process::exit(0); }
-                self.entries = RemindersOverlay::load();
+                if let Some(t) = self.closing_at {
+                    if t.elapsed().as_millis() > (self.drop_ms * 1.9) as u128 {
+                        std::process::exit(0);
+                    }
+                } else if self.opened.elapsed().as_millis() > AUTO_MS {
+                    std::process::exit(0);
+                }
+                
+                // Throttle disk loading to once per second, while keeping 60 FPS animation
+                static TICKS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                let t = TICKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if t % 60 == 0 {
+                    self.entries = RemindersOverlay::load();
+                }
             }
-            Message::TaskChanged(t) => self.task_text = t,
-            Message::WhenChanged(w) => self.when_text = w,
-            Message::QuickWhen(w) => {
-                self.when_text = w;
-                return self.update(Message::AddTimer);
+            Message::AdjCountdownH(inc) => {
+                if inc { self.cd_h = (self.cd_h + 1) % 24; }
+                else { self.cd_h = (self.cd_h + 23) % 24; }
             }
-            Message::AddTimer => {
-                let w = self.when_text.trim();
-                if !w.is_empty() {
-                    let label = if self.task_text.trim().is_empty() { "Timer".to_string() } else { self.task_text.trim().to_string() };
-                    let (epoch, str_repr) = RemindersOverlay::parse_when(w);
+            Message::AdjCountdownM(inc) => {
+                if inc { self.cd_m = (self.cd_m + 1) % 60; }
+                else { self.cd_m = (self.cd_m + 59) % 60; }
+            }
+            Message::StartCountdown => {
+                let mins = (self.cd_h as i64 * 60) + self.cd_m as i64;
+                if mins > 0 {
+                    let now = chrono::Local::now();
+                    let target = now + chrono::Duration::minutes(mins);
                     let max_id = self.entries.iter().map(|e| e.id).max().unwrap_or(0);
                     self.entries.push(ReminderEntry {
-                        id: max_id + 1, target_epoch: epoch, text: label, target_str: str_repr, alerted: false,
+                        id: max_id + 1,
+                        target_epoch: target.timestamp(),
+                        text: format!("Timer {}h {:02}m", self.cd_h, self.cd_m),
+                        target_str: target.format("%I:%M %p").to_string(),
+                        alerted: false,
                     });
                     save_reminders(&self.entries);
-                    self.task_text.clear();
-                    self.when_text.clear();
+                    self.cd_h = 0; self.cd_m = 5; // reset
                 }
+            }
+            Message::AdjClockH(inc) => {
+                if inc { self.clk_h = if self.clk_h >= 12 { 1 } else { self.clk_h + 1 }; }
+                else { self.clk_h = if self.clk_h <= 1 { 12 } else { self.clk_h - 1 }; }
+            }
+            Message::AdjClockM(inc) => {
+                if inc { self.clk_m = (self.clk_m + 1) % 60; }
+                else { self.clk_m = (self.clk_m + 59) % 60; }
+            }
+            Message::ToggleAmPm => { self.is_pm = !self.is_pm; }
+            Message::SetClock => {
+                let mut h = self.clk_h % 12;
+                if self.is_pm { h += 12; }
+                let now = chrono::Local::now();
+                let mut target = now.date_naive()
+                    .and_hms_opt(h, self.clk_m, 0).unwrap()
+                    .and_local_timezone(chrono::Local).unwrap();
+                if target < now { target = target + chrono::Duration::days(1); }
+                let max_id = self.entries.iter().map(|e| e.id).max().unwrap_or(0);
+                self.entries.push(ReminderEntry {
+                    id: max_id + 1,
+                    target_epoch: target.timestamp(),
+                    text: format!("Alarm {:02}:{:02} {}", self.clk_h, self.clk_m, if self.is_pm {"PM"} else {"AM"}),
+                    target_str: target.format("%I:%M %p").to_string(),
+                    alerted: false,
+                });
+                save_reminders(&self.entries);
+            }
+            Message::InitialFocus => {
+                return iced::window::get_latest().and_then(iced::window::gain_focus);
+            }
+            Message::FocusNext => {
+                self.active_field = (self.active_field + 1) % 7;
+                ACTIVE_FIELD.store(self.active_field, std::sync::atomic::Ordering::Relaxed);
+            }
+            Message::FocusPrev => {
+                self.active_field = (self.active_field + 6) % 7;
+                ACTIVE_FIELD.store(self.active_field, std::sync::atomic::Ordering::Relaxed);
             }
             Message::DeleteTimer(id) => {
                 self.entries.retain(|e| e.id != id);
                 save_reminders(&self.entries);
             }
-            Message::Dismiss => std::process::exit(0),
+            Message::Dismiss => {
+                if self.closing_at.is_none() {
+                    let total_open_ms = self.drop_ms + self.expand_ms + (self.drop_ms * 0.6);
+                    let current_elapsed = self.opened.elapsed().as_millis() as f32;
+                    self.close_open_elapsed_ms = current_elapsed.min(total_open_ms).max(50.0);
+                    self.closing_at = Some(Instant::now());
+                }
+            }
         }
         Task::none()
     }
@@ -108,137 +210,276 @@ impl Application for App {
     fn view(&self) -> Element<'_, Message> {
         let settings = ShellSettings::load();
         let theme = ShellTheme::from_settings(&settings);
-        let anim = crate::overlays::tooltip_anim::compute(self.opened.elapsed().as_millis() as f32, self.w_start, self.w as f32, H as f32);
-        let slant = (theme.slant_width * (anim.h / settings.bar_height as f32)).max(0.0);
-        let now = chrono::Local::now().timestamp();
-        let has_active = self.entries.iter().any(|e| e.target_epoch > now);
-        let border_color = if has_active { theme.warning } else { theme.text };
 
-        let bg_shape = ShapeBox::new()
-            .shape(ShapeType::Slant { left: self.slant_l, right: self.slant_r })
-            .background(theme.background)
-            .border(border_color, theme.control_border_width)
-            .slant_width(slant)
-            .size(Length::Fixed(self.w as f32), Length::Fixed(anim.h));
+        let time_ms = if let Some(t) = self.closing_at {
+            // Reverse: pass elapsed time counting DOWN from where open left off
+            let reverse_elapsed = self.close_open_elapsed_ms
+                - (t.elapsed().as_millis() as f32);
+            reverse_elapsed.max(0.0)
+        } else {
+            self.opened.elapsed().as_millis() as f32
+        };
 
-        let content: Element<'_, Message> = self.build_content(&theme);
-        let clipped = crate::overlays::tooltip_anim::clip_content(content, anim.w, anim.h, self.grow_right);
-        let stacked: Element<'_, Message> = Stack::new().push(bg_shape.view()).push(clipped).into();
-        crate::overlays::tooltip_anim::align_to_side(stacked, self.grow_right)
+        let a = crate::overlays::tooltip_engine::compute(
+            time_ms,
+            self.w_start(),
+            self.w as f32,
+            self.h as f32,
+            theme.slant_width,
+            settings.bar_height as f32,
+            self.drop_ms,
+            self.expand_ms,
+        );
+        let (anim_w, anim_h, anim_opacity) = (a.w, a.h, a.opacity);
+
+        let slant = (theme.slant_width * (anim_h / settings.bar_height as f32)).max(0.0);
+
+        let bg = crate::overlays::tooltip_engine::ParallelogramBg {
+            w: anim_w,
+            h: anim_h,
+            slant: slant,
+            slant_right: self.slant_l == SlantSide::Right,
+            background: theme.background,
+            border_color: theme.text,
+            border_width: theme.control_border_width,
+        };
+
+        let content = self.build_content(&theme, anim_opacity);
+        let clipped = crate::overlays::tooltip_engine::clip_content(content, anim_w, anim_h, self.grow_right);
+        let stacked: Element<'_, Message> = Stack::new().push(bg.view()).push(clipped).into();
+        crate::overlays::tooltip_engine::align_to_side(stacked, self.grow_right)
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
-        iced::Subscription::batch([
-            iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
-            iced::keyboard::on_key_press(|k, _| if k == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) { Some(Message::Dismiss) } else { None }),
-        ])
+        let tick = iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick);
+        let keys = iced::keyboard::on_key_press(|k, _m| {
+            let af = ACTIVE_FIELD.load(std::sync::atomic::Ordering::Relaxed);
+            let esc = iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape);
+            let up = iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp);
+            let down = iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown);
+            let left = iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft);
+            let right = iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight);
+            let enter = iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter);
+            let tab = iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab);
+
+            if k == esc { return Some(Message::Dismiss); }
+            
+            // Focus navigation
+            if k == left || k == tab { return Some(Message::FocusPrev); } // Tab backwards or left
+            if k == right { return Some(Message::FocusNext); }          // Right moves forward
+
+            // Value adjustment (Up/Down to match the buttons)
+            if k == up {
+                return match af {
+                    0 => Some(Message::AdjCountdownH(true)),
+                    1 => Some(Message::AdjCountdownM(true)),
+                    3 => Some(Message::AdjClockH(true)),
+                    4 => Some(Message::AdjClockM(true)),
+                    5 => Some(Message::ToggleAmPm),
+                    _ => None,
+                };
+            }
+            if k == down {
+                return match af {
+                    0 => Some(Message::AdjCountdownH(false)),
+                    1 => Some(Message::AdjCountdownM(false)),
+                    3 => Some(Message::AdjClockH(false)),
+                    4 => Some(Message::AdjClockM(false)),
+                    5 => Some(Message::ToggleAmPm),
+                    _ => None,
+                };
+            }
+
+            if k == enter {
+                return match af {
+                    0 | 1 => Some(Message::StartCountdown),
+                    3 | 4 | 5 => Some(Message::SetClock),
+                    _ => None,
+                };
+            }
+            None
+        });
+        iced::Subscription::batch([tick, keys])
     }
     fn theme(&self) -> Theme { Theme::Dark }
 }
 
 impl App {
-    fn build_content<'a>(&'a self, t: &ShellTheme) -> Element<'a, Message> {
-        let fg = t.text;
-        let muted = t.muted;
-        let success = t.success;
-        let warning = t.warning;
-        let danger = t.danger;
-        let pad_x = (t.slant_width * 2.0 + 12.0).max(28.0);
-        let pad = Padding { top: 16.0, right: pad_x, bottom: 16.0, left: pad_x };
+    fn w_start(&self) -> f32 {
+        std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(W_START)
+    }
 
-        let close_btn: Element<'a, Message> = button(text("✕").size(11).color(muted))
-            .on_press(Message::Dismiss)
-            .into();
+    fn build_content<'a>(&'a self, t: &ShellTheme, alpha: f32) -> Element<'a, Message> {
+        let apply_alpha = |c: Color| Color { a: c.a * alpha, ..c };
+        let fg = apply_alpha(t.text);
+        let muted = apply_alpha(t.muted);
+        let danger = apply_alpha(t.danger);
+        let warning = apply_alpha(t.danger);
+        let focus = apply_alpha(t.focus);
+        let caution = apply_alpha(t.danger);
+        let surface_alt = apply_alpha(t.surface_alt);
 
-        let header: Element<'a, Message> = row![
-            text("⏰ TIMERS & ALARMS").size(13).color(success),
-            horizontal_space(),
-            close_btn,
-        ].align_y(Alignment::Center).into();
+        let slant_end = t.slant_width * (self.h as f32 / 42.0);
+        let pad_x = ((slant_end + 16.0).min(self.w as f32 * 0.28)).max(20.0);
+        let pad_top = (self.h as f32 * 0.08).max(16.0);
+        let pad_bottom = (self.h as f32 * 0.08).max(16.0);
+        let pad = Padding { top: pad_top, right: pad_x, bottom: pad_bottom, left: pad_x };
 
-        let quick_btn = |lbl: &'static str, val: &'static str| -> Element<'a, Message> {
-            button(text(lbl).size(11).color(fg))
-                .on_press(Message::QuickWhen(val.into()))
-                .padding([2, 6])
-                .into()
-        };
+        let content_w = (self.w as f32 - 2.0 * pad_x).max(120.0);
+        let title_size: u16 = ((content_w / 7.0) as u16).clamp(14, 26);
+        let label_size: u16 = ((content_w / 10.0) as u16).clamp(10, 16);
 
-        let quick_row: Element<'a, Message> = row![
-            text("Quick:").size(11).color(muted),
-            quick_btn("+1m", "1m"), quick_btn("+5m", "5m"),
-            quick_btn("+15m", "15m"), quick_btn("+30m", "30m"), quick_btn("+1h", "1h"),
-        ].spacing(6).align_y(Alignment::Center).into();
+        // ── Hex spinner with border highlight for active field ──
+        macro_rules! hex_spinner {
+            ($val:expr, $up_msg:expr, $down_msg:expr, $w:expr, $border:expr) => {{
+                let btn_w = $w;
+                let btn_h = 42.0;
+                let cut = (btn_w * 0.08) as u16;
+                let bg = ShapeBox::new()
+                    .shape(ShapeType::Hexagon { cut })
+                    .background(surface_alt)
+                    .border($border, 1.5)
+                    .size(Length::Fixed(btn_w), Length::Fixed(btn_h));
 
-        let task_input: Element<'a, Message> = text_input("Note (e.g. Tea)", &self.task_text)
-            .on_input(Message::TaskChanged)
-            .padding([4, 8])
-            .size(12)
-            .width(Length::FillPortion(1))
-            .into();
-        let when_input: Element<'a, Message> = text_input("When (5m, 5pm)", &self.when_text)
-            .on_input(Message::WhenChanged)
-            .on_submit(Message::AddTimer)
-            .padding([4, 8])
-            .size(12)
-            .width(Length::FillPortion(1))
-            .into();
-        let set_btn: Element<'a, Message> = button(text("Set").size(12).color(Color::BLACK))
-            .on_press(Message::AddTimer)
-            .padding([4, 10])
-            .into();
-        let input_row: Element<'a, Message> = row![task_input, when_input, set_btn]
-            .spacing(6).align_y(Alignment::Center).into();
+                let inner = row![
+                    button(text("▼").size(14).color(fg)).on_press($down_msg).padding(4).style(|_t, _s| button::Style { background: None, ..Default::default() }),
+                    text($val).size(18).bold().color(fg).width(Length::Fill).wrapping(iced::widget::text::Wrapping::None).align_x(Alignment::Center),
+                    button(text("▲").size(14).color(fg)).on_press($up_msg).padding(4).style(|_t, _s| button::Style { background: None, ..Default::default() }),
+                ].align_y(Alignment::Center).width(Length::Fixed(btn_w)).height(Length::Fixed(btn_h));
+
+                let stacked: Element<'a, Message> = Stack::new().push(bg.view()).push(inner).into();
+                stacked
+            }};
+        }
+
+        let btn_w = (content_w - 16.0) / 2.0;
+
+        // Spinner width calc — sized to fit all buttons on one row
+        let cd_spinner_w = ((content_w - 60.0 - 16.0) / 2.0).max(70.0);
+        let clk_spinner_w = ((content_w - 90.0 - 24.0) / 2.0).max(60.0);
+        let cd_h_border = if self.active_field == 0 { caution } else { focus };
+        let cd_m_border = if self.active_field == 1 { caution } else { focus };
+        let clk_h_border = if self.active_field == 3 { caution } else { focus };
+        let clk_m_border = if self.active_field == 4 { caution } else { focus };
+        let ampm_border = if self.active_field == 5 { caution } else { focus };
+
+        // ── Countdown row ──
+        let cd_row = row![
+            hex_spinner!(format!("{:02}h", self.cd_h), Message::AdjCountdownH(true), Message::AdjCountdownH(false), cd_spinner_w, cd_h_border),
+            text(":").size(14).color(fg),
+            hex_spinner!(format!("{:02}m", self.cd_m), Message::AdjCountdownM(true), Message::AdjCountdownM(false), cd_spinner_w, cd_m_border),
+
+        ].spacing(6).align_y(Alignment::Center);
+
+        // ── Clock row (narrower spinners + AM/PM + Set) ──
+        let ampm_lbl = if self.is_pm { "PM" } else { "AM" };
+        let ampm_btn = button(text(ampm_lbl).size(12).bold().color(fg))
+            .on_press(Message::ToggleAmPm)
+            .padding([6, 6])
+            .style(move |_t, _s| button::Style {
+                background: Some(iced::Background::Color(if self.active_field == 5 { caution } else { surface_alt })),
+                border: iced::Border { color: ampm_border, width: 1.5, radius: 4.0.into() },
+                ..Default::default()
+            });
+
+        let clk_row = row![
+            hex_spinner!(format!("{:02}", self.clk_h), Message::AdjClockH(true), Message::AdjClockH(false), clk_spinner_w, clk_h_border),
+            text(":").size(14).color(fg),
+            hex_spinner!(format!("{:02}", self.clk_m), Message::AdjClockM(true), Message::AdjClockM(false), clk_spinner_w, clk_m_border),
+            ampm_btn,
+
+        ].spacing(6).align_y(Alignment::Center);
 
         let now = chrono::Local::now().timestamp();
         let mut timers_col: iced::widget::Column<'a, Message> = iced::widget::Column::new().spacing(4).width(Length::Fill);
-
         for e in self.entries.iter().filter(|e| e.target_epoch > now) {
             let id = e.id;
             let diff = (e.target_epoch - now).max(0);
-            let rem_label = if diff >= 3600 { format!("{}h {}m left", diff / 3600, (diff % 3600) / 60) }
-                            else if diff >= 60 { format!("{}m {}s left", diff / 60, diff % 60) }
-                            else { format!("{}s left", diff) };
-            let del_btn: Element<'a, Message> = button(text("✕").size(11).color(danger))
+            let rem_label = if diff >= 3600 {
+                format!("{}h {}m {}s", diff / 3600, (diff % 3600) / 60, diff % 60)
+            } else if diff >= 60 {
+                format!("{}m {}s", diff / 60, diff % 60)
+            } else {
+                format!("{}s", diff)
+            };
+
+            let del_btn: Element<'a, Message> = button(text("✕").size(10).color(danger))
                 .on_press(Message::DeleteTimer(id))
-                .padding([1, 4])
+                .padding([2, 6])
                 .into();
+
             timers_col = timers_col.push(row![
                 text(&e.text).size(12).color(fg).width(Length::Fill),
-                text(rem_label).size(11).color(warning),
+                text(rem_label).size(12).color(warning),
                 del_btn,
             ].spacing(8).align_y(Alignment::Center));
         }
 
-        let scroll_list: Element<'a, Message> = container(scrollable(timers_col).height(Length::Fill))
-            .height(Length::Fixed(120.0))
-            .width(Length::Fill)
-            .into();
+        let header = row![
+            row![].width(Length::Fill),
+            text("Set Alarm").size(title_size).bold().color(caution),
+            row![].width(Length::Fill),
+        ].width(Length::Fill).align_y(Alignment::Center);
 
-        column![header, quick_row, input_row, scroll_list]
-            .spacing(10)
-            .padding(pad)
-            .width(Length::Fixed(self.w as f32))
-            .height(Length::Fixed(H as f32))
-            .into()
+        let mut body = column![
+            header,
+            column![
+                text("Countdown").size(label_size).bold().color(caution).align_x(Alignment::Center).width(Length::Fill),
+                cd_row,
+            ].spacing(6).width(Length::Fill).align_x(Alignment::Center),
+            column![
+                text("Clock Time").size(label_size).bold().color(caution).align_x(Alignment::Center).width(Length::Fill),
+                clk_row,
+            ].spacing(6).width(Length::Fill).align_x(Alignment::Center).padding(Padding { top: 12.0, right: 0.0, bottom: 0.0, left: 0.0 }),
+        ]
+        .spacing(16)
+        .padding(pad)
+        .align_x(Alignment::Center)
+        .width(Length::Fixed(self.w as f32))
+        .height(Length::Fixed(self.h as f32));
+
+        body = body.push(
+            container(
+                text("Enter to start/confirm  •  Esc to close")
+                    .size(10)
+                    .color(muted)
+                    .align_x(Alignment::Center)
+                    .width(Length::Fill)
+            )
+            .padding(Padding { top: 12.0, right: 0.0, bottom: 0.0, left: 0.0 })
+        );
+
+        if !self.entries.is_empty() {
+            body = body.push(
+                container(
+                    column![
+                        text("Active Timers").size(12).bold().color(muted),
+                        scrollable(timers_col).height(Length::Fixed(60.0))
+                    ].spacing(6)
+                )
+                .padding(Padding { top: 16.0, right: pad_x.max(20.0), bottom: 0.0, left: pad_x.max(20.0) })
+            );
+        }
+
+        body.into()
     }
 }
 
 pub fn run() -> Result<(), iced_layershell::Error> {
-    let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
-    eprintln!("[tip-output] raw={:?} parsed={:?}", std::env::var("MBS_OUTPUT"), output);
     let s = ShellSettings::load();
     let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
+    let h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(H);
     let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
     let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1920);
-    let grow_right = cx < sw / 2;
+    let grow_right = std::env::var("MBS_GROW_RIGHT").map(|v| v == "1").unwrap_or_else(|_| cx < sw / 2);
     let cap_w: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(W_START);
     let half_start = (cap_w / 2.0) as i32;
     let bar_h = s.bar_height as i32;
     let sl_str = std::env::var("MBS_SLANT_L").unwrap_or_else(|_| "L".into());
     let sr_str = std::env::var("MBS_SLANT_R").unwrap_or_else(|_| "L".into());
     let sw_cap = s.slant_width;
-    let sw_tip = s.slant_width * (H as f32 / s.bar_height as f32);
     let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
+    let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
 
     let (anchor, margin) = if grow_right {
         let sl_left = sl_str == "L";
@@ -249,6 +490,16 @@ pub fn run() -> Result<(), iced_layershell::Error> {
         let shift = if sr_right { sw_cap } else { 0.0 };
         (Anchor::Top | Anchor::Right, (margin_top, ((sw - cx - half_start) as f32 + shift).max(0.0).min((sw - w as i32).max(0) as f32) as i32, 0, 0))
     };
-    let layer = LayerShellSettings { size: Some((w, H)), exclusive_zone: -1, anchor, layer: Layer::Overlay, keyboard_interactivity: KeyboardInteractivity::OnDemand, binded_output_name: output, margin, ..Default::default() };
+
+                let layer = LayerShellSettings {
+        size: Some((w, h)),
+        exclusive_zone: -1,
+        anchor,
+        layer: Layer::Overlay,
+        keyboard_interactivity: KeyboardInteractivity::Exclusive,
+        binded_output_name: output,
+        margin,
+        ..Default::default()
+    };
     App::run(Settings { layer_settings: layer, ..Default::default() })
 }
