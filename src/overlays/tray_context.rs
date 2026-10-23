@@ -28,21 +28,15 @@ pub struct App {
     height: u32,
 }
 
-#[cfg(any())] impl Application for App {
-    type Executor = iced::executor::Default;
-    type Message = Message;
-    type Theme = Theme;
-    type Flags = (Vec<TrayMenuItem>, String, String, u32, u32);
+impl App {
 
-    fn new(flags: Self::Flags) -> (Self, Task<Message>) {
+    fn new_app(flags: (Vec<TrayMenuItem>, String, String, u32, u32)) -> (Self, Task<Message>) {
         let (items, bus, menu_path, width, height) = flags;
         (Self { items, bus, menu_path, width, height }, Task::none())
     }
 
     fn namespace(&self) -> String { "mbs-tray-context".into() }
-    fn style(&self, _t: &Self::Theme) -> iced::theme::Style {
-        iced::theme::Style { background_color: Color::TRANSPARENT, text_color: Color::WHITE }
-    }
+    
 
     fn update(&mut self, m: Message) -> Task<Message> {
         match m {
@@ -63,9 +57,12 @@ pub struct App {
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
-        iced::keyboard::on_key_press(|k, _| {
-            if k == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) { Some(Message::Dismiss) } else { None }
-        })
+        iced::event::listen_with(|event, _status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                {
+            if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) { Some(Message::Dismiss) } else { None }
+        }
+            })
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -127,6 +124,36 @@ pub struct App {
 }
 
 pub fn run(items: Vec<TrayMenuItem>, bus: String, menu_path: String, width: u32, height: u32) -> Result<(), iced_layershell::Error> {
-    eprintln!("[tray_context DISABLED during iced 0.14 migration]");
-    Ok(())
+    let s = ShellSettings::load();
+    let bar_h = s.bar_height as i32;
+    let layer = LayerShellSettings {
+        size: Some((width, height)),
+        exclusive_zone: -1,
+        anchor: Anchor::Top | Anchor::Right,
+        layer: Layer::Overlay,
+        keyboard_interactivity: KeyboardInteractivity::Exclusive,
+        start_mode: std::env::var("MBS_OUTPUT").ok()
+                .map(iced_layershell::settings::StartMode::TargetScreen)
+                .unwrap_or(iced_layershell::settings::StartMode::Active),
+        margin: (bar_h + 8, 16, 0, 0),
+        ..Default::default()
+    };
+        let _items_for_boot = items.clone();
+    let _bus_for_boot = bus.clone();
+    let _menu_for_boot = menu_path.clone();
+    iced_layershell::application(
+        move || App::new_app((
+            _items_for_boot.clone(),
+            _bus_for_boot.clone(),
+            _menu_for_boot.clone(),
+            width,
+            height,
+        )),
+        || "mbs-tray-context".to_string(),
+        App::update,
+        App::view,
+    )
+    .subscription(App::subscription)
+    .settings(Settings { layer_settings: layer, ..Default::default() })
+    .run()
 }

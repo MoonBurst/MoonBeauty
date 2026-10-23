@@ -49,13 +49,9 @@ pub struct App {
     closing_at: Option<Instant>,
 }
 
-#[cfg(any())] impl Application for App {
-    type Executor = iced::executor::Default;
-    type Message = Message;
-    type Theme = Theme;
-    type Flags = ();
+impl App {
 
-    fn new(_: ()) -> (Self, Task<Message>) {
+    fn new_app() -> (Self, Task<Message>) {
         let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|s| s.parse().ok()).unwrap_or(200);
         let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|s| s.parse().ok()).unwrap_or(1920);
         let grow_right = std::env::var("MBS_GROW_RIGHT").map(|v| v == "1").unwrap_or_else(|_| cx < sw / 2);
@@ -81,9 +77,7 @@ pub struct App {
 
     fn namespace(&self) -> String { "mbs-tray-tip".into() }
 
-    fn style(&self, _theme: &Self::Theme) -> iced::theme::Style {
-        iced::theme::Style { background_color: Color::TRANSPARENT, text_color: Color::WHITE }
-    }
+    
 
     fn update(&mut self, m: Message) -> Task<Message> {
         match m {
@@ -215,9 +209,20 @@ pub struct App {
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
+        // Adaptive tick: 60fps during entrance animation and while
+        // closing, drop to 2fps once settled (still catches AUTO_MS
+        // timeout within 500ms of the deadline). Without this, the
+        // 60fps view-tree rebuild burns ~10% CPU on an idle tooltip.
+        let _animating = self.opened.elapsed().as_millis() < 1000
+            || self.closing_at.is_some();
+        let _tick_ms: u64 = if _animating { 16 } else { 500 };
+
         iced::Subscription::batch([
-            iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
-            iced::keyboard::on_key_press(|k, _| if k == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) { Some(Message::Dismiss) } else { None }),
+            iced::time::every(std::time::Duration::from_millis(_tick_ms)).map(|_| Message::Tick),
+            iced::event::listen_with(|event, _status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) { Some(Message::Dismiss) } else { None }
+            }),
         ])
     }
     fn theme(&self) -> Theme { Theme::Dark }
@@ -301,6 +306,44 @@ fn save_pixmap(id: &str, w: u32, h: u32, data: &[u8]) -> Option<String> {
 }
 
 pub fn run() -> Result<(), iced_layershell::Error> {
-    eprintln!("[tray_popup DISABLED during iced 0.14 migration]");
-    Ok(())
+    let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
+    eprintln!("[tip-output] raw={:?} parsed={:?}", std::env::var("MBS_OUTPUT"), output);
+    let s = ShellSettings::load();
+    let h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
+    let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
+    let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
+    let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1920);
+    let grow_right = cx < sw / 2;
+    let cap_w: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(W_START);
+    let half_start = (cap_w / 2.0) as i32;
+    let bar_h = s.bar_height as i32;
+    let sl_str = std::env::var("MBS_SLANT_L").unwrap_or_else(|_| "L".into());
+    let sr_str = if grow_right { sl_str.clone() } else {
+        std::env::var("MBS_SLANT_R").unwrap_or_else(|_| "R".into())
+    };
+    let sw_cap = s.slant_width;
+    let _sw_tip = s.slant_width * (h as f32 / s.bar_height as f32);
+    let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
+
+    let (anchor, margin) = if grow_right {
+        let sl_left = sl_str == "L";
+        let shift = if sl_left { sw_cap } else { 0.0 };
+        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, ((cx - half_start) as f32 + shift).max(0.0).min((sw - w as i32).max(0) as f32) as i32))
+    } else {
+        let sr_right = sr_str == "R";
+        let shift = if sr_right { sw_cap } else { 0.0 };
+        (Anchor::Top | Anchor::Right, (margin_top, ((sw - cx - half_start) as f32 + shift).max(0.0).min((sw - w as i32).max(0) as f32) as i32, 0, 0))
+    };
+        let layer = LayerShellSettings { size: Some((w, h)), exclusive_zone: -1, anchor, layer: Layer::Overlay, keyboard_interactivity: KeyboardInteractivity::OnDemand, start_mode: output
+                .map(iced_layershell::settings::StartMode::TargetScreen)
+                .unwrap_or(iced_layershell::settings::StartMode::Active), margin, ..Default::default() };
+        iced_layershell::application(
+        App::new_app,
+        || "mbs-tray-tip".to_string(),
+        App::update,
+        App::view,
+    )
+    .subscription(App::subscription)
+    .settings(Settings { layer_settings: layer, ..Default::default() })
+    .run()
 }

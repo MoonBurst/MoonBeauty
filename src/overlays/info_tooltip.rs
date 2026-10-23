@@ -55,13 +55,9 @@ pub struct App {
     sources_enabled: [bool; 3],
 }
 
-#[cfg(any())] impl Application for App {
-    type Executor = iced::executor::Default;
-    type Message = Message;
-    type Theme = Theme;
-    type Flags = ();
+impl App {
 
-    fn new(_: ()) -> (Self, Task<Message>) {
+    fn new_app() -> (Self, Task<Message>) {
         let mode = std::env::var("MBS_INFO_MODE").unwrap_or_else(|_| "custom".into());
         let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|s| s.parse().ok()).unwrap_or(200);
         let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|s| s.parse().ok()).unwrap_or(1920);
@@ -81,7 +77,7 @@ pub struct App {
     }
 
     fn namespace(&self) -> String { format!("mbs-info-tip-{}", self.mode) }
-    fn style(&self, _t: &Self::Theme) -> iced::theme::Style { iced::theme::Style { background_color: Color::TRANSPARENT, text_color: Color::WHITE } }
+    
 
     fn update(&mut self, m: Message) -> Task<Message> {
         match m {
@@ -210,9 +206,20 @@ pub struct App {
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
+        // Adaptive tick: 60fps during entrance animation and while
+        // closing, drop to 2fps once settled (still catches AUTO_MS
+        // timeout within 500ms of the deadline). Without this, the
+        // 60fps view-tree rebuild burns ~10% CPU on an idle tooltip.
+        let _animating = self.opened.elapsed().as_millis() < 1000
+            || self.closing_at.is_some();
+        let _tick_ms: u64 = if _animating { 16 } else { 500 };
+
         iced::Subscription::batch([
-            iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
-            iced::keyboard::on_key_press(|k, _| if k == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) { Some(Message::Dismiss) } else { None }),
+            iced::time::every(std::time::Duration::from_millis(_tick_ms)).map(|_| Message::Tick),
+            iced::event::listen_with(|event, _status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) { Some(Message::Dismiss) } else { None }
+            }),
         ])
     }
     fn theme(&self) -> Theme { Theme::Dark }
@@ -938,6 +945,44 @@ async fn fetch_data(mode: String) -> InfoData {
 }
 
 pub fn run() -> Result<(), iced_layershell::Error> {
-    eprintln!("[info_tooltip DISABLED during iced 0.14 migration]");
-    Ok(())
+    let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
+    let s = ShellSettings::load();
+    let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
+    let h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(s.tooltip_height_px);
+
+    let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
+    let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1920);
+    let cap_w: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(100.0);
+    let grow_right = cx < sw / 2;
+
+    let bar_h = s.bar_height as i32;
+    let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
+    let half_cap = (cap_w / 2.0) as i32;
+    let slant_px = s.slant_width as i32;
+
+    let (anchor, margin) = if grow_right {
+        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, (cx - half_cap).max(0)))
+    } else {
+        (Anchor::Top | Anchor::Right, (margin_top, (sw - cx - half_cap - slant_px).max(0), 0, 0))
+    };
+
+    let layer = LayerShellSettings {
+        size: Some((w, h)), exclusive_zone: -1, anchor, layer: Layer::Overlay,
+        keyboard_interactivity: KeyboardInteractivity::OnDemand,
+        start_mode: output
+                .map(iced_layershell::settings::StartMode::TargetScreen)
+                .unwrap_or(iced_layershell::settings::StartMode::Active), margin, ..Default::default()
+    };
+        let _ns_mode_val = std::env::var("MBS_INFO_MODE").unwrap_or_else(|_| "custom".into());
+    let _ns_mode = format!("mbs-info-tip-{}", _ns_mode_val);
+
+    iced_layershell::application(
+        App::new_app,
+        move || _ns_mode.clone(),
+        App::update,
+        App::view,
+    )
+    .subscription(App::subscription)
+    .settings(Settings { layer_settings: layer, ..Default::default() })
+    .run()
 }

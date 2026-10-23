@@ -90,6 +90,19 @@ impl ShapeBox {
 impl<Message> canvas::Program<Message> for ShapeBox {
     type State = ();
 
+    fn update(
+        &self,
+        _state: &mut Self::State,
+        _event: &iced::Event,
+        _bounds: Rectangle,
+        _cursor: Cursor,
+    ) -> Option<iced::widget::Action<Message>> {
+        // Decorative canvas. Under iced 0.14 reactive rendering, an unmodified
+        // canvas only paints on the first frame. Requesting a redraw on
+        // every event keeps capsule backgrounds in sync with layout changes.
+        Some(iced::widget::Action::request_redraw())
+    }
+
     fn draw(
         &self,
         _state: &Self::State,

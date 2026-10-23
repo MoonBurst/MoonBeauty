@@ -73,6 +73,20 @@ pub struct TooltipBg {
 
 impl<Message> canvas::Program<Message> for TooltipBg {
     type State = ();
+
+    fn update(
+        &self,
+        _state: &mut Self::State,
+        _event: &iced::Event,
+        _bounds: Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Option<iced::widget::Action<Message>> {
+        // The tooltip's drop/expand animation rebuilds this widget with new w/h
+        // every 16ms tick. Reactive rendering would otherwise only paint the
+        // first frame, producing a choppy animation. Forcing redraw makes
+        // the parallelogram follow the smoothstep easing.
+        Some(iced::widget::Action::request_redraw())
+    }
     fn draw(&self, _s: &Self::State, renderer: &iced::Renderer, _t: &Theme,
             bounds: Rectangle, _c: iced::mouse::Cursor) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());

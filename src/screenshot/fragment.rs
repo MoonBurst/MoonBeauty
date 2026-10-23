@@ -74,15 +74,9 @@ impl Default for FragmentApp {
     }
 }
 
-#[cfg(any())] impl Application for FragmentApp {
-    type Executor = iced::executor::Default;
-    type Message = Message;
-    type Theme = Theme;
-    type Flags = FragmentApp;
+impl FragmentApp {
 
-    fn new(flags: Self::Flags) -> (Self, Task<Message>) {
-        (flags, Task::none())
-    }
+    
 
     fn namespace(&self) -> String {
         format!("mbs-freeze-frag-{}", self.monitor)
@@ -180,11 +174,14 @@ impl Default for FragmentApp {
     fn subscription(&self) -> iced::Subscription<Message> {
         iced::Subscription::batch([
             iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
-            iced::keyboard::on_key_press(|key, modifiers| match key {
+            iced::event::listen_with(|event, _status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
                     Some(Message::Escape)
                 }
                 _ => None,
+            }
             }),
         ])
     }
@@ -313,6 +310,52 @@ pub fn run(
     local_png: PathBuf,
     state_file: PathBuf,
 ) -> Result<(), String> {
-    eprintln!("[fragment DISABLED during iced 0.14 migration]");
-    Err("DISABLED during iced 0.14 migration".into())
+    let bytes = std::fs::read(&local_png).map_err(|e| format!("read: {e}"))?;
+    let handle = iced::widget::image::Handle::from_bytes(bytes);
+    let app = FragmentApp {
+        monitor: monitor.clone(),
+        gx,
+        gy,
+        handle,
+        state_file,
+        is_initiator: false,
+        render_rect: None,
+    };
+    
+    // layer_settings is passed via the Settings struct, not a trait method
+    let layer = LayerShellSettings {
+        size: Some((0, 0)),
+        exclusive_zone: -1,
+        anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
+        layer: Layer::Overlay,
+        keyboard_interactivity: KeyboardInteractivity::Exclusive,
+        events_transparent: false,
+        start_mode: Some(monitor)
+                .map(iced_layershell::settings::StartMode::TargetScreen)
+                .unwrap_or(iced_layershell::settings::StartMode::Active),
+        ..Default::default()
+    };
+
+    let _app_cell = std::sync::Arc::new(std::sync::Mutex::new(Some(app)));
+    let _app_for_boot = _app_cell.clone();
+    iced_layershell::application(
+        move || {
+            let _app = _app_for_boot
+                .lock()
+                .unwrap()
+                .take()
+                .expect("iced_layershell calls boot exactly once");
+            (_app, iced::Task::none())
+        },
+        || "mbs-freeze-frag".to_string(),
+        FragmentApp::update,
+        FragmentApp::view,
+    )
+    .subscription(FragmentApp::subscription)
+    .settings(Settings {
+        layer_settings: layer,
+        ..Default::default()
+    })
+    .run()
+    .map_err(|e| format!("run: {e:?}"))
 }

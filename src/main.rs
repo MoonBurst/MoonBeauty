@@ -302,60 +302,8 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         }
     }
 
-    if args.iter().any(|a| a == "--freeze-selector") {
-        let idx = args.iter().position(|a| a == "--freeze-selector").unwrap();
-        let input = args.get(idx + 1).cloned().unwrap_or_default();
-        let output = args.get(idx + 2).cloned().unwrap_or_default();
-        let binded = args.get(idx + 3).cloned();
-        if input.is_empty() || output.is_empty() {
-            eprintln!("usage: --freeze-selector <input.png> <output.png> [output-name]");
-            std::process::exit(2);
-        }
-        match screenshot::selector::run(
-            std::path::PathBuf::from(input),
-            std::path::PathBuf::from(output),
-            binded,
-        ) {
-            Ok(_) => std::process::exit(0),
-            Err(e) => { eprintln!("[freeze-selector] {e}"); std::process::exit(1); }
-        }
-    }
-
-    // Orchestrator: capture focused output → spawn child → report crop
-    if args.iter().any(|a| a == "--freeze-test") {
-        let bytes = match screenshot::capture::capture_output(None) {
-            Ok(b) => b,
-            Err(e) => { eprintln!("[freeze] capture failed: {e}"); std::process::exit(1); }
-        };
-        let img = match image::load_from_memory(&bytes) {
-            Ok(i) => i,
-            Err(e) => { eprintln!("[freeze] decode failed: {e}"); std::process::exit(1); }
-        };
-        eprintln!("[freeze] captured {}x{} ({} bytes)", img.width(), img.height(), bytes.len());
-
-        let tmp_in = "/tmp/mbs-freeze-in.png";
-        let tmp_out = "/tmp/mbs-freeze-out.png";
-        std::fs::write(tmp_in, &bytes).ok();
-        let _ = std::fs::remove_file(tmp_out);
-
-        let exe = resolve_exe();
-        let status = std::process::Command::new(exe)
-            .args(["--freeze-selector", tmp_in, tmp_out])
-            .status();
-        match status {
-            Ok(s) if s.success() && std::path::Path::new(tmp_out).exists() => {
-                let cropped = std::fs::read(tmp_out).unwrap_or_default();
-                if let Ok(i) = image::load_from_memory(&cropped) {
-                    eprintln!("[freeze] ✓ cropped {}x{} → {}", i.width(), i.height(), tmp_out);
-                }
-                std::process::exit(0);
-            }
-            Ok(_) => { eprintln!("[freeze] cancelled"); std::process::exit(1); }
-            Err(e) => { eprintln!("[freeze] child spawn failed: {e}"); std::process::exit(1); }
-        }
-    }
-
-    if args.iter().any(|a| a == "--screenshot") {
+        // Orchestrator: capture focused output → spawn child → report crop
+        if args.iter().any(|a| a == "--screenshot") {
         let quick = args.iter().any(|a| a == "--quick" || a == "--no-annotate");
         let annotate = !quick;
         let watermark_cli = args.iter()
@@ -607,6 +555,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             anchor,
             layer: Layer::Overlay,
             keyboard_interactivity: KeyboardInteractivity::None,
+            events_transparent: false,
             start_mode: binded_output_name
                 .map(iced_layershell::settings::StartMode::TargetScreen)
                 .unwrap_or(iced_layershell::settings::StartMode::Active),
@@ -624,6 +573,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
             layer: Layer::Overlay,
             keyboard_interactivity: KeyboardInteractivity::Exclusive,
+            events_transparent: false,
             start_mode: (lock_output).map(iced_layershell::settings::StartMode::TargetScreen).unwrap_or(iced_layershell::settings::StartMode::Active),
             ..Default::default()
         }
@@ -637,6 +587,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
             layer: Layer::Overlay,
             keyboard_interactivity: KeyboardInteractivity::Exclusive,
+            events_transparent: false,
             start_mode: binded_output_name
                 .map(iced_layershell::settings::StartMode::TargetScreen)
                 .unwrap_or(iced_layershell::settings::StartMode::Active),
@@ -649,6 +600,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
             layer: Layer::Overlay,
             keyboard_interactivity: KeyboardInteractivity::Exclusive,
+            events_transparent: false,
             start_mode: (None).map(iced_layershell::settings::StartMode::TargetScreen).unwrap_or(iced_layershell::settings::StartMode::Active),
             ..Default::default()
         }
@@ -659,6 +611,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             anchor: Anchor::Top | Anchor::Left | Anchor::Right,
             layer: Layer::Top,
             keyboard_interactivity: KeyboardInteractivity::None,
+            events_transparent: false,
             start_mode: match settings.bar_monitor.as_str() {
                 "All" | "" => iced_layershell::settings::StartMode::Active,
                 n => iced_layershell::settings::StartMode::TargetScreen(n.to_string()),
@@ -1368,6 +1321,7 @@ impl MoonBeautyShellApp {
                 }
             }
             Message::TopBar(msg) => {
+                eprintln!("[topbar-msg] {:?}", msg);
                 if let TopBarMessage::Action(act) = msg {
                     match act {
                         CapsuleAction::OpenOverlay(id) => {
