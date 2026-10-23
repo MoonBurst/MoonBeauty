@@ -615,7 +615,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             exclusive_zone: -1,
             anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
             layer: Layer::Overlay,
-            keyboard_interactivity: KeyboardInteractivity::OnDemand,
+            keyboard_interactivity: KeyboardInteractivity::Exclusive,
             binded_output_name: None,
             ..Default::default()
         }
@@ -701,6 +701,8 @@ pub enum Message {
     DismissActiveOverlay,
     CloseShell,
     TrayItemsLoaded(Vec<moon_beauty_shell::backend::TrayItem>),
+    TrayAnimTick,
+    CollapseTrayIfGen(u64),
     CollapseTray,
 }
 
@@ -737,6 +739,12 @@ pub struct MoonBeautyShellApp {
     notif_surface_size: (u32, u32),
     tray_expanded: bool,
     tray_items: Vec<moon_beauty_shell::backend::TrayItem>,
+    tray_anim_width: f32,
+    tray_target_width: f32,
+    tray_anim_start_width: f32,
+    tray_anim_started_at: std::time::Instant,
+    tray_anim_duration_ms: u64,
+    tray_timeout_gen: u64,
     detected_gpus: Vec<moon_beauty_shell::backend::GpuInfo>,
 
     launcher: AppLauncher,
@@ -760,6 +768,18 @@ pub struct MoonBeautyShellApp {
 }
 
 impl MoonBeautyShellApp {
+    fn close_tray(&mut self) {
+        if self.tray_expanded {
+            self.tray_expanded = false;
+            self.tray_anim_start_width = self.tray_anim_width;
+            self.tray_anim_started_at = std::time::Instant::now();
+            self.tray_target_width = self.settings.tray_width as f32;
+            self.tray_anim_duration_ms = 180;
+        }
+        // Invalidate any pending timeout timers
+        self.tray_timeout_gen = self.tray_timeout_gen.wrapping_add(1);
+    }
+
     fn standalone_running(&mut self) -> Option<OverlayTarget> {
         if let Some((t, child)) = self.standalone_child.as_mut() {
             if matches!(child.try_wait(), Ok(None)) {
@@ -844,6 +864,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
     let is_notif_surface = detect_notif_surface(&args);
         let is_standalone = standalone_target.is_some();
         let settings = ShellSettings::load();
+        let _tray_width_px = settings.tray_width as f32;
         eprintln!("[startup] tray_width={} tray_timeout={}s", settings.tray_width, settings.tray_timeout_sec);
         let theme = ShellTheme::from_settings(&settings);
 
@@ -929,10 +950,22 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             notif_surface_size: if is_notif_surface { (1, 1) } else { (0, 0) },
             tray_expanded: false,
             tray_items: Vec::new(),
+            tray_anim_width: _tray_width_px,
+            tray_target_width: _tray_width_px,
+            tray_anim_start_width: _tray_width_px,
+            tray_anim_started_at: std::time::Instant::now(),
+            tray_anim_duration_ms: 220,
+            tray_timeout_gen: 0,
             detected_gpus: if is_notif_surface || is_standalone { Vec::new() } else { SystemCollector::list_gpus_sync() },
 
             launcher: AppLauncher::new(),
-            calc: CalculatorOverlay::new(),
+            calc: {
+                if let Ok(expr) = std::env::var("MBS_CALC_EXPR") {
+                    CalculatorOverlay::new_with_input(&expr)
+                } else {
+                    CalculatorOverlay::new()
+                }
+            },
             clipboard: ClipboardOverlay::new(),
             notes: NotesOverlay::new(),
             pass: PassOverlay::new(),
@@ -970,7 +1003,37 @@ impl iced_layershell::Application for MoonBeautyShellApp {
         ];
 
         if matches!(app.active_overlay, Some(OverlayTarget::Launcher)) {
+            // Immediate focus attempt
             init_tasks.push(iced::widget::text_input::focus("launcher_search").map(Message::Launcher));
+            // Delayed re-focus — catches compositor focus arriving after map
+            init_tasks.push(Command::perform(
+                async {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                },
+                |_| Message::Launcher(LauncherMessage::Refocus),
+            ));
+        } else if matches!(app.active_overlay, Some(OverlayTarget::Calc)) {
+            init_tasks.push(
+                iced::widget::text_input::focus(moon_beauty_shell::overlays::calc::CALC_INPUT_ID)
+                    .map(Message::Calc),
+            );
+            init_tasks.push(Command::perform(
+                async {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                },
+                |_| Message::Calc(CalcMessage::Refocus),
+            ));
+        } else if matches!(app.active_overlay, Some(OverlayTarget::Pass)) {
+            init_tasks.push(
+                iced::widget::text_input::focus(moon_beauty_shell::overlays::pass::PASS_SEARCH_ID)
+                    .map(Message::Pass),
+            );
+            init_tasks.push(Command::perform(
+                async {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                },
+                |_| Message::Pass(PassMessage::Refocus),
+            ));
         } else if matches!(app.active_overlay, Some(OverlayTarget::Clipboard)) {
             init_tasks.push(Command::perform(
                 ClipboardOverlay::reload(),
@@ -1442,17 +1505,47 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                             return Command::perform(AudioBackend::toggle_source_mute(), |_| Message::TopBar(TopBarMessage::Noop));
                         }
                         CapsuleAction::ToggleTrayExpanded => {
-                            eprintln!("[tray] ToggleTrayExpanded clicked. New state: {}", !self.tray_expanded);
-                            self.tray_expanded = !self.tray_expanded;
-                            if self.tray_expanded {
+                            if !self.tray_expanded {
+                                // OPENING
+                                self.tray_timeout_gen = self.tray_timeout_gen.wrapping_add(1);
+                                let my_gen = self.tray_timeout_gen;
+                                
+                                self.tray_expanded = true;
+                                self.tray_anim_start_width = self.tray_anim_width;
+                                self.tray_anim_started_at = std::time::Instant::now();
+                                let expanded_w = moon_beauty_shell::bar::capsules::compute_expanded_visible_width(
+                                    &self.settings, self.tray_items.len()
+                                );
+                                self.tray_target_width = expanded_w;
+                                self.tray_anim_duration_ms = 220;
+
+                                let timeout = self.settings.tray_timeout_sec;
+                                if timeout > 0 {
+                                    return Command::batch(vec![
+                                        Command::perform(
+                                            moon_beauty_shell::backend::tray_watcher::fetch_tray_items(),
+                                            Message::TrayItemsLoaded,
+                                        ),
+                                        Command::perform(
+                                            async move {
+                                                tokio::time::sleep(std::time::Duration::from_secs(timeout as u64)).await;
+                                                my_gen
+                                            },
+                                            Message::CollapseTrayIfGen,
+                                        ),
+                                    ]);
+                                }
                                 return Command::perform(
                                     moon_beauty_shell::backend::tray_watcher::fetch_tray_items(),
                                     Message::TrayItemsLoaded,
                                 );
+                            } else {
+                                // CLOSING — bump gen to invalidate any pending timer
+                                self.close_tray();
                             }
                         }
                         CapsuleAction::TrayActivate(item) => {
-                            self.tray_expanded = false;
+                            self.close_tray();
                             return Command::perform(
                                 async move {
                                     let _ = moon_beauty_shell::backend::tray_watcher::activate_tray_item(&item.bus, &item.path).await;
@@ -1500,6 +1593,63 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                     self.active_overlay = None;
                 }
                 LauncherMessage::ExecuteApp(cmd) => {
+                    // Tab pressed on math row — open calculator with same expression
+                    if cmd == "__tab__" {
+                        // Tab = Enter on currently selected item.
+                        // For a math row, this copies the result.
+                        // For an app row, this launches the app.
+                        if let Some(selected) = self.launcher.filtered_apps.get(self.launcher.selected_index) {
+                            let resolved = selected.exec.clone();
+                            return self.update(Message::Launcher(LauncherMessage::ExecuteApp(resolved)));
+                        }
+                        return Command::none();
+                    }
+                    // Math result — copy to clipboard and close
+                    if let Some(result) = cmd.strip_prefix("math:") {
+                        let result = result.to_string();
+                        eprintln!("[launcher] math result -> wl-copy: {}", result);
+                        let _ = std::process::Command::new("notify-send")
+                            .args(["-a", "Launcher", "Copied", &result])
+                            .spawn();
+                        if self.is_standalone {
+                            let rt = tokio::runtime::Runtime::new().unwrap();
+                            let r = result.clone();
+                            rt.block_on(async move {
+                                let _ = tokio::process::Command::new("wl-copy")
+                                    .arg(&r)
+                                    .status()
+                                    .await;
+                            });
+                            std::process::exit(0);
+                        }
+                        self.active_overlay = None;
+                        return Command::perform(async move {
+                            let _ = tokio::process::Command::new("wl-copy")
+                                .arg(&result)
+                                .status()
+                                .await;
+                        }, |_| Message::DismissActiveOverlay);
+                    }
+
+                    if let Some(key) = cmd.strip_prefix("pass:") {
+                        eprintln!("[launcher] pass copy: {}", key);
+                        // Detached: `pass -c` may block on GPG pinentry, so we
+                        // spawn it as its own process and exit immediately.
+                        // The `sh -c '... "$1"' -- <key>` pattern prevents shell
+                        // injection when the key has special chars.
+                        let _ = std::process::Command::new("sh")
+                            .arg("-c")
+                            .arg(r#"pass -c "$1" 2>&1 && notify-send -a 'Password Store' 'Copied' "$1""#)
+                            .arg("--")
+                            .arg(key)
+                            .spawn();
+                        if self.is_standalone {
+                            std::process::exit(0);
+                        }
+                        self.active_overlay = None;
+                        return Command::none();
+                    }
+
                     if let Some(target_str) = cmd.strip_prefix("internal:") {
                         if let Some(target) = OverlayTarget::from_str(target_str) {
                             if self.is_standalone {
@@ -1525,9 +1675,19 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                     if self.is_standalone { std::process::exit(0); }
                     self.active_overlay = None;
                 }
+                CalcMessage::Refocus => {
+                    return iced::widget::text_input::focus(
+                        moon_beauty_shell::overlays::calc::CALC_INPUT_ID,
+                    ).map(Message::Calc);
+                }
                 CalcMessage::CopyResult(val) => {
                     if self.is_standalone {
-                        tokio::spawn(async move { CalculatorOverlay::copy_to_clipboard(&val).await; });
+                        // Block on the copy so it completes before exit.
+                        let v = val.clone();
+                        let rt = tokio::runtime::Runtime::new().unwrap();
+                        rt.block_on(async move {
+                            CalculatorOverlay::copy_to_clipboard(&v).await;
+                        });
                         std::process::exit(0);
                     }
                     self.active_overlay = None;
@@ -1718,9 +1878,19 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                     if self.is_standalone { std::process::exit(0); }
                     self.active_overlay = None;
                 }
+                PassMessage::Refocus => {
+                    return iced::widget::text_input::focus(
+                        moon_beauty_shell::overlays::pass::PASS_SEARCH_ID,
+                    ).map(Message::Pass);
+                }
                 PassMessage::CopyKey(k) => {
                     if self.is_standalone {
-                        tokio::spawn(async move { PassOverlay::copy_password(&k).await; });
+                        // Block on copy so it completes before exit (no orphan tokio task)
+                        let k = k.clone();
+                        let rt = tokio::runtime::Runtime::new().unwrap();
+                        rt.block_on(async move {
+                            PassOverlay::copy_password(&k).await;
+                        });
                         std::process::exit(0);
                     }
                     self.active_overlay = None;
@@ -2030,10 +2200,46 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 _ => self.lockscreen.update(msg),
             },
             Message::CollapseTray => {
-                self.tray_expanded = false;
+                self.close_tray();
+            }
+            Message::CollapseTrayIfGen(gen) => {
+                if gen == self.tray_timeout_gen && self.tray_expanded {
+                    self.close_tray();
+                }
+            }
+            Message::TrayAnimTick => {
+                let elapsed_ms = self.tray_anim_started_at.elapsed().as_millis() as f32;
+                let t = (elapsed_ms / self.tray_anim_duration_ms.max(1) as f32).clamp(0.0, 1.0);
+
+                // Expand: ease-out-cubic (fast start, smooth settle)
+                // Collapse: ease-in-cubic (slow start, snap finish)
+                let expanding = self.tray_target_width > self.tray_anim_start_width;
+                let eased = if expanding {
+                    1.0 - (1.0 - t).powi(3)
+                } else {
+                    t * t * t
+                };
+
+                let delta = self.tray_target_width - self.tray_anim_start_width;
+                self.tray_anim_width = self.tray_anim_start_width + delta * eased;
+
+                if t >= 1.0 {
+                    self.tray_anim_width = self.tray_target_width;
+                }
             }
             Message::TrayItemsLoaded(items) => {
                 self.tray_items = items;
+                if self.tray_expanded {
+                    let new_target = moon_beauty_shell::bar::capsules::compute_expanded_visible_width(
+                        &self.settings, self.tray_items.len()
+                    );
+                    // Re-anchor if target changed mid-animation
+                    if (new_target - self.tray_target_width).abs() > 1.0 {
+                        self.tray_anim_start_width = self.tray_anim_width;
+                        self.tray_anim_started_at = std::time::Instant::now();
+                        self.tray_target_width = new_target;
+                    }
+                }
             }
             Message::DismissActiveOverlay => {
                 // Persist if we're closing the Settings overlay via Esc.
@@ -2115,6 +2321,50 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             iced::Subscription::none()
         };
 
+        let launcher_sub = if matches!(self.active_overlay, Some(OverlayTarget::Launcher)) {
+            // Use listen_with (not on_key_press) so Left/Right events reach us
+            // even though text_input consumes them for cursor movement.
+            iced::event::listen_with(|event, status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
+                    return None;
+                };
+                let shift = modifiers.shift();
+
+                // Debug: log arrow keys with their capture status
+                if matches!(
+                    key,
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft)
+                        | iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight)
+                ) {
+                    eprintln!("[launcher-key] arrow status={:?}", status);
+                }
+
+                match key {
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
+                        Some(Message::Launcher(LauncherMessage::SelectUp))
+                    }
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => {
+                        Some(Message::Launcher(LauncherMessage::SelectDown))
+                    }
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight) => {
+                        Some(Message::Launcher(LauncherMessage::SelectNext))
+                    }
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft) => {
+                        Some(Message::Launcher(LauncherMessage::SelectPrev))
+                    }
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab) if shift => {
+                        Some(Message::Launcher(LauncherMessage::SelectPrev))
+                    }
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab) => {
+                        Some(Message::Launcher(LauncherMessage::SelectNext))
+                    }
+                    _ => None,
+                }
+            })
+        } else {
+            iced::Subscription::none()
+        };
+
         let esc_sub = if self.annotator.text_editing.is_some() {
             iced::keyboard::on_key_press(|key, _mods| match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
@@ -2179,8 +2429,17 @@ impl iced_layershell::Application for MoonBeautyShellApp {
         };
         let resize_sub = iced::window::resize_events()
             .map(|(_id, size)| Message::WindowResized(size.width));
-        iced::Subscription::batch(vec![clock_sub, toast_sub, hw_sub, weather_sub, esc_sub,
-            enter_sub, ipc_sub, notif_sub, resize_sub, clip_sub, annotator_sub, text_typing_sub])
+        let elapsed = self.tray_anim_started_at.elapsed().as_millis() as u64;
+        let anim_active = elapsed < self.tray_anim_duration_ms
+            && (self.tray_anim_width - self.tray_target_width).abs() > 0.01;
+        let anim_sub = if anim_active {
+            iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::TrayAnimTick)
+        } else {
+            iced::Subscription::none()
+        };
+        iced::Subscription::batch(vec![clock_sub, toast_sub, hw_sub, weather_sub, anim_sub, esc_sub,
+            enter_sub, ipc_sub, notif_sub, resize_sub, clip_sub, annotator_sub, text_typing_sub,
+            launcher_sub])
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -2237,7 +2496,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             Some(OverlayTarget::Calc) => Some(self.calc.view(&self.theme, &self.settings).map(Message::Calc)),
             Some(OverlayTarget::Clipboard) => Some(self.clipboard.view(&self.theme, &self.settings).map(Message::Clipboard)),
             Some(OverlayTarget::Notes) => Some(self.notes.view(&self.theme).map(Message::Notes)),
-            Some(OverlayTarget::Pass) => Some(self.pass.view(&self.theme).map(Message::Pass)),
+            Some(OverlayTarget::Pass) => Some(self.pass.view(&self.theme, &self.settings).map(Message::Pass)),
             Some(OverlayTarget::Power) => Some(self.power.view(&self.theme).map(Message::Power)),
             Some(OverlayTarget::Todo) => Some(self.todo.view(&self.theme).map(Message::Todo)),
             Some(OverlayTarget::Reminders) => Some(self.reminders.view(&self.theme).map(Message::Reminders)),
@@ -2265,7 +2524,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             }
         }
 
-        let bar_view = TopBar::view(&self.settings, &self.theme, &self.telemetry, self.tray_expanded, &self.tray_items).map(Message::TopBar);
+        let bar_view = TopBar::view(&self.settings, &self.theme, &self.telemetry, self.tray_expanded, &self.tray_items, self.tray_anim_width).map(Message::TopBar);
         let base_content = Stack::new().push(bar_view);
 
         if let Some(overlay) = overlay_element {

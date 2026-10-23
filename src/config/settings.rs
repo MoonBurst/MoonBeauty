@@ -16,6 +16,108 @@ pub struct ContentRule {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum UnifiedCheck {
+    Process { name: String },
+    PortOpen { port: u16 },
+    SystemdActive { unit: String },
+    SystemdInactive { unit: String },
+    File { path: String },
+    Directory { path: String },
+    Mounted { path: String },
+    Command { command: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum UnifiedToggle {
+    Systemctl { action: String, unit: String },
+    Podman { action: String, container: String },
+    Docker { action: String, container: String },
+    Command { command: String },
+}
+
+
+impl UnifiedCheck {
+    pub fn type_str(&self) -> &'static str {
+        match self {
+            UnifiedCheck::Process { .. } => "process",
+            UnifiedCheck::PortOpen { .. } => "port_open",
+            UnifiedCheck::SystemdActive { .. } => "systemd_active",
+            UnifiedCheck::SystemdInactive { .. } => "systemd_inactive",
+            UnifiedCheck::File { .. } => "file",
+            UnifiedCheck::Directory { .. } => "directory",
+            UnifiedCheck::Mounted { .. } => "mounted",
+            UnifiedCheck::Command { .. } => "command",
+        }
+    }
+    pub fn param_str(&self) -> String {
+        match self {
+            UnifiedCheck::Process { name } => name.clone(),
+            UnifiedCheck::PortOpen { port } => port.to_string(),
+            UnifiedCheck::SystemdActive { unit } => unit.clone(),
+            UnifiedCheck::SystemdInactive { unit } => unit.clone(),
+            UnifiedCheck::File { path } => path.clone(),
+            UnifiedCheck::Directory { path } => path.clone(),
+            UnifiedCheck::Mounted { path } => path.clone(),
+            UnifiedCheck::Command { command } => command.clone(),
+        }
+    }
+    pub fn from_type_param(t: &str, p: &str) -> Option<Self> {
+        match t {
+            "process" => Some(UnifiedCheck::Process { name: p.into() }),
+            "port_open" => p.parse::<u16>().ok().map(|port| UnifiedCheck::PortOpen { port }),
+            "systemd_active" => Some(UnifiedCheck::SystemdActive { unit: p.into() }),
+            "systemd_inactive" => Some(UnifiedCheck::SystemdInactive { unit: p.into() }),
+            "file" => Some(UnifiedCheck::File { path: p.into() }),
+            "directory" => Some(UnifiedCheck::Directory { path: p.into() }),
+            "mounted" => Some(UnifiedCheck::Mounted { path: p.into() }),
+            "command" => Some(UnifiedCheck::Command { command: p.into() }),
+            _ => None,
+        }
+    }
+}
+
+impl UnifiedToggle {
+    pub fn type_str(&self) -> &'static str {
+        match self {
+            UnifiedToggle::Systemctl { .. } => "systemctl",
+            UnifiedToggle::Podman { .. } => "podman",
+            UnifiedToggle::Docker { .. } => "docker",
+            UnifiedToggle::Command { .. } => "command",
+        }
+    }
+    pub fn param_str(&self) -> String {
+        match self {
+            UnifiedToggle::Systemctl { action, unit } => format!("{}:{}", action, unit),
+            UnifiedToggle::Podman { action, container } => format!("{}:{}", action, container),
+            UnifiedToggle::Docker { action, container } => format!("{}:{}", action, container),
+            UnifiedToggle::Command { command } => command.clone(),
+        }
+    }
+    pub fn from_type_param(t: &str, p: &str) -> Option<Self> {
+        if t == "command" {
+            return Some(UnifiedToggle::Command { command: p.into() });
+        }
+        let (action, target) = p.split_once(':')?;
+        match t {
+            "systemctl" => Some(UnifiedToggle::Systemctl { action: action.into(), unit: target.into() }),
+            "podman" => Some(UnifiedToggle::Podman { action: action.into(), container: target.into() }),
+            "docker" => Some(UnifiedToggle::Docker { action: action.into(), container: target.into() }),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnifiedItem {
+    pub name: String,
+    pub check: UnifiedCheck,
+    #[serde(default)]
+    pub toggle: Option<UnifiedToggle>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FriendProfile {
     #[serde(default)]
     pub name: String,
@@ -214,6 +316,8 @@ pub struct ShellSettings {
     pub bar_center: Vec<String>,
     #[serde(default = "default_bar_right", alias = "barRight", alias = "barRightModules")]
     pub bar_right: Vec<String>,
+    #[serde(default, alias = "unifiedItems")]
+    pub unified_items: Vec<UnifiedItem>,
     #[serde(default, alias = "visibleCapsules")]
     pub visible_capsules: HashMap<String, bool>,
     #[serde(default, alias = "capsuleSlants")]
@@ -350,6 +454,7 @@ impl Default for ShellSettings {
             alarm_sound_duration_sec: default_alarm_sound_duration(),
             alarm_sound_volume: default_alarm_sound_volume(),
             friend_profiles: load_friend_profiles(),
+            unified_items: Vec::new(),
             bar_left: default_bar_left(),
             bar_center: default_bar_center(),
             bar_right: default_bar_right(),

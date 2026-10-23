@@ -82,6 +82,23 @@ pub fn lookup_width(id: &str) -> Option<f32> {
     widths_map().lock().ok().and_then(|m| m.get(id).copied())
 }
 
+/// Compute the visible width of the fully-expanded tray (excluding slants).
+/// Matches the internal math in `render_tray_expanded` so the animator can
+/// target the exact final width.
+pub fn compute_expanded_visible_width(settings: &crate::config::settings::ShellSettings, item_count: usize) -> f32 {
+    let shown = item_count.min(8);
+    let icon_size = settings.tray_icon_size as f32;
+    let icon_slot = icon_size + 8.0; // icon_size + icon_pad * 2
+    let close_slot = 24.0;
+    let spacing = 4.0;
+    let empty_w = if item_count == 0 { 150.0 } else { 0.0 };
+    let content_w = close_slot
+        + if shown > 0 { spacing } else { 0.0 }
+        + (icon_slot + spacing) * shown as f32
+        + empty_w;
+    content_w + 32.0
+}
+
 pub struct CapsuleRenderer;
 
 impl CapsuleRenderer {
@@ -326,7 +343,7 @@ impl CapsuleRenderer {
         };
 
         let text_w = LABEL_W.with(|w| w.get());
-        let min_width = if id == "tray" {
+        let bounding_w = if id == "tray" {
             // tray_width means the VISIBLE parallelogram width.
             // The ShapeBox::Slant clips `slant_width` off each side, so
             // the bounding box must be wider by 2*slant_width.
@@ -334,7 +351,7 @@ impl CapsuleRenderer {
         } else {
             text_w + theme.slant_width * 2.0 + 24.0
         };
-        record_width(id, min_width);
+        record_width(id, bounding_w);
 
         let border_color = if border_color == theme.border { theme.text } else { border_color };
 
@@ -350,10 +367,10 @@ impl CapsuleRenderer {
             .background(theme.background)
             .border(border_color, theme.control_border_width)
             .slant_width(theme.slant_width)
-            .size(Length::Fixed(min_width), Length::Fill);
+            .size(Length::Fixed(bounding_w), Length::Fill);
 
         let button_content = container(content)
-            .width(Length::Fixed(min_width))
+            .width(Length::Fixed(bounding_w))
             .height(Length::Fill)
             .align_x(Alignment::Center)
             .align_y(Alignment::Center);
@@ -361,7 +378,7 @@ impl CapsuleRenderer {
         let action_btn = button(Stack::new().push(background_shape.view()).push(button_content))
             .on_press(on_action(action))
             .padding(0)
-            .width(Length::Fixed(min_width))
+            .width(Length::Fixed(bounding_w))
             .style(|_t, _s| button::Style {
                 background: None,
                 ..Default::default()
@@ -388,6 +405,7 @@ impl CapsuleRenderer {
         slant_left: SlantSide,
         slant_right: SlantSide,
         region: &str,
+        display_width: f32,
         on_action: impl Fn(CapsuleAction) -> Message + 'static + Copy,
     ) -> Element<'a, Message> {
         let icon_size = settings.tray_icon_size as f32;
@@ -402,12 +420,20 @@ impl CapsuleRenderer {
             + if shown > 0 { spacing } else { 0.0 }
             + (icon_slot + spacing) * shown as f32
             + empty_w;
-        let min_width = content_w + theme.slant_width * 2.0 + 32.0;
+        let _full_min_width = content_w + theme.slant_width * 2.0 + 32.0;
+        // Use the animated display_width passed by caller, add slants for bounding box
+        let bounding_w = display_width + theme.slant_width * 2.0;
+        let show_icons = display_width > settings.tray_width as f32 + 3.0;
 
         let hover_bg = theme.surface_alt;
         let fg = theme.text;
 
-        let close_btn = button(text("\u{2715}").size(14).color(theme.muted))
+        let close_arrow = match region {
+            "left"  => "◀",
+            "right" => "▶",
+            _       => "▲",
+        };
+        let close_btn = button(text(close_arrow).size(16).color(theme.text))
             .on_press(on_action(CapsuleAction::ToggleTrayExpanded))
             .padding(0)
             .width(Length::Fixed(close_slot))
@@ -491,16 +517,28 @@ impl CapsuleRenderer {
         }
 
         let pad_x = theme.slant_width.round() as u16;
-        let mut content = Row::new()
-            .push(close_btn)
-            .push(icons_row)
-            .spacing(spacing)
-            .align_y(Alignment::Center)
-            .padding([0, pad_x]);
+        let mut content = if region == "right" {
+            // Icons left, close right
+            let mut r = Row::new().spacing(spacing).align_y(Alignment::Center);
+            if show_icons {
+                r = r.push(icons_row);
+            }
+            r = r.push(close_btn);
+            r
+        } else {
+            // Close left, icons right
+            let mut r = Row::new().spacing(spacing).align_y(Alignment::Center);
+            r = r.push(close_btn);
+            if show_icons {
+                r = r.push(icons_row);
+            }
+            r
+        }
+        .padding([0, pad_x]);
         if items.is_empty() {
             content = content.push(
                 container(text("Empty").size(11).color(theme.muted))
-                    .width(Length::Fixed(min_width - pad_x as f32 * 2.0))
+                    .width(Length::Fixed(bounding_w - pad_x as f32 * 2.0))
                     .center_x(Length::Fill)
                     .clip(true)
             );
@@ -514,18 +552,18 @@ impl CapsuleRenderer {
             .background(theme.background)
             .border(theme.text, theme.control_border_width)
             .slant_width(theme.slant_width)
-            .size(Length::Fixed(min_width), Length::Fill);
+            .size(Length::Fixed(bounding_w), Length::Fill);
 
         container(Stack::new()
             .push(background_shape.view())
             .push(
                 container(content)
-                    .width(Length::Fixed(min_width))
+                    .width(Length::Fixed(bounding_w))
                     .height(Length::Fill)
                     .align_x(Alignment::Center)
                     .align_y(Alignment::Center),
             ))
-            .width(Length::Fixed(min_width))
+            .width(Length::Fixed(bounding_w))
             .clip(true)
             .into()
     }

@@ -1,5 +1,13 @@
+//! MPRIS media player client — pure zbus, no libdbus, no playerctl.
+//!
+//! Enumerates `org.mpris.MediaPlayer2.*` bus names, prefers whichever is
+//! currently Playing, and reads/writes the standard Player interface.
+
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::process::Command;
+use zbus::Connection;
+use zbus::zvariant::OwnedValue;
 
 #[derive(Debug, Clone, Default)]
 pub struct MprisTrack {
@@ -15,38 +23,122 @@ pub struct MprisTrack {
 
 pub struct MprisBackend;
 
+const MPRIS_IFACE: &str = "org.mpris.MediaPlayer2.Player";
+const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
+
 impl MprisBackend {
-    pub async fn poll() -> Option<MprisTrack> {
-        let output = Command::new("playerctl")
-            .args([
-                "metadata",
-                "--format",
-                "{{title}}|{{artist}}|{{album}}|{{status}}|{{position}}|{{mpris:length}}|{{volume}}|{{xesam:url}}",
-            ])
-            .output()
+    async fn get_active_player() -> Option<(Connection, String)> {
+        let conn = Connection::session().await.ok()?;
+
+        let reply = conn
+            .call_method(
+                Some("org.freedesktop.DBus"),
+                "/org/freedesktop/DBus",
+                Some("org.freedesktop.DBus"),
+                "ListNames",
+                &(),
+            )
             .await
             .ok()?;
 
-        if !output.status.success() {
+        let names: Vec<String> = reply.body().deserialize().ok()?;
+        let mpris_names: Vec<String> = names
+            .into_iter()
+            .filter(|n| n.starts_with("org.mpris.MediaPlayer2."))
+            .filter(|n| !n.ends_with(".playerctld"))
+            .collect();
+
+        if mpris_names.is_empty() {
             return None;
         }
 
-        let raw = String::from_utf8_lossy(&output.stdout);
-        let line = raw.lines().next()?;
-        let parts: Vec<&str> = line.split('|').collect();
-
-        if parts.len() < 7 {
-            return None;
+        // Prefer a player that's currently Playing
+        for name in &mpris_names {
+            if let Ok(proxy) =
+                zbus::Proxy::new(&conn, name.as_str(), MPRIS_PATH, MPRIS_IFACE).await
+            {
+                if let Ok(status) = proxy.get_property::<String>("PlaybackStatus").await {
+                    if status == "Playing" {
+                        return Some((conn, name.clone()));
+                    }
+                }
+            }
         }
 
-        let title = parts[0].trim().to_string();
-        let artist = parts[1].trim().to_string();
-        let album = parts[2].trim().to_string();
-        let status = parts[3].trim();
-        let pos_us = parts[4].trim().parse::<f64>().unwrap_or(0.0);
-        let len_us = parts[5].trim().parse::<f64>().unwrap_or(0.0);
-        let vol = parts[6].trim().parse::<f64>().unwrap_or(1.0);
-        let url = parts.get(7).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        Some((conn, mpris_names[0].clone()))
+    }
+
+    pub async fn poll() -> Option<MprisTrack> {
+        let (conn, bus_name) = Self::get_active_player().await?;
+        let proxy = zbus::Proxy::new(&conn, bus_name.as_str(), MPRIS_PATH, MPRIS_IFACE)
+            .await
+            .ok()?;
+
+        let metadata: HashMap<String, OwnedValue> =
+            proxy.get_property("Metadata").await.ok()?;
+
+        let get_str = |key: &str| -> Option<String> {
+            metadata.get(key).and_then(|v| match &**v {
+                zbus::zvariant::Value::Str(s) => Some(s.to_string()),
+                _ => None,
+            })
+        };
+
+        let title = get_str("xesam:title").unwrap_or_default();
+        let album = get_str("xesam:album").unwrap_or_default();
+        let url = get_str("xesam:url");
+
+        let artist = metadata
+            .get("xesam:artist")
+            .and_then(|v| match &**v {
+                zbus::zvariant::Value::Str(s) => Some(s.to_string()),
+                zbus::zvariant::Value::Array(arr) => {
+                    let parts: Vec<String> = arr
+                        .iter()
+                        .filter_map(|item| {
+                            if let zbus::zvariant::Value::Str(s) = item {
+                                Some(s.to_string())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    if parts.is_empty() {
+                        None
+                    } else {
+                        Some(parts.join(", "))
+                    }
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
+
+        let length_sec = metadata
+            .get("mpris:length")
+            .and_then(|v| match &**v {
+                zbus::zvariant::Value::I64(n) => Some(*n as f64 / 1_000_000.0),
+                zbus::zvariant::Value::U64(n) => Some(*n as f64 / 1_000_000.0),
+                _ => None,
+            })
+            .unwrap_or(0.0);
+
+        let is_playing = proxy
+            .get_property::<String>("PlaybackStatus")
+            .await
+            .map(|s| s == "Playing")
+            .unwrap_or(false);
+
+        let position_sec = proxy
+            .get_property::<i64>("Position")
+            .await
+            .map(|p| p as f64 / 1_000_000.0)
+            .unwrap_or(0.0);
+
+        let volume_pct = proxy
+            .get_property::<f64>("Volume")
+            .await
+            .map(|v| (v * 100.0).clamp(0.0, 100.0) as u8)
+            .unwrap_or(100);
 
         if title.is_empty() && artist.is_empty() {
             return None;
@@ -56,38 +148,71 @@ impl MprisBackend {
             title,
             artist,
             album,
-            is_playing: status.eq_ignore_ascii_case("Playing"),
-            position_sec: pos_us / 1_000_000.0,
-            length_sec: len_us / 1_000_000.0,
-            volume_pct: (vol * 100.0).clamp(0.0, 100.0) as u8,
+            is_playing,
+            position_sec,
+            length_sec,
+            volume_pct,
             url,
         })
     }
 
+    async fn call_method(method: &str) {
+        let Some((conn, bus_name)) = Self::get_active_player().await else {
+            return;
+        };
+        let Ok(proxy) =
+            zbus::Proxy::new(&conn, bus_name.as_str(), MPRIS_PATH, MPRIS_IFACE).await
+        else {
+            return;
+        };
+        let _ = proxy.call_method(method, &()).await;
+    }
+
     pub async fn toggle_play_pause() {
-        let _ = Command::new("playerctl").arg("play-pause").status().await;
+        Self::call_method("PlayPause").await;
     }
 
     pub async fn next() {
-        let _ = Command::new("playerctl").arg("next").status().await;
+        Self::call_method("Next").await;
     }
 
     pub async fn previous() {
-        let _ = Command::new("playerctl").arg("previous").status().await;
+        Self::call_method("Previous").await;
     }
 
     pub async fn set_position(sec: f64) {
-        let _ = Command::new("playerctl")
-            .args(["position", &format!("{:.2}", sec)])
-            .status()
+        let Some((conn, bus_name)) = Self::get_active_player().await else {
+            return;
+        };
+        let Ok(proxy) =
+            zbus::Proxy::new(&conn, bus_name.as_str(), MPRIS_PATH, MPRIS_IFACE).await
+        else {
+            return;
+        };
+        // Most players ignore the TrackId argument for SetPosition and just
+        // seek within the current track. NoTrack is the safe sentinel.
+        let Ok(track_id) = zbus::zvariant::ObjectPath::try_from(
+            "/org/mpris/MediaPlayer2/TrackList/NoTrack",
+        ) else {
+            return;
+        };
+        let pos_us = (sec * 1_000_000.0) as i64;
+        let _ = proxy
+            .call_method("SetPosition", &(track_id, pos_us))
             .await;
     }
 
     pub async fn set_volume(vol_pct: u8) {
-        let frac = (vol_pct as f64) / 100.0;
-        let _ = Command::new("playerctl")
-            .args(["volume", &format!("{:.2}", frac)])
-            .status()
+        let Some((conn, bus_name)) = Self::get_active_player().await else {
+            return;
+        };
+        let Ok(proxy) =
+            zbus::Proxy::new(&conn, bus_name.as_str(), MPRIS_PATH, MPRIS_IFACE).await
+        else {
+            return;
+        };
+        let _ = proxy
+            .set_property("Volume", (vol_pct as f64) / 100.0)
             .await;
     }
 

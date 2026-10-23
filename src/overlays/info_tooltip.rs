@@ -21,14 +21,16 @@ const AUTO_MS: u128 = 15_000;
 pub enum InfoData {
     Calendar(crate::backend::CalendarViewData),
     Music(Option<MprisTrack>),
-    Unified(PodmanStatus, BorgStatus),
+    Unified(PodmanStatus, BorgStatus, Vec<crate::backend::UnifiedItemStatus>),
     Net(crate::backend::NetMetrics),
     Custom,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message { Tick, Loaded(InfoData), Dismiss, MusicPrev, MusicNext, MusicPlayPause, MusicSeek(f64), MusicSetVolume(u8), MusicOpenFolder(Option<String>), MusicTrashConfirm, MusicTrashExecute(Option<String>),
-    MusicToggleSource(usize), SearchChanged(String), KillProcess(u32), Noop }
+    MusicToggleSource(usize),
+    PodmanRestart(String),
+    UnifiedToggle(usize), SearchChanged(String), KillProcess(u32), Noop }
 
 impl TryInto<iced_layershell::actions::LayershellCustomActionsWithInfo<()>> for Message {
     type Error = Message;
@@ -133,6 +135,24 @@ impl Application for App {
                     crate::backend::MprisBackend::open_track_folder(url.as_deref()).await;
                 }, |_| Message::Noop);
             }
+            Message::PodmanRestart(cname) => {
+                return Task::perform(async move {
+                    crate::backend::PodmanBackend::restart(&cname).await;
+                }, |_| Message::Dismiss);
+            }
+            Message::UnifiedToggle(idx) => {
+                let s = ShellSettings::load();
+                if let Some(item) = s.unified_items.get(idx).cloned() {
+                    let mode = self.mode.clone();
+                    return Task::perform(async move {
+                        if let Err(e) = crate::backend::unified::toggle_item(&item).await {
+                            eprintln!("[unified] toggle '{}' failed: {}", item.name, e);
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        fetch_data(mode).await
+                    }, Message::Loaded);
+                }
+            }
             Message::MusicToggleSource(idx) => { self.sources_enabled[idx] = !self.sources_enabled[idx]; }
             Message::MusicTrashConfirm => { self.trash_confirm = true; }
             Message::MusicTrashExecute(url) => {
@@ -225,8 +245,8 @@ impl App {
         let mut col = column![].spacing(gap).width(Length::Fill);
 
         let mk_close = || -> Element<'a, Message> {
-            button(text("x").size(fs.saturating_sub(2).max(10)).color(muted))
-                .on_press(Message::Dismiss).padding([2, 6]).into()
+            // Removed per user request — press Escape to close.
+            iced::widget::Space::new(Length::Fixed(0.0), Length::Fixed(0.0)).into()
         };
 
         if let Some(d) = &self.data {
@@ -465,30 +485,125 @@ impl App {
                     ].align_y(Alignment::Center).width(Length::Fill);
                     col = col.push(slanted_row(src_row.into(), y + src_h * 0.5, total_h, slant_h, slant_right, safe, w_f, src_h));
                 }
-                InfoData::Unified(podman, borg) => {
+                InfoData::Unified(podman, borg, custom_items) => {
+                    let header_h = fs as f32 + 16.0;
                     let header = row![
-                        text("SYSTEM").size(fs).bold().color(text_col),
+                        text("SYSTEM").size(fs.max(14)).bold().color(text_col),
                         horizontal_space(),
                         mk_close(),
                     ].align_y(Alignment::Center).width(Length::Fill);
-                    col = col.push(slanted_row(header.into(), y + 16.0, total_h, slant_h, slant_right, safe, w_f, 32.0));
-                    y += 32.0 + gap;
+                    col = col.push(slanted_row(header.into(), y + header_h * 0.5, total_h, slant_h, slant_right, safe, w_f, header_h));
+                    y += header_h + gap;
 
-                    let mut list_col = column![].spacing(4);
-                    for c in podman.containers.iter().take(4) {
-                        let dot = if c.is_running { "●" } else { "○" };
-                        let color = if c.is_running { success } else { muted };
-                        list_col = list_col.push(row![
-                            text(dot).size(fs).color(color),
-                            text(&c.name).size(fs).color(text_col).width(Length::Fill),
-                            text(&c.status).size(fs-2).color(muted),
-                        ].spacing(6).align_y(Alignment::Center));
+                    // Containers
+                    if !podman.containers.is_empty() {
+                        let title_h = fs as f32 + 4.0;
+                        let title_el: Element<'_, Message> = text("Containers").size(fs - 2).bold().color(muted).into();
+                        col = col.push(slanted_row(title_el, y + title_h * 0.5, total_h, slant_h, slant_right, safe, w_f, title_h));
+                        y += title_h + gap;
+
+                        for c in podman.containers.iter().take(6) {
+                            let row_h = fs as f32 + 12.0;
+                            let dot = if c.is_running { "●" } else { "○" };
+                            let dot_color = if c.is_running { success } else { muted };
+                            let cname = c.name.clone();
+                            
+                            let restart_btn = make_slanted_button(
+                                "↻".into(),
+                                Message::PodmanRestart(cname.clone()),
+                                a(t.background), a(t.text), a(t.text), 4.0, fs - 3,
+                            );
+                            
+                            let row_el = row![
+                                text(dot).size(fs).color(dot_color),
+                                text(&c.name).size(fs - 1).color(text_col).width(Length::Fill),
+                                text(&c.status).size(fs - 3).color(muted),
+                                container(restart_btn).width(Length::Fixed(28.0)).height(Length::Fixed(row_h - 2.0)),
+                            ].spacing(8).align_y(Alignment::Center).width(Length::Fill);
+                            
+                            col = col.push(slanted_row(row_el.into(), y + row_h * 0.5, total_h, slant_h, slant_right, safe, w_f, row_h));
+                            y += row_h + gap;
+                        }
                     }
-                    col = col.push(slanted_row(list_col.into(), y + 40.0, total_h, slant_h, slant_right, safe, w_f, 80.0));
-                    y += 80.0 + gap;
 
-                    let borg_el = row![text("BORG:").size(fs).bold().color(muted), text(&borg.state_label).size(fs).color(text_col)].into();
-                    col = col.push(slanted_row(borg_el, y + 10.0, total_h, slant_h, slant_right, safe, w_f, 20.0));
+                    // Custom items
+                    if !custom_items.is_empty() {
+                        let title_h = fs as f32 + 4.0;
+                        let title_el: Element<'_, Message> = text("Custom Items").size(fs - 2).bold().color(muted).into();
+                        col = col.push(slanted_row(title_el, y + title_h * 0.5, total_h, slant_h, slant_right, safe, w_f, title_h));
+                        y += title_h + gap;
+
+                        for (idx, item) in custom_items.iter().enumerate() {
+                            let row_h = fs as f32 + 12.0;
+                            let dot = if item.is_ok { "●" } else { "○" };
+                            let dot_color = if item.is_ok { success } else { danger };
+                            
+                            let action_el: Element<'_, Message> = if item.has_toggle {
+                                make_slanted_button(
+                                    "↻".into(),
+                                    Message::UnifiedToggle(idx),
+                                    a(t.background), a(t.text), a(t.text), 4.0, fs - 3,
+                                )
+                            } else {
+                                container(text("")).width(Length::Fixed(28.0)).into()
+                            };
+                            
+                            let msg_str = if item.message.is_empty() {
+                                String::new()
+                            } else {
+                                let truncated: String = item.message.chars().take(18).collect();
+                                format!(" ({})", truncated)
+                            };
+                            
+                            let row_el = row![
+                                text(dot).size(fs).color(dot_color),
+                                text(&item.name).size(fs - 1).color(text_col).width(Length::Fill),
+                                text(msg_str).size(fs - 3).color(muted),
+                                container(action_el).width(Length::Fixed(28.0)).height(Length::Fixed(row_h - 2.0)),
+                            ].spacing(8).align_y(Alignment::Center).width(Length::Fill);
+                            
+                            col = col.push(slanted_row(row_el.into(), y + row_h * 0.5, total_h, slant_h, slant_right, safe, w_f, row_h));
+                            y += row_h + gap;
+                        }
+                    }
+                    
+                    if podman.containers.is_empty() && custom_items.is_empty() {
+                        let msg_h = fs as f32 + 8.0;
+                        let msg: Element<'_, Message> = text("(no containers or custom items — add via Settings)").size(fs - 2).color(muted).into();
+                        col = col.push(slanted_row(msg, y + msg_h * 0.5, total_h, slant_h, slant_right, safe, w_f, msg_h));
+                        y += msg_h + gap;
+                    }
+                    
+                    // Borg — three states: Failed (red) > Running (yellow) > Normal (green)
+                    let title_h = fs as f32 + 4.0;
+                    let title_el: Element<'_, Message> = text("Borg").size(fs - 2).bold().color(muted).into();
+                    col = col.push(slanted_row(title_el, y + title_h * 0.5, total_h, slant_h, slant_right, safe, w_f, title_h));
+                    y += title_h + gap;
+
+                    let borg_h = fs as f32 + 12.0;
+                    let (borg_dot_color, borg_label) = if borg.is_failed {
+                        let msg = borg.details.first()
+                            .cloned()
+                            .unwrap_or_else(|| "Failed".to_string());
+                        (danger, msg)
+                    } else if borg.is_active {
+                        let status = if borg.percent > 0 {
+                            format!("Running ({}%)", borg.percent)
+                        } else {
+                            "Running".to_string()
+                        };
+                        (warning, status)
+                    } else if borg.is_mounted {
+                        (success, "Mounted".to_string())
+                    } else {
+                        (success, "Idle (Synced)".to_string())
+                    };
+
+                    let borg_el = row![
+                        text("●").size(fs).color(borg_dot_color),
+                        text(borg_label).size(fs - 1).color(text_col).width(Length::Fill),
+                    ].spacing(8).align_y(Alignment::Center).width(Length::Fill).into();
+                    col = col.push(slanted_row(borg_el, y + borg_h * 0.5, total_h, slant_h, slant_right, safe, w_f, borg_h));
                 }
                 InfoData::Net(net) => {
                     let header = row![
@@ -809,7 +924,9 @@ async fn fetch_data(mode: String) -> InfoData {
         "unified" => {
             let p = PodmanBackend::poll().await;
             let b = BorgBackend::poll().await;
-            InfoData::Unified(p, b)
+            let s = ShellSettings::load();
+            let items = crate::backend::unified::check_unified_items(&s.unified_items).await;
+            InfoData::Unified(p, b, items)
         }
         "net" => {
             let mut sc = SystemCollector::new();

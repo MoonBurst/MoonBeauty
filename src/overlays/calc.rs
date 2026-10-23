@@ -11,7 +11,10 @@ pub enum CalcMessage {
     InputChanged(String),
     CopyResult(String),
     Dismiss,
+    Refocus,
 }
+
+pub const CALC_INPUT_ID: &str = "calc_input";
 
 pub struct CalculatorOverlay {
     pub input_text: String,
@@ -29,6 +32,15 @@ impl CalculatorOverlay {
         Self {
             input_text: String::new(),
             result_text: String::new(),
+        }
+    }
+
+    pub fn new_with_input(expr: &str) -> Self {
+        let expr = expr.to_string();
+        let result = Self::evaluate(&expr);
+        Self {
+            input_text: expr,
+            result_text: result,
         }
     }
 
@@ -190,6 +202,7 @@ impl CalculatorOverlay {
         };
 
         let input = text_input("Type math or unit conversion (e.g. 50 * 12, 100 kg in lbs)...", &self.input_text)
+            .id(CALC_INPUT_ID)
             .on_input(CalcMessage::InputChanged)
             .on_submit(CalcMessage::CopyResult(self.result_text.clone()))
             .padding(14)

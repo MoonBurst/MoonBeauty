@@ -8,6 +8,7 @@ pub struct BorgStatus {
     pub state_label: String,
     pub is_active: bool,
     pub is_mounted: bool,
+    pub is_failed: bool,
     pub percent: u8,
     pub speed: String,
     pub eta: String,
@@ -56,6 +57,7 @@ impl BorgBackend {
                 state_label: if is_mounted { "Mounted".into() } else { "Idle".into() },
                 is_active: false,
                 is_mounted,
+                is_failed: false,
                 percent: 0,
                 speed: "".into(),
                 eta: "".into(),
@@ -84,6 +86,7 @@ impl BorgBackend {
 
         let mut details = Vec::new();
         let is_active = st == "running" || st == "syncing" || st == "indexing";
+        let is_error_state = st == "error" || st == "failed" || st == "fail";
 
         match st.as_str() {
             "indexing" => {
@@ -98,19 +101,31 @@ impl BorgBackend {
             "syncing" => {
                 details.push(format!("Syncing to WebDAV: {}%", pct));
             }
+            "error" | "failed" | "fail" => {
+                let msg = if speed.is_empty() { "Unknown error".to_string() } else { speed.clone() };
+                details.push(format!("Error: {}", msg));
+            }
             _ => {
                 details.push("Repository Idle".into());
             }
         }
 
-        if !speed.is_empty() {
+        if !speed.is_empty() && !is_error_state {
             details.push(format!("Transfer Speed: {}", speed));
         }
-        if !eta.is_empty() {
+        if !eta.is_empty() && !is_error_state {
             details.push(format!("ETA: {}", eta));
         }
 
-        let state_label = if is_active {
+        // Failed if explicit error state OR any detail mentions error/fail
+        let is_failed = is_error_state || details.iter().any(|d| {
+            let low = d.to_lowercase();
+            low.contains("error") || low.contains("failed") || low.contains("fail")
+        });
+
+        let state_label = if is_failed {
+            "Borg: Failed".into()
+        } else if is_active {
             if pct > 0 {
                 format!("Borg: {}%", pct)
             } else {
@@ -126,6 +141,7 @@ impl BorgBackend {
             state_label,
             is_active,
             is_mounted,
+            is_failed,
             percent: pct,
             speed,
             eta,

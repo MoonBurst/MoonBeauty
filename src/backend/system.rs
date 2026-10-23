@@ -1,5 +1,7 @@
 use std::fs;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
+use sysinfo::{ProcessesToUpdate, System};
 use tokio::process::Command;
 
 #[derive(Debug, Clone, Default)]
@@ -66,6 +68,41 @@ pub struct ProcessItem {
     pub is_highlight: bool,
 }
 
+
+fn sys_state() -> &'static Mutex<System> {
+    static SYS: OnceLock<Mutex<System>> = OnceLock::new();
+    SYS.get_or_init(|| Mutex::new(System::new()))
+}
+
+fn read_cpu_temp() -> u32 {
+    // Thermal zones first
+    for i in 0..10 {
+        let path = format!("/sys/class/thermal/thermal_zone{}/temp", i);
+        if let Ok(raw) = fs::read_to_string(&path) {
+            if let Ok(v) = raw.trim().parse::<u32>() {
+                let t = if v > 1000 { v / 1000 } else { v };
+                if t > 0 { return t; }
+            }
+        }
+    }
+    // Fallback: k10temp / coretemp / zenpower
+    if let Ok(entries) = fs::read_dir("/sys/class/hwmon") {
+        for entry in entries.flatten() {
+            let dir = entry.path();
+            let name = fs::read_to_string(dir.join("name"))
+                .map(|s| s.trim().to_string()).unwrap_or_default();
+            if name == "k10temp" || name == "coretemp" || name == "zenpower" {
+                if let Ok(raw) = fs::read_to_string(dir.join("temp1_input")) {
+                    if let Ok(v) = raw.trim().parse::<u32>() {
+                        return v / 1000;
+                    }
+                }
+            }
+        }
+    }
+    0
+}
+
 pub struct SystemCollector {
     prev_rx_bytes: u64,
     prev_tx_bytes: u64,
@@ -106,66 +143,50 @@ impl SystemCollector {
     }
 
     pub async fn collect_cpu() -> CpuMetrics {
-        let mut temp_c = 0;
-        // Try /sys/class/thermal first (may be empty on some setups).
-        for i in 0..10 {
-            let path = format!("/sys/class/thermal/thermal_zone{}/temp", i);
-            if let Ok(raw) = fs::read_to_string(&path) {
-                if let Ok(v) = raw.trim().parse::<u32>() {
-                    temp_c = if v > 1000 { v / 1000 } else { v };
-                    if temp_c > 0 { break; }
-                }
-            }
-        }
-        // Fallback: /sys/class/hwmon k10temp (AMD), coretemp (Intel),
-        // zenpower (AMD Ryzen OC). These systems have no thermal_zone files.
-        if temp_c == 0 {
-            if let Ok(entries) = fs::read_dir("/sys/class/hwmon") {
-                for entry in entries.flatten() {
-                    let dir = entry.path();
-                    let name = fs::read_to_string(dir.join("name"))
-                        .map(|s| s.trim().to_string()).unwrap_or_default();
-                    if name == "k10temp" || name == "coretemp" || name == "zenpower" {
-                        if let Ok(raw) = fs::read_to_string(dir.join("temp1_input")) {
-                            if let Ok(v) = raw.trim().parse::<u32>() {
-                                temp_c = v / 1000;
-                                if temp_c > 0 { break; }
-                            }
-                        }
-                    }
-                }
-            }
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static FIRST_CALL: AtomicBool = AtomicBool::new(true);
+    let is_first = FIRST_CALL.swap(false, Ordering::Relaxed);
+    let temp_c = read_cpu_temp();
+
+    tokio::task::spawn_blocking(move || {
+        let mut sys = sys_state().lock().unwrap();
+
+        // First refresh: establishes baseline
+        sys.refresh_cpu_usage();
+        sys.refresh_processes(ProcessesToUpdate::All);
+
+        // On the very first call we have no inter-poll gap, so sleep 250ms
+        // and refresh again. Subsequent calls get a fresh 2s delta from the
+        // last poll (whatever the app's poll interval is) so no sleep needed.
+        if is_first {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            sys.refresh_cpu_usage();
+            sys.refresh_processes(ProcessesToUpdate::All);
         }
 
-        let read_stat = || {
-            let stat = fs::read_to_string("/proc/stat").unwrap_or_default();
-            let line = stat.lines().next().unwrap_or("");
-            let parts: Vec<u64> = line.split_whitespace().skip(1).filter_map(|x| x.parse().ok()).collect();
-            if parts.len() >= 4 {
-                let idle = parts[3] + parts[4]; // idle + iowait
-                let total: u64 = parts.iter().sum();
-                (idle, total)
-            } else { (0, 0) }
-        };
-        let (i1, t1) = read_stat();
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        let (i2, t2) = read_stat();
-        let usage_pct = if t2 > t1 {
-            let dt = t2 - t1;
-            let di = i2 - i1;
-            (100.0 * (dt.saturating_sub(di)) as f64 / dt as f64).clamp(0.0, 100.0) as u8
-        } else {
-            0
-        };
+        let usage_pct = sys.global_cpu_usage().round().clamp(0.0, 100.0) as u8;
 
-        let top_procs = Self::get_top_cpu_processes().await;
+        let mut procs: Vec<(u32, String, f32)> = sys.processes()
+            .iter()
+            .map(|(pid, p)| {
+                (pid.as_u32(), p.name().to_string_lossy().to_string(), p.cpu_usage())
+            })
+            .collect();
+        procs.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
-        CpuMetrics {
-            usage_pct,
-            temp_c,
-            top_procs,
-        }
-    }
+        let top_procs = procs.into_iter().take(15).map(|(pid, name, pct)| ProcessItem {
+            pid,
+            name,
+            metric: format!("{:.1}%", pct),
+            is_highlight: false,
+        }).collect();
+
+        CpuMetrics { usage_pct, temp_c, top_procs }
+    }).await.unwrap_or_else(|e| {
+        eprintln!("[cpu] sysinfo task failed: {:?}", e);
+        CpuMetrics { usage_pct: 0, temp_c, top_procs: Vec::new() }
+    })
+}
 
     pub async fn collect_gpu(card_id: &str, is_nvidia: bool, nv_index: u32) -> GpuMetrics {
         if is_nvidia {
@@ -269,38 +290,40 @@ impl SystemCollector {
     }
 
     pub async fn collect_ram() -> RamMetrics {
-        let meminfo = fs::read_to_string("/proc/meminfo").unwrap_or_default();
-        let mut total_kb = 0.0;
-        let mut avail_kb = 0.0;
+    tokio::task::spawn_blocking(|| {
+        let mut sys = sys_state().lock().unwrap();
+        sys.refresh_memory();
+        sys.refresh_processes(ProcessesToUpdate::All);
 
-        for line in meminfo.lines() {
-            if line.starts_with("MemTotal:") {
-                total_kb = line.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0.0);
-            } else if line.starts_with("MemAvailable:") {
-                avail_kb = line.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0.0);
-            }
-        }
+        let total_gib = sys.total_memory() as f32 / (1024.0 * 1024.0 * 1024.0);
+        let avail_gib = sys.available_memory() as f32 / (1024.0 * 1024.0 * 1024.0);
 
-        let total_gib = total_kb / (1024.0 * 1024.0);
-        let avail_gib = avail_kb / (1024.0 * 1024.0);
-
+        // zram stats — sysinfo doesn't expose these
         let zram_orig = fs::read_to_string("/sys/block/zram0/orig_data_size")
-            .ok()
-            .and_then(|s| s.trim().parse::<f32>().ok())
-            .unwrap_or(0.0);
+            .ok().and_then(|s| s.trim().parse::<f32>().ok()).unwrap_or(0.0);
         let zram_comp = fs::read_to_string("/sys/block/zram0/compr_data_size")
-            .ok()
-            .and_then(|s| s.trim().parse::<f32>().ok())
-            .unwrap_or(0.0);
+            .ok().and_then(|s| s.trim().parse::<f32>().ok()).unwrap_or(0.0);
 
-        let mut zram_ratio = 1.0;
-        let mut zram_saved_gib = 0.0;
-        if zram_comp > 0.0 && zram_orig > 0.0 {
-            zram_ratio = zram_orig / zram_comp;
-            zram_saved_gib = (zram_orig - zram_comp) / (1024.0 * 1024.0 * 1024.0);
-        }
+        let (zram_ratio, zram_saved_gib) = if zram_comp > 0.0 && zram_orig > 0.0 {
+            (zram_orig / zram_comp, (zram_orig - zram_comp) / (1024.0 * 1024.0 * 1024.0))
+        } else {
+            (1.0, 0.0)
+        };
 
-        let top_procs = Self::get_top_ram_processes().await;
+        let mut procs: Vec<(u32, String, u64)> = sys.processes()
+            .iter()
+            .map(|(pid, p)| {
+                (pid.as_u32(), p.name().to_string_lossy().to_string(), p.memory())
+            })
+            .collect();
+        procs.sort_by(|a, b| b.2.cmp(&a.2));
+
+        let top_procs = procs.into_iter().take(15).map(|(pid, name, bytes)| ProcessItem {
+            pid,
+            name,
+            metric: format!("{} MiB", bytes / (1024 * 1024)),
+            is_highlight: false,
+        }).collect();
 
         RamMetrics {
             total_gib,
@@ -310,7 +333,8 @@ impl SystemCollector {
             zram_saved_gib,
             top_procs,
         }
-    }
+    }).await.unwrap_or_default()
+}
 
     pub fn collect_battery() -> BatteryMetrics {
         let ps = Path::new("/sys/class/power_supply");
@@ -363,57 +387,37 @@ impl SystemCollector {
     }
 
     pub fn update_net(&mut self) -> NetMetrics {
-        // Preferred interface: the one carrying the default route.
-        let primary: Option<String> = (|| {
-            let route = fs::read_to_string("/proc/net/route").ok()?;
-            for line in route.lines().skip(1) {
-                let p: Vec<&str> = line.split_whitespace().collect();
-                if p.len() >= 2 && p[1] == "00000000" {
-                    return Some(p[0].to_string());
-                }
-            }
-            None
-        })();
+        use sysinfo::Networks;
+        static NETWORKS: OnceLock<Mutex<Networks>> = OnceLock::new();
+        let mut networks = NETWORKS
+            .get_or_init(|| Mutex::new(Networks::new_with_refreshed_list()))
+            .lock()
+            .unwrap();
+        networks.refresh();
 
-        let dev = fs::read_to_string("/proc/net/dev").unwrap_or_default();
-        let mut chosen_iface = String::from("none");
-        let mut chosen_rx: u64 = 0;
-        let mut chosen_tx: u64 = 0;
-        let mut fallback_rx: u64 = 0;
-        let mut fallback_tx: u64 = 0;
-        let mut fallback_iface = String::new();
-
-        for line in dev.lines() {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() < 10 { continue; }
-            let iface = parts[0].trim_end_matches(':');
-            if iface == "lo" { continue; }
-            let rx = parts[1].parse::<u64>().unwrap_or(0);
-            let tx = parts[9].parse::<u64>().unwrap_or(0);
-
-            if let Some(ref want) = primary {
-                if iface == want {
-                    chosen_iface = iface.to_string();
-                    chosen_rx = rx;
-                    chosen_tx = tx;
-                    break;
-                }
-            }
-            if rx > fallback_rx {
-                fallback_rx = rx;
-                fallback_tx = tx;
-                fallback_iface = iface.to_string();
-            }
-        }
-        if chosen_iface == "none" && !fallback_iface.is_empty() {
-            chosen_iface = fallback_iface;
-            chosen_rx = fallback_rx;
-            chosen_tx = fallback_tx;
+        // Prefer a non-loopback interface with data
+        let mut chosen: Option<(String, u64, u64)> = None;
+        for (name, data) in networks.iter() {
+            if name == "lo" { continue; }
+            chosen = Some((name.clone(), data.total_received(), data.total_transmitted()));
+            break;
         }
 
-        // If we're looking at a different interface than last time, seed the
-        // deltas from this sample so the rate isn't computed against a
-        // mismatched counter (which showed a huge spike on iface changes).
+        let (chosen_iface, chosen_rx, chosen_tx) = match chosen {
+            Some(c) => c,
+            None => {
+                return NetMetrics {
+                    iface: "none".into(),
+                    hw_type: "".into(),
+                    ip: "".into(),
+                    down_str: "0.0Kb".into(),
+                    up_str: "0.0Kb".into(),
+                    ping_str: "--".into(),
+                    top_procs: Vec::new(),
+                };
+            }
+        };
+
         if self.prev_iface != chosen_iface {
             self.prev_iface = chosen_iface.clone();
             self.prev_rx_bytes = chosen_rx;
@@ -439,25 +443,17 @@ impl SystemCollector {
         self.prev_tx_bytes = chosen_tx;
         self.prev_net_time = now;
 
-        let hw_type = if chosen_iface.starts_with("wl") {
-            "WiFi"
-        } else if chosen_iface.starts_with("ww") {
-            "Cellular"
-        } else if chosen_iface.starts_with("wg") {
-            "WireGuard"
-        } else {
-            "Ethernet"
-        };
+        let hw_type = if chosen_iface.starts_with("wl") { "WiFi" }
+            else if chosen_iface.starts_with("ww") { "Cellular" }
+            else if chosen_iface.starts_with("wg") { "WireGuard" }
+            else { "Ethernet" };
 
-        // Lightweight TCP ping to measure latency without requiring root/ICMP.
-        // Connects to Cloudflare DNS (1.1.1.1:80) with a 400ms timeout.
+        // Lightweight TCP ping
         let mut ping_str = "OFFLINE".to_string();
         if let Ok(addr) = "1.1.1.1:80".parse() {
-            let start = std::time::Instant::now();
+            let t0 = std::time::Instant::now();
             if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(400)).is_ok() {
-                let ms = start.elapsed().as_millis();
-                // Show only update if it changes drastically to avoid jitter? No, just show ms.
-                ping_str = format!("{}ms", ms);
+                ping_str = format!("{}ms", t0.elapsed().as_millis());
             }
         }
 
@@ -510,68 +506,6 @@ impl SystemCollector {
         } else {
             format!("{:.1}Kb", (bps / 1_000.0).max(0.0))
         }
-    }
-
-    async fn get_top_cpu_processes() -> Vec<ProcessItem> {
-        let Ok(out) = Command::new("ps")
-            .args(["-eo", "pid,pcpu,comm", "--sort=-pcpu", "--no-headers"])
-            .output()
-            .await
-        else {
-            return Vec::new();
-        };
-
-        String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .take(15)
-            .filter_map(|l| {
-                let parts: Vec<&str> = l.split_whitespace().collect();
-                if parts.len() >= 3 {
-                    let pid = parts[0].parse().ok()?;
-                    let cpu = parts[1];
-                    let name = parts[2..].join(" ");
-                    Some(ProcessItem {
-                        pid,
-                        name,
-                        metric: format!("{}%", cpu),
-                        is_highlight: false,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
-    async fn get_top_ram_processes() -> Vec<ProcessItem> {
-        let Ok(out) = Command::new("ps")
-            .args(["-eo", "pid,rss,comm", "--sort=-rss", "--no-headers"])
-            .output()
-            .await
-        else {
-            return Vec::new();
-        };
-
-        String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .take(15)
-            .filter_map(|l| {
-                let parts: Vec<&str> = l.split_whitespace().collect();
-                if parts.len() >= 3 {
-                    let pid = parts[0].parse().ok()?;
-                    let rss_kb: u64 = parts[1].parse().ok()?;
-                    let name = parts[2..].join(" ");
-                    Some(ProcessItem {
-                        pid,
-                        name,
-                        metric: format!("{} MiB", rss_kb / 1024),
-                        is_highlight: false,
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect()
     }
 
     pub async fn kill_process(pid: u32) -> Result<(), std::io::Error> {

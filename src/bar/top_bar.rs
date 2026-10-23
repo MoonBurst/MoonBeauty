@@ -23,6 +23,7 @@ impl TopBar {
         telemetry: &'a UnifiedTelemetry,
         tray_expanded: bool,
         tray_items: &'a [TrayItem],
+        tray_anim_width: f32,
     ) -> Element<'a, TopBarMessage> {
         let spacing_px = settings.capsule_spacing as f32;
 
@@ -34,9 +35,10 @@ impl TopBar {
                     "right" => (SlantSide::Right, SlantSide::Right),
                     _ => (SlantSide::Left, SlantSide::Left),
                 };
-                if id == "tray" && tray_expanded {
+                if id == "tray" && (tray_expanded || tray_anim_width > settings.tray_width as f32 + 0.5) {
                     left_row = left_row.push(CapsuleRenderer::render_tray_expanded(
-                        tray_items, theme, settings, sl, sr, "left", TopBarMessage::Action,
+                        tray_items, theme, settings, sl, sr, "left", tray_anim_width,
+                        TopBarMessage::Action,
                     ));
                 } else {
                     let cap = CapsuleRenderer::render(
@@ -69,9 +71,10 @@ impl TopBar {
                     else { (SlantSide::Right, SlantSide::Right) }
                 }
             };
-            if id.as_str() == "tray" && tray_expanded {
+            if id.as_str() == "tray" && (tray_expanded || tray_anim_width > settings.tray_width as f32 + 0.5) {
                 center_row = center_row.push(CapsuleRenderer::render_tray_expanded(
-                    tray_items, theme, settings, sl, sr, "center", TopBarMessage::Action,
+                    tray_items, theme, settings, sl, sr, "center", tray_anim_width,
+                        TopBarMessage::Action,
                 ));
             } else {
                 let cap = CapsuleRenderer::render(
@@ -95,9 +98,10 @@ impl TopBar {
                     "right" => (SlantSide::Right, SlantSide::Right),
                     _ => (SlantSide::Right, SlantSide::Right),
                 };
-                if id == "tray" && tray_expanded {
+                if id == "tray" && (tray_expanded || tray_anim_width > settings.tray_width as f32 + 0.5) {
                     right_row = right_row.push(CapsuleRenderer::render_tray_expanded(
-                        tray_items, theme, settings, sl, sr, "right", TopBarMessage::Action,
+                        tray_items, theme, settings, sl, sr, "right", tray_anim_width,
+                        TopBarMessage::Action,
                     ));
                 } else {
                     let cap = CapsuleRenderer::render(

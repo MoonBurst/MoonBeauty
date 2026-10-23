@@ -7,6 +7,7 @@ pub mod notif_dbus;
 pub mod podman_twitch;
 pub mod system;
 pub mod tray_watcher;
+pub mod unified;
 pub mod weather;
 
 pub use audio::{AudioBackend, AudioStatus};
@@ -14,6 +15,7 @@ pub use borg::{BorgBackend, BorgStatus};
 pub use clock::{CalendarViewData, ClockBackend, WorldZoneColumn};
 pub use mpris::{MprisBackend, MprisTrack};
 pub use podman_twitch::{PodmanBackend, PodmanStatus, WatcherDetails};
+pub use unified::{UnifiedItemStatus, check_unified_items, toggle_item};
 pub use system::{BatteryMetrics, CpuMetrics, GpuInfo, GpuMetrics, NetMetrics, RamMetrics, SystemCollector};
 pub use weather::{WeatherAlert, WeatherBackend, WeatherData};
 pub use tray_watcher::{TrayItem, TrayMenuItem, fetch_tray_items, activate_tray_item, get_menu_tree, trigger_menu_item};

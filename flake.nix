@@ -24,6 +24,7 @@
           imagemagick
           wl-clipboard
           pciutils
+          dbus
           nerd-fonts.symbols-only
         ];
       in {
