@@ -153,9 +153,9 @@ impl TopBar {
 
         let content = row![
             left_row,
-            iced::widget::horizontal_space(),
+            iced::widget::space::horizontal(),
             center_row,
-            iced::widget::horizontal_space(),
+            iced::widget::space::horizontal(),
             right_row,
         ]
         .padding([4, 16])

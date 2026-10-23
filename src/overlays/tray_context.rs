@@ -2,8 +2,6 @@ use iced::widget::{button, column, container, text, Stack};
 use iced::{Alignment, Color, Element, Length, Task, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use iced_layershell::Application;
-
 use crate::backend::tray_watcher::TrayMenuItem;
 use crate::config::theme::ShellTheme;
 use crate::config::ShellSettings;
@@ -15,9 +13,9 @@ pub enum Message {
     ClickItem(i32),
 }
 
-impl TryInto<iced_layershell::actions::LayershellCustomActionsWithInfo<()>> for Message {
+impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message {
     type Error = Message;
-    fn try_into(self) -> Result<iced_layershell::actions::LayershellCustomActionsWithInfo<()>, Self::Error> {
+    fn try_into(self) -> Result<iced_layershell::actions::LayershellCustomActionWithId, Self::Error> {
         Err(self)
     }
 }
@@ -30,7 +28,7 @@ pub struct App {
     height: u32,
 }
 
-impl Application for App {
+#[cfg(any())] impl Application for App {
     type Executor = iced::executor::Default;
     type Message = Message;
     type Theme = Theme;
@@ -42,8 +40,8 @@ impl Application for App {
     }
 
     fn namespace(&self) -> String { "mbs-tray-context".into() }
-    fn style(&self, _t: &Self::Theme) -> iced_layershell::Appearance {
-        iced_layershell::Appearance { background_color: Color::TRANSPARENT, text_color: Color::WHITE }
+    fn style(&self, _t: &Self::Theme) -> iced::theme::Style {
+        iced::theme::Style { background_color: Color::TRANSPARENT, text_color: Color::WHITE }
     }
 
     fn update(&mut self, m: Message) -> Task<Message> {
@@ -95,7 +93,7 @@ impl Application for App {
             let fg = if item.enabled { theme.text } else { theme.muted };
             
             let btn = button(
-                container(text(&item.label).size(fs).color(fg))
+                container(text(&item.label).size((fs) as f32).color(fg))
                     .width(Length::Fill)
                     .height(Length::Fill)
                     .align_y(iced::alignment::Vertical::Center)
@@ -129,17 +127,6 @@ impl Application for App {
 }
 
 pub fn run(items: Vec<TrayMenuItem>, bus: String, menu_path: String, width: u32, height: u32) -> Result<(), iced_layershell::Error> {
-    let s = ShellSettings::load();
-    let bar_h = s.bar_height as i32;
-    let layer = LayerShellSettings {
-        size: Some((width, height)),
-        exclusive_zone: -1,
-        anchor: Anchor::Top | Anchor::Right,
-        layer: Layer::Overlay,
-        keyboard_interactivity: KeyboardInteractivity::Exclusive,
-        binded_output_name: std::env::var("MBS_OUTPUT").ok(),
-        margin: (bar_h + 8, 16, 0, 0),
-        ..Default::default()
-    };
-    App::run(Settings { flags: (items, bus, menu_path, width, height), layer_settings: layer, ..Default::default() })
+    eprintln!("[tray_context DISABLED during iced 0.14 migration]");
+    Ok(())
 }

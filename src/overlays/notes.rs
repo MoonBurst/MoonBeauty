@@ -117,7 +117,7 @@ impl NotesOverlay {
             .on_input(NotesMessage::SearchOrNewChanged)
             .on_submit(NotesMessage::AddNote)
             .padding(14)
-            .size(theme.font_size_overlay);
+            .size((theme.font_size_overlay) as f32);
 
         let query = self.input_text.trim().to_lowercase();
         let mut list_col = column![].spacing(8);
@@ -134,10 +134,10 @@ impl NotesOverlay {
                 text("📌").size(14),
                 column![
                     text(&note.ts)
-                        .size(theme.font_size_normal - 4)
+                        .size((theme.font_size_normal - 4) as f32)
                         .color(theme.warning),
                     text(&note.content)
-                        .size(theme.font_size_normal)
+                        .size((theme.font_size_normal) as f32)
                         .color(theme.text),
                 ]
                 .width(Length::Fill)
@@ -172,7 +172,7 @@ impl NotesOverlay {
         let card_content = container(
             column![
                 text("📝 QUICK NOTES")
-                    .size(theme.font_size_overlay)
+                    .size((theme.font_size_overlay) as f32)
                     .color(theme.text),
                 input,
                 scrollable(list_col).height(Length::Fill),

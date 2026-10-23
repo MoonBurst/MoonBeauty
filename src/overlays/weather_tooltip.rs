@@ -2,7 +2,6 @@ use iced::widget::{column, container, row, text, Space, Stack};
 use iced::{Alignment, Color, Element, Length, Padding, Task, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use iced_layershell::Application;
 use std::time::Instant;
 
 use crate::backend::weather::{WeatherAlert, WeatherData};
@@ -18,9 +17,9 @@ const AUTO_MS: u128 = 20_000;
 #[derive(Debug, Clone)]
 pub enum Message { Tick, Loaded(Option<WeatherData>), Dismiss }
 
-impl TryInto<iced_layershell::actions::LayershellCustomActionsWithInfo<()>> for Message {
+impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message {
     type Error = Message;
-    fn try_into(self) -> Result<iced_layershell::actions::LayershellCustomActionsWithInfo<()>, Self::Error> { Err(self) }
+    fn try_into(self) -> Result<iced_layershell::actions::LayershellCustomActionWithId, Self::Error> { Err(self) }
 }
 
 pub struct App {
@@ -39,7 +38,7 @@ pub struct App {
     closing_at: Option<Instant>,
 }
 
-impl Application for App {
+#[cfg(any())] impl Application for App {
     type Executor = iced::executor::Default;
     type Message = Message;
     type Theme = Theme;
@@ -67,8 +66,8 @@ impl Application for App {
     }
 
     fn namespace(&self) -> String { "mbs-wx-tip".into() }
-    fn style(&self, _theme: &Self::Theme) -> iced_layershell::Appearance {
-        iced_layershell::Appearance { background_color: Color::TRANSPARENT, text_color: Color::WHITE }
+    fn style(&self, _theme: &Self::Theme) -> iced::theme::Style {
+        iced::theme::Style { background_color: Color::TRANSPARENT, text_color: Color::WHITE }
     }
 
     fn update(&mut self, m: Message) -> Task<Message> {
@@ -153,8 +152,8 @@ impl App {
             _ => "LOCAL WEATHER",
         };
         let header_el = row![
-            text(title).size(fs.max(12)).bold().color(if let Some(WeatherAlert::Danger(_)) = self.weather.as_ref().map(|w| &w.alert) { danger } else { text_col }),
-            iced::widget::horizontal_space(),
+            text(title).size((fs.max(12)) as f32).bold().color(if let Some(WeatherAlert::Danger(_)) = self.weather.as_ref().map(|w| &w.alert) { danger } else { text_col }),
+            iced::widget::space::horizontal(),
         ].align_y(Alignment::Center).width(Length::Fill).into();
         col = col.push(slanted_row(header_el, y + header_h * 0.5, total_h, slant_h, slant_right, safe, w_f, header_h));
         y += header_h + gap;
@@ -169,9 +168,9 @@ impl App {
                             else { text_col };
                 
                 let txt = if i == 0 {
-                    text(line).size(fs).font(iced::Font::MONOSPACE).bold().color(color).wrapping(iced::widget::text::Wrapping::None)
+                    text(line).size((fs) as f32).font(iced::Font::MONOSPACE).bold().color(color).wrapping(iced::widget::text::Wrapping::None)
                 } else {
-                    text(line).size(fs).font(iced::Font::MONOSPACE).color(color).wrapping(iced::widget::text::Wrapping::None)
+                    text(line).size((fs) as f32).font(iced::Font::MONOSPACE).color(color).wrapping(iced::widget::text::Wrapping::None)
                 };
                 let row_el = row![txt].align_y(Alignment::Center).width(Length::Fill).into();
                 
@@ -219,38 +218,13 @@ fn slanted_row<'a, M: 'a>(
         .clip(true);
 
     row![
-        Space::new(Length::Fixed(lp), Length::Shrink),
+        iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(lp)),
         inner_clipped,
-        Space::new(Length::Fixed(rp), Length::Shrink),
+        iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(rp)),
     ].height(Length::Fixed(row_h)).width(Length::Fixed(total_w)).into()
 }
 
 pub fn run() -> Result<(), iced_layershell::Error> {
-    let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
-    let s = ShellSettings::load();
-    let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(420);
-    let h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(520);
-
-    let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
-    let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1920);
-    let cap_w: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(100.0);
-    let grow_right = cx < sw / 2;
-
-    let bar_h = s.bar_height as i32;
-    let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
-    let half_cap = (cap_w / 2.0) as i32;
-    let slant_px = s.slant_width as i32;
-
-    let (anchor, margin) = if grow_right {
-        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, (cx - half_cap).max(0)))
-    } else {
-        (Anchor::Top | Anchor::Right, (margin_top, (sw - cx - half_cap - slant_px).max(0), 0, 0))
-    };
-
-    let layer = LayerShellSettings {
-        size: Some((w, h)), exclusive_zone: -1, anchor, layer: Layer::Overlay,
-        keyboard_interactivity: KeyboardInteractivity::OnDemand,
-        binded_output_name: output, margin, ..Default::default()
-    };
-    App::run(Settings { layer_settings: layer, ..Default::default() })
+    eprintln!("[weather_tooltip DISABLED during iced 0.14 migration]");
+    Ok(())
 }

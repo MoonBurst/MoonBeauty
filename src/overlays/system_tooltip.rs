@@ -1,10 +1,9 @@
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke};
-use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, text_input, Space, Stack};
+use iced::widget::{button, column, container, space::horizontal, row, scrollable, text, text_input, Space, Stack};
 use iced::{Alignment, Color, Element, Length, Padding, Point, Rectangle, Task, Theme};
 use crate::style::TextExt;
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use iced_layershell::Application;
 use std::time::Instant;
 
 use crate::backend::system::{GpuInfo, ProcessItem, SystemCollector};
@@ -26,9 +25,9 @@ pub enum Data {
 #[derive(Debug, Clone)]
 pub enum Message { Tick, Loaded(Data), Dismiss, KillProcess(u32), Noop, SearchChanged(String), CycleGpu }
 
-impl TryInto<iced_layershell::actions::LayershellCustomActionsWithInfo<()>> for Message {
+impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message {
     type Error = Message;
-    fn try_into(self) -> Result<iced_layershell::actions::LayershellCustomActionsWithInfo<()>, Self::Error> { Err(self) }
+    fn try_into(self) -> Result<iced_layershell::actions::LayershellCustomActionWithId, Self::Error> { Err(self) }
 }
 
 pub struct App {
@@ -41,7 +40,7 @@ pub struct App {
     selected_gpu: usize,
 }
 
-impl Application for App {
+#[cfg(any())] impl Application for App {
     type Executor = iced::executor::Default;
     type Message = Message;
     type Theme = Theme;
@@ -107,8 +106,8 @@ impl Application for App {
     }
 
     fn namespace(&self) -> String { format!("mbs-sys-tip-{}", self.target) }
-    fn style(&self, _t: &Self::Theme) -> iced_layershell::Appearance {
-        iced_layershell::Appearance { background_color: Color::TRANSPARENT, text_color: Color::WHITE }
+    fn style(&self, _t: &Self::Theme) -> iced::theme::Style {
+        iced::theme::Style { background_color: Color::TRANSPARENT, text_color: Color::WHITE }
     }
 
     fn update(&mut self, m: Message) -> Task<Message> {
@@ -201,8 +200,8 @@ fn hex_metric(label: &'static str, value: String, color: Color, theme: &ShellThe
         .border(color, 1.5)
         .size(Length::Fill, Length::Fixed(HEX_H));
     let content = column![
-        text(label).size(font_size.saturating_sub(5).max(8)).bold().color(muted).wrapping(iced::widget::text::Wrapping::None),
-        text(value).size((font_size + 2).max(14)).bold().color(color).wrapping(iced::widget::text::Wrapping::None),
+        text(label).size((font_size.saturating_sub(5).max(8)) as f32).bold().color(muted).wrapping(iced::widget::text::Wrapping::None),
+        text(value).size(((font_size + 2).max(14)) as f32).bold().color(color).wrapping(iced::widget::text::Wrapping::None),
     ].align_x(Alignment::Center)
      .width(Length::Fill)
      .height(Length::Fill)
@@ -275,10 +274,10 @@ fn render_proc_row(p: &ProcessItem, t: &ShellTheme, total_ram_gib: Option<f32>, 
         .style(|_t, _s| button::Style { background: None, ..Default::default() });
 
     let name_clip = container(
-        text(name).size(font_size.saturating_sub(4).max(9)).color(text_col).wrapping(iced::widget::text::Wrapping::None)
+        text(name).size((font_size.saturating_sub(4).max(9)) as f32).color(text_col).wrapping(iced::widget::text::Wrapping::None)
     ).width(Length::Fill).height(Length::Fixed(row_h)).align_y(Alignment::Center).clip(true);
 
-    let metric_container = container(text(metric_str).size(font_size.saturating_sub(4).max(9)).color(muted).wrapping(iced::widget::text::Wrapping::None))
+    let metric_container = container(text(metric_str).size((font_size.saturating_sub(4).max(9)) as f32).color(muted).wrapping(iced::widget::text::Wrapping::None))
         .width(Length::Fixed(metric_w))
         .height(Length::Fixed(row_h))
         .align_y(Alignment::Center)
@@ -350,7 +349,7 @@ impl App {
                 left: search_slant + 8.0,
                 right: search_slant + 8.0,
             })
-            .size(fs)
+            .size((fs) as f32)
             .width(Length::Fill)
             .style(move |_t, _s| iced::widget::text_input::Style {
                 background: iced::Background::Color(Color::TRANSPARENT),
@@ -375,9 +374,9 @@ impl App {
             .into();
 
         let row_el = row![
-            Space::new(Length::Fixed(lp_s), Length::Shrink),
+            iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(lp_s)),
             search_layer,
-            Space::new(Length::Fixed(rp_s), Length::Shrink),
+            iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(rp_s)),
         ].width(Length::Fixed(w_f)).into();
 
         (row_el, y + search_h + gap)
@@ -417,8 +416,8 @@ impl App {
                 Data::Cpu(c) => {
                     let header_h = fs as f32 + 16.0;
                     let header: Element<'_, Message> = row![
-                        text("CPU METRICS").size(fs.max(12)).bold().color(text_col).wrapping(iced::widget::text::Wrapping::None),
-                        horizontal_space(),
+                        text("CPU METRICS").size((fs.max(12)) as f32).bold().color(text_col).wrapping(iced::widget::text::Wrapping::None),
+                        iced::widget::space::horizontal(),
                     ].align_y(Alignment::Center).width(Length::Fill).into();
                     col = col.push(slanted_row(header, y + header_h * 0.5, total_h, slant_h, slant_right, safe, w_f, header_h));
                     y += header_h + gap;
@@ -453,8 +452,8 @@ impl App {
                     let header_el: Element<'_, Message> = if multi {
                         button(
                             row![
-                                text(header_label).size(fs.max(12)).bold().color(text_col).wrapping(iced::widget::text::Wrapping::None),
-                                horizontal_space(),
+                                text(header_label).size((fs.max(12)) as f32).bold().color(text_col).wrapping(iced::widget::text::Wrapping::None),
+                                iced::widget::space::horizontal(),
                             ].align_y(Alignment::Center).width(Length::Fill)
                         )
                         .on_press(Message::CycleGpu)
@@ -464,8 +463,8 @@ impl App {
                         .into()
                     } else {
                         row![
-                            text(header_label).size(fs.max(12)).bold().color(text_col).wrapping(iced::widget::text::Wrapping::None),
-                            horizontal_space(),
+                            text(header_label).size((fs.max(12)) as f32).bold().color(text_col).wrapping(iced::widget::text::Wrapping::None),
+                            iced::widget::space::horizontal(),
                         ].align_y(Alignment::Center).width(Length::Fill).into()
                     };
                     col = col.push(slanted_row(header_el, y + header_h * 0.5, total_h, slant_h, slant_right, safe, w_f, header_h));
@@ -492,7 +491,7 @@ impl App {
                     } else {
                         let empty_el: Element<'_, Message> = container(
                             text(if g.top_procs.is_empty() { "(no GPU processes tracked)" } else { "(no match)" })
-                                .size(fs.saturating_sub(4).max(9)).color(muted).wrapping(iced::widget::text::Wrapping::None)
+                                .size((fs.saturating_sub(4).max(9)) as f32).color(muted).wrapping(iced::widget::text::Wrapping::None)
                         ).into();
                         col = col.push(slanted_row(empty_el, y + 10.0, total_h, slant_h, slant_right, safe, w_f, 20.0));
                     }
@@ -502,8 +501,8 @@ impl App {
 
                     let header_h = fs as f32 + 16.0;
                     let header: Element<'_, Message> = row![
-                        text("RAM USAGE").size(fs.max(12)).bold().color(text_col).wrapping(iced::widget::text::Wrapping::None),
-                        horizontal_space(),
+                        text("RAM USAGE").size((fs.max(12)) as f32).bold().color(text_col).wrapping(iced::widget::text::Wrapping::None),
+                        iced::widget::space::horizontal(),
                     ].align_y(Alignment::Center).width(Length::Fill).into();
                     col = col.push(slanted_row(header, y + header_h * 0.5, total_h, slant_h, slant_right, safe, w_f, header_h));
                     y += header_h + gap;
@@ -530,8 +529,8 @@ impl App {
         } else {
             let header_h = fs as f32 + 16.0;
             let header: Element<'_, Message> = row![
-                text("LOADING METRICS...").size(fs.max(12)).color(muted).wrapping(iced::widget::text::Wrapping::None),
-                horizontal_space(),
+                text("LOADING METRICS...").size((fs.max(12)) as f32).color(muted).wrapping(iced::widget::text::Wrapping::None),
+                iced::widget::space::horizontal(),
             ].align_y(Alignment::Center).width(Length::Fill).into();
             col = col.push(slanted_row(header, y + header_h * 0.5, total_h, slant_h, slant_right, safe, w_f, header_h));
         }
@@ -569,9 +568,9 @@ fn slanted_row<'a, M: 'a>(
         .clip(true);
 
     row![
-        Space::new(Length::Fixed(lp), Length::Shrink),
+        iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(lp)),
         inner_clipped,
-        Space::new(Length::Fixed(rp), Length::Shrink),
+        iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(rp)),
     ].height(Length::Fixed(row_h)).width(Length::Fixed(total_w)).into()
 }
 
@@ -641,41 +640,6 @@ impl<Message> canvas::Program<Message> for KillButtonShape {
 
 
 pub fn run() -> Result<(), iced_layershell::Error> {
-    let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
-    let s = ShellSettings::load();
-    let mut w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
-    let mut h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(s.tooltip_height_px);
-    if std::env::var("MBS_SYS_TARGET").unwrap_or_default() == "ram" {
-        w = w.max(540);
-        h = h.max(480);
-    }
-
-    let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
-    let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1920);
-    let cap_w: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(100.0);
-    let grow_right = cx < sw / 2;
-
-    let bar_h = s.bar_height as i32;
-    let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
-    
-    let half_cap = (cap_w / 2.0) as i32;
-    let slant_px = s.slant_width as i32;
-
-    let (anchor, margin) = if grow_right {
-        // Left side: left edge of tooltip binds to left edge of capsule
-        let left_edge = (cx - half_cap).max(0);
-        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, left_edge))
-    } else {
-        // Right side: right edge of tooltip binds to right edge of capsule.
-        // We subtract `slant_px` to account for the Parallelogram's inner slant.
-        let right_edge = sw - cx - half_cap - slant_px;
-        (Anchor::Top | Anchor::Right, (margin_top, right_edge.max(0), 0, 0))
-    };
-
-    let layer = LayerShellSettings {
-        size: Some((w, h)), exclusive_zone: -1, anchor, layer: Layer::Overlay,
-        keyboard_interactivity: KeyboardInteractivity::OnDemand,
-        binded_output_name: output, margin, ..Default::default()
-    };
-    App::run(Settings { layer_settings: layer, ..Default::default() })
+    eprintln!("[system_tooltip DISABLED during iced 0.14 migration]");
+    Ok(())
 }

@@ -561,7 +561,7 @@ impl AppLauncher {
     pub fn update(&mut self, message: LauncherMessage) -> iced::Task<LauncherMessage> {
         match message {
             LauncherMessage::Refocus => {
-                return iced::widget::text_input::focus(LAUNCHER_SEARCH_ID);
+                return iced::widget::operation::focus(LAUNCHER_SEARCH_ID);
             }
             LauncherMessage::SelectNext => {
                 if !self.filtered_apps.is_empty() {
@@ -762,7 +762,7 @@ impl AppLauncher {
     }
 
     pub fn focus_search(&mut self) -> iced::Task<LauncherMessage> {
-        iced::widget::text_input::focus(LAUNCHER_SEARCH_ID)
+        iced::widget::operation::focus(LAUNCHER_SEARCH_ID)
     }
 
     pub async fn launch(exec: &str) {
@@ -828,16 +828,16 @@ impl AppLauncher {
                 },
             )
             .padding(14)
-            .size(theme.font_size_overlay)
+            .size((theme.font_size_overlay) as f32)
             .width(Length::Fill)
             .style(move |_t, status| {
         let border_color = match status {
-            text_input::Status::Focused => theme.focus,
+            text_input::Status::Focused { .. } => theme.focus,
             text_input::Status::Hovered => theme.border,
             _ => theme.border,
         };
         let border_width = match status {
-            text_input::Status::Focused => theme.control_border_width + 0.5,
+            text_input::Status::Focused { .. } => theme.control_border_width + 0.5,
             _ => theme.control_border_width,
         };
         text_input::Style {
@@ -910,13 +910,13 @@ impl AppLauncher {
                     let tile_content = container(
                         column![
                             text(copy_val)
-                                .size(theme.font_size_overlay + 1)
+                                .size((theme.font_size_overlay + 1) as f32)
                                 .bold()
                                 .color(theme.text_strong)
                                 .align_x(Alignment::Center)
                                 .wrapping(iced::widget::text::Wrapping::None),
                             text(input_part)
-                                .size(theme.font_size_normal.saturating_sub(2))
+                                .size((theme.font_size_normal.saturating_sub(2)) as f32)
                                 .color(theme.muted)
                                 .align_x(Alignment::Center)
                                 .wrapping(iced::widget::text::Wrapping::None),
@@ -976,10 +976,10 @@ impl AppLauncher {
                         icon_elem,
                         column![
                             text(&app.name)
-                                .size(theme.font_size_overlay)
+                                .size((theme.font_size_overlay) as f32)
                                 .bold(),
                             text(&app.exec)
-                                .size(theme.font_size_normal.saturating_sub(2))
+                                .size((theme.font_size_normal.saturating_sub(2)) as f32)
                                 .shell()
                                 .color(theme.muted),
                         ]
@@ -1033,7 +1033,7 @@ impl AppLauncher {
 
         if math_items.is_empty() && app_items.is_empty() {
             content_col = content_col.push(
-                container(text("No results").size(theme.font_size_overlay).color(theme.muted))
+                container(text("No results").size((theme.font_size_overlay) as f32).color(theme.muted))
                     .width(Length::Fill)
                     .center_x(Length::Fill)
                     .padding(20),

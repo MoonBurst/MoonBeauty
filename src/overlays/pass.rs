@@ -144,13 +144,13 @@ impl PassOverlay {
                 },
             )
             .padding(Padding { top: 12.0, right: 24.0, bottom: 12.0, left: 24.0 })
-            .size(theme.font_size_overlay)
+            .size((theme.font_size_overlay) as f32)
             .width(Length::Fill)
             .style(move |_t, status| text_input::Style {
                 background: iced::Background::Color(theme.surface_alt),
                 border: iced::Border {
                     color: match status {
-                        text_input::Status::Focused => theme.focus,
+                        text_input::Status::Focused { .. } => theme.focus,
                         text_input::Status::Hovered => theme.border,
                         _ => theme.border,
                     },
@@ -187,7 +187,7 @@ impl PassOverlay {
             let item_content = container(
                 row![
                     text(">").size(16).color(theme.success),
-                    text(key).size(theme.font_size_overlay).color(theme.text),
+                    text(key).size((theme.font_size_overlay) as f32).color(theme.text),
                 ]
                 .spacing(12)
                 .align_y(Alignment::Center)

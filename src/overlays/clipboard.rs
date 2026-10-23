@@ -261,7 +261,7 @@ impl ClipboardOverlay {
         let search_input = text_input("Search clipboard...", &self.search_query)
             .on_input(ClipboardMessage::SearchChanged)
             .padding(Padding { top: 12.0, right: 24.0, bottom: 12.0, left: 24.0 })
-            .size(theme.font_size_overlay)
+            .size((theme.font_size_overlay) as f32)
             .width(Length::Fill)
             .style(move |_t, _s| text_input::Style {
                 background: iced::Background::Color(Color::TRANSPARENT),
@@ -285,7 +285,7 @@ impl ClipboardOverlay {
         ).height(Length::Fixed(48.0));
 
         let wipe_btn = button(
-            container(text("Wipe All").size(theme.font_size_overlay).color(theme.danger))
+            container(text("Wipe All").size((theme.font_size_overlay) as f32).color(theme.danger))
                 .center_y(Length::Fill)
                 .center_x(Length::Fill)
         )
@@ -305,7 +305,7 @@ impl ClipboardOverlay {
             .size(Length::Fixed(100.0), Length::Fixed(48.0));
 
         let ocr_btn = button(
-            container(text("OCR").size(theme.font_size_overlay).color(if is_image_selected { theme.text } else { theme.muted }))
+            container(text("OCR").size((theme.font_size_overlay) as f32).color(if is_image_selected { theme.text } else { theme.muted }))
                 .center_y(Length::Fill)
                 .center_x(Length::Fill)
         )
@@ -376,7 +376,7 @@ impl ClipboardOverlay {
             }
             
             // Force the text to stay strictly within the box
-            let text_container = container(text(display_text).size(theme.font_size_overlay).color(text_color))
+            let text_container = container(text(display_text).size((theme.font_size_overlay) as f32).color(text_color))
                 .width(Length::Fill)
                 .clip(true);
             item_row = item_row.push(text_container);
@@ -411,7 +411,7 @@ impl ClipboardOverlay {
         }
 
         let left_pane = container(
-            scrollable(list_col).id(iced::widget::scrollable::Id::new("clip_list")).width(Length::Fill).height(Length::Fill)
+            scrollable(list_col).id(iced::widget::Id::new("clip_list")).width(Length::Fill).height(Length::Fill)
         )
         .width(Length::FillPortion(1))
         .height(Length::Fill)
@@ -443,7 +443,7 @@ impl ClipboardOverlay {
                 scrollable(
                     container(
                         text(&self.preview_text)
-                            .size(theme.font_size_overlay)
+                            .size((theme.font_size_overlay) as f32)
                             .font(iced::Font::MONOSPACE)
                             .color(theme.text)
                             .wrapping(iced::widget::text::Wrapping::WordOrGlyph)
@@ -451,7 +451,7 @@ impl ClipboardOverlay {
                 ).width(Length::Fill).height(Length::Fill)
             ).padding(inner_padding).width(Length::Fill).height(Length::Fill).into()
         } else {
-            container(text("Select an entry to preview").size(theme.font_size_overlay).color(theme.muted))
+            container(text("Select an entry to preview").size((theme.font_size_overlay) as f32).color(theme.muted))
                 .center_x(Length::Fill)
                 .center_y(Length::Fill)
                 .width(Length::Fill)

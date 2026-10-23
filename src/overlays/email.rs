@@ -155,7 +155,7 @@ impl EmailOverlay {
             let col = if is_sel { theme.success } else { theme.text };
             let f_clone = f.to_string();
 
-            let f_btn = button(text(*f).size(theme.font_size_normal).bold().color(col))
+            let f_btn = button(text(*f).size((theme.font_size_normal) as f32).bold().color(col))
                 .on_press(EmailMessage::SelectFolder(f_clone))
                 .padding([8, 12])
                 .style(|_t, _s| button::Style { background: None, ..Default::default() });
@@ -171,8 +171,8 @@ impl EmailOverlay {
 
             let row_item = button(
                 column![
-                    text(sender).size(theme.font_size_normal).bold().color(theme.text),
-                    text(subject).size(theme.font_size_normal - 2).color(theme.muted),
+                    text(sender).size((theme.font_size_normal) as f32).bold().color(theme.text),
+                    text(subject).size((theme.font_size_normal - 2) as f32).color(theme.muted),
                 ]
                 .spacing(2),
             )
@@ -186,7 +186,7 @@ impl EmailOverlay {
 
         let preview_content = scrollable(
             text(&self.mail_body)
-                .size(theme.font_size_normal)
+                .size((theme.font_size_normal) as f32)
                 .color(theme.text),
         )
         .height(Length::Fill);
@@ -207,7 +207,7 @@ impl EmailOverlay {
             column![
                 row![
                     text("✉ EMAIL CLIENT (HIMALAYA)")
-                        .size(theme.font_size_overlay)
+                        .size((theme.font_size_overlay) as f32)
                         .color(theme.text),
                     row![].width(Length::Fill),
                     button(text("✏ Compose").size(12).bold().color(theme.success))

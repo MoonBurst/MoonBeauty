@@ -3,7 +3,6 @@ use iced::widget::Stack;
 use iced::{Color, Element, Length, Point, Rectangle, Size, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use iced_layershell::Application;
 use iced_layershell::to_layer_message;
 use std::path::PathBuf;
 
@@ -74,32 +73,32 @@ impl Program<Message> for SelectorCanvas {
     fn update(
         &self,
         _state: &mut (),
-        event: iced::widget::canvas::Event,
+        event: &iced::Event,
         bounds: Rectangle,
-        cursor: iced::mouse::Cursor,
-    ) -> (iced::widget::canvas::event::Status, Option<Message>) {
+        cursor: iced::mouse::Cursor
+    ) -> Option<iced::widget::Action<Message>> {
         use iced::mouse;
-        use iced::widget::canvas::event::Status;
+        use iced::event::Status;
         match event {
-            iced::widget::canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(p) = cursor.position_in(bounds) {
-                    return (Status::Captured, Some(Message::Press(p)));
+                    return Some(iced::widget::Action::publish(Message::Press(p)));
                 }
             }
-            iced::widget::canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+            iced::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
                 if self.start.is_some() {
                     if let Some(p) = cursor.position_in(bounds) {
-                        return (Status::Captured, Some(Message::Drag(p)));
+                        return Some(iced::widget::Action::publish(Message::Drag(p)));
                     }
                 }
             }
-            iced::widget::canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+            iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
                 if self.start.is_some() => {
-                    return (Status::Captured, Some(Message::Release));
+                    return Some(iced::widget::Action::publish(Message::Release));
                 }
             _ => {}
         }
-        (Status::Ignored, None)
+        None
     }
 
     fn draw(
@@ -154,7 +153,7 @@ impl Program<Message> for SelectorCanvas {
     }
 }
 
-impl Application for SelectorApp {
+#[cfg(any())] impl Application for SelectorApp {
     type Executor = iced::executor::Default;
     type Message = Message;
     type Theme = Theme;
@@ -234,7 +233,7 @@ impl Application for SelectorApp {
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
-        iced::keyboard::on_key_press(|key, _mods| match key {
+        iced::keyboard::on_key_press(|key, modifiers| match key {
             iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => Some(Message::Confirm),
             iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => Some(Message::Cancel),
             _ => None,
@@ -244,38 +243,6 @@ impl Application for SelectorApp {
 
 }
 pub fn run(input_png: PathBuf, output_png: PathBuf, binded_output: Option<String>) -> Result<(), String> {
-    let bytes = std::fs::read(&input_png).map_err(|e| format!("read input: {e}"))?;
-    let img = image::load_from_memory(&bytes).map_err(|e| format!("decode: {e}"))?;
-    let rgba = img.to_rgba8();
-    let (w, h) = rgba.dimensions();
-    let rgba_raw = rgba.into_raw();
-    let handle = iced::widget::image::Handle::from_bytes(bytes);
-
-    let app = SelectorApp {
-        handle,
-        img_w: w,
-        img_h: h,
-        rgba: rgba_raw,
-        start: None,
-        current: None,
-        out_path: output_png,
-    };
-
-    let layer = LayerShellSettings {
-        size: Some((0, 0)),
-        exclusive_zone: -1,
-        anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
-        layer: Layer::Overlay,
-        keyboard_interactivity: KeyboardInteractivity::Exclusive,
-        binded_output_name: binded_output,
-        ..Default::default()
-    };
-
-    let settings = Settings {
-        flags: app,
-        layer_settings: layer,
-        ..Default::default()
-    };
-
-    <SelectorApp as Application>::run(settings).map_err(|e| format!("run: {e:?}"))
+    eprintln!("[selector DISABLED during iced 0.14 migration]");
+    Err("DISABLED during iced 0.14 migration".into())
 }

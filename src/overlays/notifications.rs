@@ -603,8 +603,8 @@ impl NotificationOverlay {
                     icon_badge,
                     avatar,
                     column![
-                        text(&toast.summary).size(settings.notif_summary_size).bold().color(toast_text_color).width(Length::Fill),
-                        text(&toast.body).size(settings.notif_body_size).color(toast_text_color).width(Length::Fill),
+                        text(&toast.summary).size((settings.notif_summary_size) as f32).bold().color(toast_text_color).width(Length::Fill),
+                        text(&toast.body).size((settings.notif_body_size) as f32).color(toast_text_color).width(Length::Fill),
                     ]
                     .width(Length::Fill)
                     .spacing(2),
@@ -673,7 +673,7 @@ impl NotificationOverlay {
             list_col = list_col.push(
                 container(
                     text("No notifications in history.")
-                        .size(theme.font_size_overlay)
+                        .size((theme.font_size_overlay) as f32)
                         .color(theme.muted)
                 )
                 .padding(30)
@@ -686,11 +686,11 @@ impl NotificationOverlay {
                     text("🔔").size(18),
                     column![
                         row![
-                            text(&item.summary).size(theme.font_size_overlay).bold().color(theme.text).width(Length::Fill),
+                            text(&item.summary).size((theme.font_size_overlay) as f32).bold().color(theme.text).width(Length::Fill),
                             text(&item.timestamp).size(11).color(theme.muted),
                         ]
                         .align_y(Alignment::Center),
-                        text(&item.body).size(theme.font_size_overlay.saturating_sub(3)).color(theme.muted),
+                        text(&item.body).size((theme.font_size_overlay.saturating_sub(3)) as f32).color(theme.muted),
                     ]
                     .width(Length::Fill)
                     .spacing(3),
@@ -725,7 +725,7 @@ impl NotificationOverlay {
             column![
                 row![
                     text("📜 NOTIFICATION HISTORY")
-                        .size(theme.font_size_overlay + 2)
+                        .size((theme.font_size_overlay + 2) as f32)
                         .bold()
                         .color(theme.text),
                     row![].width(Length::Fill),

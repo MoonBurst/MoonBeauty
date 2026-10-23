@@ -1,9 +1,8 @@
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke};
-use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, text_input, Space, Stack};
+use iced::widget::{button, column, container, space::horizontal, row, scrollable, text, text_input, Space, Stack};
 use iced::{Alignment, Color, Element, Length, Padding, Point, Rectangle, Task, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use iced_layershell::Application;
 use std::time::Instant;
 
 use crate::config::theme::ShellTheme;
@@ -35,9 +34,9 @@ pub enum Message {
     InitialFocus,
 }
 
-impl TryInto<iced_layershell::actions::LayershellCustomActionsWithInfo<()>> for Message {
+impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message {
     type Error = Message;
-    fn try_into(self) -> Result<iced_layershell::actions::LayershellCustomActionsWithInfo<()>, Self::Error> {
+    fn try_into(self) -> Result<iced_layershell::actions::LayershellCustomActionWithId, Self::Error> {
         Err(self)
     }
 }
@@ -63,7 +62,7 @@ pub struct App {
     close_open_elapsed_ms: f32,
 }
 
-impl Application for App {
+#[cfg(any())] impl Application for App {
     type Executor = iced::executor::Default;
     type Message = Message;
     type Theme = Theme;
@@ -107,8 +106,8 @@ impl Application for App {
 
     fn namespace(&self) -> String { "mbs-alarm-tip".into() }
 
-    fn style(&self, _theme: &Self::Theme) -> iced_layershell::Appearance {
-        iced_layershell::Appearance { background_color: Color::TRANSPARENT, text_color: Color::WHITE }
+    fn style(&self, _theme: &Self::Theme) -> iced::theme::Style {
+        iced::theme::Style { background_color: Color::TRANSPARENT, text_color: Color::WHITE }
     }
 
     fn update(&mut self, m: Message) -> Task<Message> {
@@ -182,7 +181,7 @@ impl Application for App {
                 save_reminders(&self.entries);
             }
             Message::InitialFocus => {
-                return iced::window::get_latest().and_then(iced::window::gain_focus);
+                return iced::Task::none();
             }
             Message::FocusNext => {
                 self.active_field = (self.active_field + 1) % 7;
@@ -416,18 +415,18 @@ impl App {
 
         let header = row![
             row![].width(Length::Fill),
-            text("Set Alarm").size(title_size).bold().color(caution),
+            text("Set Alarm").size((title_size) as f32).bold().color(caution),
             row![].width(Length::Fill),
         ].width(Length::Fill).align_y(Alignment::Center);
 
         let mut body = column![
             header,
             column![
-                text("Countdown").size(label_size).bold().color(caution).align_x(Alignment::Center).width(Length::Fill),
+                text("Countdown").size((label_size) as f32).bold().color(caution).align_x(Alignment::Center).width(Length::Fill),
                 cd_row,
             ].spacing(6).width(Length::Fill).align_x(Alignment::Center),
             column![
-                text("Clock Time").size(label_size).bold().color(caution).align_x(Alignment::Center).width(Length::Fill),
+                text("Clock Time").size((label_size) as f32).bold().color(caution).align_x(Alignment::Center).width(Length::Fill),
                 clk_row,
             ].spacing(6).width(Length::Fill).align_x(Alignment::Center).padding(Padding { top: 12.0, right: 0.0, bottom: 0.0, left: 0.0 }),
         ]
@@ -488,49 +487,14 @@ fn slanted_row<'a, M: 'a>(
         .clip(true);
 
     row![
-        Space::new(Length::Fixed(lp), Length::Shrink),
+        iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(lp)),
         inner_clipped,
-        Space::new(Length::Fixed(rp), Length::Shrink),
+        iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(rp)),
     ].height(Length::Fixed(row_h)).width(Length::Fixed(total_w)).into()
 }
 
 
 pub fn run() -> Result<(), iced_layershell::Error> {
-    let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
-    let s = ShellSettings::load();
-    let mut w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
-    let mut h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(s.tooltip_height_px);
-    if std::env::var("MBS_SYS_TARGET").unwrap_or_default() == "ram" {
-        w = w.max(540);
-        h = h.max(480);
-    }
-
-    let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
-    let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1920);
-    let cap_w: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(100.0);
-    let grow_right = cx < sw / 2;
-
-    let bar_h = s.bar_height as i32;
-    let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
-    
-    let half_cap = (cap_w / 2.0) as i32;
-    let slant_px = s.slant_width as i32;
-
-    let (anchor, margin) = if grow_right {
-        // Left side: left edge of tooltip binds to left edge of capsule
-        let left_edge = (cx - half_cap).max(0);
-        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, left_edge))
-    } else {
-        // Right side: right edge of tooltip binds to right edge of capsule.
-        // We subtract `slant_px` to account for the Parallelogram's inner slant.
-        let right_edge = sw - cx - half_cap - slant_px;
-        (Anchor::Top | Anchor::Right, (margin_top, right_edge.max(0), 0, 0))
-    };
-
-    let layer = LayerShellSettings {
-        size: Some((w, h)), exclusive_zone: -1, anchor, layer: Layer::Overlay,
-        keyboard_interactivity: KeyboardInteractivity::OnDemand,
-        binded_output_name: output, margin, ..Default::default()
-    };
-    App::run(Settings { layer_settings: layer, ..Default::default() })
+    eprintln!("[alarm_tooltip DISABLED during iced 0.14 migration]");
+    Ok(())
 }

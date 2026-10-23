@@ -2,8 +2,6 @@ use iced::widget::{container, Stack};
 use iced::{Color, Element, Length, Padding, Task as Command, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use iced_layershell::Application;
-
 use moon_beauty_shell::backend::*;
 use moon_beauty_shell::bar::{CapsuleAction, TopBar, TopBarMessage};
 use moon_beauty_shell::config::{ShellSettings, ShellTheme};
@@ -609,7 +607,9 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             anchor,
             layer: Layer::Overlay,
             keyboard_interactivity: KeyboardInteractivity::None,
-            binded_output_name,
+            start_mode: binded_output_name
+                .map(iced_layershell::settings::StartMode::TargetScreen)
+                .unwrap_or(iced_layershell::settings::StartMode::Active),
             ..Default::default()
         }
     } else if standalone_target.as_ref() == Some(&OverlayTarget::Lockscreen) {
@@ -624,7 +624,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
             layer: Layer::Overlay,
             keyboard_interactivity: KeyboardInteractivity::Exclusive,
-            binded_output_name: lock_output,
+            start_mode: (lock_output).map(iced_layershell::settings::StartMode::TargetScreen).unwrap_or(iced_layershell::settings::StartMode::Active),
             ..Default::default()
         }
     } else if standalone_target.as_ref() == Some(&OverlayTarget::Annotator) {
@@ -637,7 +637,9 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
             layer: Layer::Overlay,
             keyboard_interactivity: KeyboardInteractivity::Exclusive,
-            binded_output_name,
+            start_mode: binded_output_name
+                .map(iced_layershell::settings::StartMode::TargetScreen)
+                .unwrap_or(iced_layershell::settings::StartMode::Active),
             ..Default::default()
         }
     } else if standalone_target.is_some() {
@@ -647,7 +649,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
             layer: Layer::Overlay,
             keyboard_interactivity: KeyboardInteractivity::Exclusive,
-            binded_output_name: None,
+            start_mode: (None).map(iced_layershell::settings::StartMode::TargetScreen).unwrap_or(iced_layershell::settings::StartMode::Active),
             ..Default::default()
         }
     } else {
@@ -657,7 +659,10 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             anchor: Anchor::Top | Anchor::Left | Anchor::Right,
             layer: Layer::Top,
             keyboard_interactivity: KeyboardInteractivity::None,
-            binded_output_name: match settings.bar_monitor.as_str() { "All" | "" => None, n => Some(n.to_string()) },
+            start_mode: match settings.bar_monitor.as_str() {
+                "All" | "" => iced_layershell::settings::StartMode::Active,
+                n => iced_layershell::settings::StartMode::TargetScreen(n.to_string()),
+            },
             ..Default::default()
         }
     };
@@ -691,10 +696,18 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         }
     }
 
-    MoonBeautyShellApp::run(Settings {
+    iced_layershell::application(
+        || MoonBeautyShellApp::new_app(),
+        || "moon-beauty-shell".to_string(),
+        MoonBeautyShellApp::update,
+        MoonBeautyShellApp::view,
+    )
+    .subscription(MoonBeautyShellApp::subscription)
+    .settings(Settings {
         layer_settings,
         ..Default::default()
     })
+    .run()
 }
 
 #[derive(Debug, Clone)]
@@ -737,16 +750,19 @@ pub enum Message {
     CollapseTray,
 }
 
-impl TryInto<iced_layershell::actions::LayershellCustomActionsWithInfo<()>> for Message {
+impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message {
     type Error = Message;
     fn try_into(
         self,
-    ) -> Result<iced_layershell::actions::LayershellCustomActionsWithInfo<()>, Self::Error>
+    ) -> Result<iced_layershell::actions::LayershellCustomActionWithId, Self::Error>
     {
         match self {
-            Message::ResizeNotifSurface(w, h) => Ok(
-                iced_layershell::actions::LayershellCustomActionsWithInfo::SizeChange((w, h)),
-            ),
+            Message::ResizeNotifSurface(w, h) => {
+                Ok(iced_layershell::actions::LayershellCustomActionWithId::new(
+                    None,
+                    iced_layershell::actions::LayershellCustomAction::SizeChange((w, h)),
+                ))
+            }
             other => Err(other),
         }
     }
@@ -861,17 +877,13 @@ impl MoonBeautyShellApp {
     }
 }
 
-impl iced_layershell::Application for MoonBeautyShellApp {
-    type Message = Message;
-    type Flags = ();
-    type Theme = Theme;
-    type Executor = iced::executor::Default;
+impl MoonBeautyShellApp {
 
     fn namespace(&self) -> String {
         "moon-beauty-shell".into()
     }
 
-    fn new(_flags: Self::Flags) -> (Self, Command<Message>) {
+    fn new_app() -> (Self, Command<Message>) {
         let args: Vec<String> = std::env::args().collect();
         let standalone_target = detect_standalone_overlay(&args);
         if let Some(idx) = args.iter().position(|a| a == "--tray-context-menu") {
@@ -1035,7 +1047,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
 
         if matches!(app.active_overlay, Some(OverlayTarget::Launcher)) {
             // Immediate focus attempt
-            init_tasks.push(iced::widget::text_input::focus("launcher_search").map(Message::Launcher));
+            init_tasks.push(iced::widget::operation::focus("launcher_search").map(Message::Launcher));
             // Delayed re-focus — catches compositor focus arriving after map
             init_tasks.push(Command::perform(
                 async {
@@ -1045,7 +1057,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             ));
         } else if matches!(app.active_overlay, Some(OverlayTarget::Calc)) {
             init_tasks.push(
-                iced::widget::text_input::focus(moon_beauty_shell::overlays::calc::CALC_INPUT_ID)
+                iced::widget::operation::focus(moon_beauty_shell::overlays::calc::CALC_INPUT_ID)
                     .map(Message::Calc),
             );
             init_tasks.push(Command::perform(
@@ -1056,7 +1068,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             ));
         } else if matches!(app.active_overlay, Some(OverlayTarget::Pass)) {
             init_tasks.push(
-                iced::widget::text_input::focus(moon_beauty_shell::overlays::pass::PASS_SEARCH_ID)
+                iced::widget::operation::focus(moon_beauty_shell::overlays::pass::PASS_SEARCH_ID)
                     .map(Message::Pass),
             );
             init_tasks.push(Command::perform(
@@ -1067,7 +1079,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             ));
         } else if matches!(app.active_overlay, Some(OverlayTarget::Dictionary)) {
             init_tasks.push(
-                iced::widget::text_input::focus(moon_beauty_shell::overlays::dictionary::DICT_SEARCH_ID)
+                iced::widget::operation::focus(moon_beauty_shell::overlays::dictionary::DICT_SEARCH_ID)
                     .map(Message::Dict),
             );
             init_tasks.push(Command::perform(
@@ -1086,13 +1098,6 @@ impl iced_layershell::Application for MoonBeautyShellApp {
         }
         
         (app, Command::batch(init_tasks))
-    }
-
-    fn style(&self, _theme: &Self::Theme) -> iced_layershell::Appearance {
-        iced_layershell::Appearance {
-            background_color: Color::TRANSPARENT,
-            text_color: self.theme.text,
-        }
     }
 
     fn update(&mut self, message: Message) -> Command<Message> {
@@ -1738,7 +1743,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                     self.active_overlay = None;
                 }
                 CalcMessage::Refocus => {
-                    return iced::widget::text_input::focus(
+                    return iced::widget::operation::focus(
                         moon_beauty_shell::overlays::calc::CALC_INPUT_ID,
                     ).map(Message::Calc);
                 }
@@ -1793,8 +1798,8 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 self.clipboard.selected_id = Some(next_id);
                 return Command::batch([
                     Command::perform(ClipboardOverlay::load_preview(next_id), |(text, image_path)| Message::Clipboard(ClipboardMessage::PreviewLoaded { text, image_path })),
-                    iced::widget::scrollable::scroll_to(
-                        iced::widget::scrollable::Id::new("clip_list"),
+                    iced::widget::operation::scroll_to(
+                        iced::widget::Id::new("clip_list"),
                         iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: (next_idx as f32 * 64.0 - 200.0).max(0.0) }
                     )
                 ]);
@@ -1808,8 +1813,8 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 self.clipboard.selected_id = Some(prev_id);
                 return Command::batch([
                     Command::perform(ClipboardOverlay::load_preview(prev_id), |(text, image_path)| Message::Clipboard(ClipboardMessage::PreviewLoaded { text, image_path })),
-                    iced::widget::scrollable::scroll_to(
-                        iced::widget::scrollable::Id::new("clip_list"),
+                    iced::widget::operation::scroll_to(
+                        iced::widget::Id::new("clip_list"),
                         iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: (prev_idx as f32 * 64.0 - 200.0).max(0.0) }
                     )
                 ]);
@@ -1844,8 +1849,8 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                                     ClipboardOverlay::load_preview(next_id),
                                     |(text, image_path)| Message::Clipboard(ClipboardMessage::PreviewLoaded { text, image_path })
                                 ),
-                                iced::widget::scrollable::scroll_to(
-                                    iced::widget::scrollable::Id::new("clip_list"),
+                                iced::widget::operation::scroll_to(
+                                    iced::widget::Id::new("clip_list"),
                                     iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: (next_idx as f32 * 64.0 - 200.0).max(0.0) }
                                 )
                             ]);
@@ -1941,7 +1946,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                     self.active_overlay = None;
                 }
                 PassMessage::Refocus => {
-                    return iced::widget::text_input::focus(
+                    return iced::widget::operation::focus(
                         moon_beauty_shell::overlays::pass::PASS_SEARCH_ID,
                     ).map(Message::Pass);
                 }
@@ -1991,7 +1996,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                     self.active_overlay = None;
                 }
                 DictMessage::Refocus => {
-                    return iced::widget::text_input::focus(
+                    return iced::widget::operation::focus(
                         moon_beauty_shell::overlays::dictionary::DICT_SEARCH_ID,
                     ).map(Message::Dict);
                 }
@@ -2181,7 +2186,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 other => self.annotator.update(other),
                 }
                 if is_text_press {
-                    return iced::window::get_latest().and_then(iced::window::gain_focus);
+                    return iced::Task::none();
                 }
             }
             Message::Amogus(msg) => match msg {
@@ -2363,20 +2368,25 @@ impl iced_layershell::Application for MoonBeautyShellApp {
         let weather_sub = iced::time::every(std::time::Duration::from_secs(900)).map(|_| Message::TickWeather);
 
         let clip_sub = if matches!(self.active_overlay, Some(OverlayTarget::Clipboard)) {
-            iced::keyboard::on_key_press(|key, _mods| match key {
+            iced::event::listen_with(|event, _status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => Some(Message::Clipboard(ClipboardMessage::SelectPrev)),
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => Some(Message::Clipboard(ClipboardMessage::SelectNext)),
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => Some(Message::Clipboard(ClipboardMessage::CopySelected)),
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Delete) => Some(Message::Clipboard(ClipboardMessage::DeleteSelected)),
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => Some(Message::Clipboard(ClipboardMessage::DeleteSelected)),
                 _ => None,
+            }
             })
         } else {
             iced::Subscription::none()
         };
 
         let text_typing_sub = if self.annotator.text_editing.is_some() {
-            iced::keyboard::on_key_press(|key, _mods| {
+            iced::event::listen_with(|event, _status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                {
                 match key {
                 iced::keyboard::Key::Character(c) => {
                     match c.as_str() {
@@ -2392,7 +2402,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                     Some(Message::Annotator(AnnotatorMessage::BackspacePressed))
                 }
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
-                    if _mods.control() {
+                    if modifiers.control() {
                         Some(Message::Annotator(AnnotatorMessage::NewLinePressed))
                     } else {
                         Some(Message::Annotator(AnnotatorMessage::ConfirmText))
@@ -2406,6 +2416,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 }
                 _ => None,
                 }
+            }
             })
         } else {
             iced::Subscription::none()
@@ -2456,25 +2467,27 @@ impl iced_layershell::Application for MoonBeautyShellApp {
         };
 
         let lock_key_sub = if matches!(self.active_overlay, Some(OverlayTarget::Lockscreen)) {
-            iced::keyboard::on_key_press(|key, mods| {
+            iced::event::listen_with(|event, _status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                {
                 let mods_str = format!(
                     "shift={} ctrl={} alt={} logo={}",
-                    mods.shift(), mods.control(), mods.alt(), mods.logo()
+                    modifiers.shift(), modifiers.control(), modifiers.alt(), modifiers.logo()
                 );
                 // Log EVERY key press that reaches the lockscreen. If a key
                 // you typed doesn't show up here, the loss is upstream of our
                 // code (compositor, surface focus, subscription registration).
-                eprintln!("[lock-key-raw] {:?} mods({})", key, mods_str);
+                eprintln!("[lock-key-raw] {:?} modifiers({})", key, mods_str);
 
                 match &key {
                     iced::keyboard::Key::Character(c) => {
                         // Normalize shift+lowercase-ASCII → uppercase. Iced on
                         // layer-shell surfaces sometimes reports the unshifted
-                        // character even though mods.shift() is true (known
+                        // character even though modifiers.shift() is true (known
                         // bug in the winit→iced KeyboardEvent path). This is
                         // idempotent if iced already applied shift:
                         // `"P".to_uppercase() == "P"`.
-                        let normalized: String = if mods.shift()
+                        let normalized: String = if modifiers.shift()
                             && !c.is_empty()
                             && c.chars().all(|ch| ch.is_ascii_lowercase())
                         {
@@ -2484,7 +2497,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                         };
                         eprintln!(
                             "[lock-key] Character({:?}) shift={} → sending {:?}",
-                            c, mods.shift(), normalized
+                            c, modifiers.shift(), normalized
                         );
                         Some(Message::Lock(LockMessage::KeyPress(
                             iced::keyboard::Key::Character(normalized.into()),
@@ -2503,6 +2516,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                         None
                     }
                 }
+            }
             })
         } else {
             iced::Subscription::none()
@@ -2516,28 +2530,36 @@ impl iced_layershell::Application for MoonBeautyShellApp {
         };
 
         let esc_sub = if self.annotator.text_editing.is_some() {
-            iced::keyboard::on_key_press(|key, _mods| match key {
+            iced::event::listen_with(|event, _status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
                     Some(Message::Annotator(AnnotatorMessage::CancelText))
                 }
                 _ => None,
+            }
             })
         } else if matches!(self.active_overlay, Some(OverlayTarget::Lockscreen)) {
             // Lock screen cannot be dismissed with Escape
             iced::Subscription::none()
         } else {
-            iced::keyboard::on_key_press(|key, _modifiers| {
+            iced::event::listen_with(|event, _status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                {
                 if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
                     Some(Message::DismissActiveOverlay)
                 } else {
                     None
                 }
+            }
             })
         };
 
         // Enter → save when annotator overlay is active.
         let annotator_sub = if matches!(self.active_overlay, Some(OverlayTarget::Annotator)) && self.annotator.text_editing.is_none() {
-            iced::keyboard::on_key_press(|key, _mods| match key {
+            iced::event::listen_with(|event, _status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                match key {
                 iced::keyboard::Key::Character(c) => match c.as_str() {
                     "r" | "R" => Some(Message::Annotator(AnnotatorMessage::SetTool(Tool::Rect))),
                     "o" | "O" | "c" | "C" => Some(Message::Annotator(AnnotatorMessage::SetTool(Tool::Ellipse))),
@@ -2548,17 +2570,21 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                     _ => None,
                 },
                 _ => None,
+            }
             })
         } else {
             iced::Subscription::none()
         };
 
         let enter_sub = if matches!(self.active_overlay, Some(OverlayTarget::Annotator)) && self.annotator.text_editing.is_none() {
-            iced::keyboard::on_key_press(|key, _mods| match key {
+            iced::event::listen_with(|event, _status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
                     Some(Message::Annotator(AnnotatorMessage::Save))
                 }
                 _ => None,
+            }
             })
         } else {
             iced::Subscription::none()
@@ -2687,7 +2713,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
         }
     }
 
-    fn theme(&self) -> Self::Theme {
+    fn theme(&self) -> iced::Theme {
         Theme::Dark
     }
 }

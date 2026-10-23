@@ -10,8 +10,8 @@ sha2 = "0.10"
 rand_chacha = "0.3"
 rand = "0.8"
 async-channel = "2"
-iced = { version = "0.13", features = ["advanced", "tokio", "canvas", "image", "svg"] }
-iced_layershell = "0.7"
+iced = { version = "0.14", features = ["advanced", "tokio", "canvas", "image", "svg"] }
+iced_layershell = "0.14.2"
 tokio = { version = "1.38", features = ["full"] }
 bollard = "0.17"
 futures-util = "0.3"

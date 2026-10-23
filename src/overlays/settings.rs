@@ -668,7 +668,7 @@ SettingsMessage::SaveSettings => {}
 
             let btn_item = button(
                 text(label)
-                    .size(scale_sz(0.82))
+                    .size((scale_sz(0.82)) as f32)
                     .bold()
                     .color(col)
                     .align_x(Alignment::Center),
@@ -692,13 +692,13 @@ SettingsMessage::SaveSettings => {}
             SettingsTab::Notifications => {
                 let mut pings_col = column![
                     text("CUSTOM PINGS")
-                        .size(scale_sz(0.95))
+                        .size((scale_sz(0.95)) as f32)
                         .bold()
                         .color(theme.success),
                     row![
-                        text("ALL:").size(scale_sz(0.68)).bold().color(theme.text),
-                        text("Sound").size(scale_sz(0.68)).bold().color(theme.danger),
-                        text("TTS").size(scale_sz(0.68)).bold().color(theme.danger),
+                        text("ALL:").size((scale_sz(0.68)) as f32).bold().color(theme.text),
+                        text("Sound").size((scale_sz(0.68)) as f32).bold().color(theme.danger),
+                        text("TTS").size((scale_sz(0.68)) as f32).bold().color(theme.danger),
                     ].spacing(6).align_y(Alignment::Center),
                 ].spacing(8).width(Length::Fixed(270.0));
 
@@ -711,7 +711,7 @@ SettingsMessage::SaveSettings => {}
                     let is_selected = idx == self.selected_profile;
 
                     let sound_btn = button(
-                        text("Sound").size(scale_sz(0.6)).bold().color(if is_sound { Color::BLACK } else { Color::from_rgb8(255, 60, 60) })
+                        text("Sound").size((scale_sz(0.6)) as f32).bold().color(if is_sound { Color::BLACK } else { Color::from_rgb8(255, 60, 60) })
                     )
                     .on_press(SettingsMessage::ToggleProfileSound(idx))
                     .padding([2, 6])
@@ -722,7 +722,7 @@ SettingsMessage::SaveSettings => {}
                     });
 
                     let tts_btn = button(
-                        text("TTS").size(scale_sz(0.6)).bold().color(if is_tts { Color::BLACK } else { Color::from_rgb8(255, 60, 60) })
+                        text("TTS").size((scale_sz(0.6)) as f32).bold().color(if is_tts { Color::BLACK } else { Color::from_rgb8(255, 60, 60) })
                     )
                     .on_press(SettingsMessage::ToggleProfileTts(idx))
                     .padding([2, 6])
@@ -743,7 +743,7 @@ SettingsMessage::SaveSettings => {}
 
                     let capsule_content = row![
                         swatch,
-                        text(p_name).size(scale_sz(0.75)).bold().color(if is_selected { theme.text } else { Color::from_rgb8(200, 200, 200) }).width(Length::Fill),
+                        text(p_name).size((scale_sz(0.75)) as f32).bold().color(if is_selected { theme.text } else { Color::from_rgb8(200, 200, 200) }).width(Length::Fill),
                         sound_btn,
                         tts_btn,
                     ]
@@ -764,7 +764,7 @@ SettingsMessage::SaveSettings => {}
                 }
 
                 let add_btn = button(
-                    text("+ Add User / Word").size(scale_sz(0.72)).bold().color(theme.success).align_x(Alignment::Center)
+                    text("+ Add User / Word").size((scale_sz(0.72)) as f32).bold().color(theme.success).align_x(Alignment::Center)
                 )
                 .on_press(SettingsMessage::AddNewProfile)
                 .padding([6, 12])
@@ -778,7 +778,7 @@ SettingsMessage::SaveSettings => {}
                 pings_col = pings_col.push(scrollable(pings_list).height(Length::Fixed(560.0)));
                 pings_col = pings_col.push(add_btn);
 
-                let active_pill = button(text(if settings.notifications_enabled { "ON" } else { "OFF" }).size(scale_sz(0.7)).bold().color(Color::BLACK))
+                let active_pill = button(text(if settings.notifications_enabled { "ON" } else { "OFF" }).size((scale_sz(0.7)) as f32).bold().color(Color::BLACK))
                     .on_press(SettingsMessage::ToggleNotifications)
                     .padding([4, 14])
                     .style(move |_t, _s| button::Style {
@@ -787,7 +787,7 @@ SettingsMessage::SaveSettings => {}
                         ..Default::default()
                     });
 
-                let test_btn = button(text("Test Notification").size(scale_sz(0.72)).bold().color(theme.text))
+                let test_btn = button(text("Test Notification").size((scale_sz(0.72)) as f32).bold().color(theme.text))
                     .on_press(SettingsMessage::TestNotification)
                     .padding([6, 16])
                     .style(move |_t, _s| button::Style {
@@ -797,11 +797,11 @@ SettingsMessage::SaveSettings => {}
                     });
 
                 let screens = ["Auto (Primary)", "HDMI-A-2", "DP-2", "DP-1"];
-                let mut scr_row = row![text("Screen:").size(scale_sz(0.78)).bold().color(theme.text)].spacing(6).align_y(Alignment::Center);
+                let mut scr_row = row![text("Screen:").size((scale_sz(0.78)) as f32).bold().color(theme.text)].spacing(6).align_y(Alignment::Center);
                 for s in screens {
                     let is_s = self.selected_screen == s;
                     let s_str = s.to_string();
-                    let scr_btn = button(text(s).size(scale_sz(0.65)).bold().color(if is_s { Color::BLACK } else { theme.text }))
+                    let scr_btn = button(text(s).size((scale_sz(0.65)) as f32).bold().color(if is_s { Color::BLACK } else { theme.text }))
                         .on_press(SettingsMessage::SelectNotifScreen(s_str))
                         .padding([3, 8])
                         .style(move |_t, _s| button::Style {
@@ -813,11 +813,11 @@ SettingsMessage::SaveSettings => {}
                 }
 
                 let corners = [("top-right", "Top-R"), ("top-left", "Top-L"), ("bottom-right", "Bot-R"), ("bottom-left", "Bot-L")];
-                let mut corner_row = row![text("Corner:").size(scale_sz(0.78)).bold().color(theme.text)].spacing(6).align_y(Alignment::Center);
+                let mut corner_row = row![text("Corner:").size((scale_sz(0.78)) as f32).bold().color(theme.text)].spacing(6).align_y(Alignment::Center);
                 for (c_id, c_lbl) in corners {
                     let is_c = settings.notif_corner == c_id;
                     let c_str = c_id.to_string();
-                    let c_btn = button(text(c_lbl).size(scale_sz(0.65)).bold().color(if is_c { Color::BLACK } else { theme.text }))
+                    let c_btn = button(text(c_lbl).size((scale_sz(0.65)) as f32).bold().color(if is_c { Color::BLACK } else { theme.text }))
                         .on_press(SettingsMessage::SelectNotifCorner(c_str))
                         .padding([3, 8])
                         .style(move |_t, _s| button::Style {
@@ -829,11 +829,11 @@ SettingsMessage::SaveSettings => {}
                 }
 
                 let shapes = [("round", "Round"), ("hex", "Hex"), ("slant", "Slant"), ("flat", "Flat")];
-                let mut shape_row = row![text("Shape:").size(scale_sz(0.78)).bold().color(theme.text)].spacing(6).align_y(Alignment::Center);
+                let mut shape_row = row![text("Shape:").size((scale_sz(0.78)) as f32).bold().color(theme.text)].spacing(6).align_y(Alignment::Center);
                 for (s_id, s_lbl) in shapes {
                     let is_sh = settings.notif_shape == s_id;
                     let sh_str = s_id.to_string();
-                    let sh_btn = button(text(s_lbl).size(scale_sz(0.65)).bold().color(if is_sh { Color::BLACK } else { theme.text }))
+                    let sh_btn = button(text(s_lbl).size((scale_sz(0.65)) as f32).bold().color(if is_sh { Color::BLACK } else { theme.text }))
                         .on_press(SettingsMessage::SelectNotifShape(sh_str))
                         .padding([3, 8])
                         .style(move |_t, _s| button::Style {
@@ -846,54 +846,54 @@ SettingsMessage::SaveSettings => {}
 
                 let col_left_sliders = column![
                     column![
-                        row![text("Hold Duration").size(scale_sz(0.7)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}s", settings.notif_hold_duration_sec)).size(scale_sz(0.7)).bold().color(theme.text)],
+                        row![text("Hold Duration").size((scale_sz(0.7)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}s", settings.notif_hold_duration_sec)).size((scale_sz(0.7)) as f32).bold().color(theme.text)],
                         slider(1..=20, settings.notif_hold_duration_sec as u32, |v| SettingsMessage::NotifHoldDuration(v as u64)).width(Length::Fill),
                     ].spacing(2),
                     column![
-                        row![text("Baseline Y Offset").size(scale_sz(0.7)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.notif_baseline_y)).size(scale_sz(0.7)).bold().color(theme.text)],
+                        row![text("Baseline Y Offset").size((scale_sz(0.7)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.notif_baseline_y)).size((scale_sz(0.7)) as f32).bold().color(theme.text)],
                         slider(20..=800, settings.notif_baseline_y, SettingsMessage::NotifBaselineY).width(Length::Fill),
                     ].spacing(2),
                     column![
-                        row![text("Card Stack Overlap").size(scale_sz(0.7)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.notif_stack_overlap)).size(scale_sz(0.7)).bold().color(theme.text)],
+                        row![text("Card Stack Overlap").size((scale_sz(0.7)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.notif_stack_overlap)).size((scale_sz(0.7)) as f32).bold().color(theme.text)],
                         slider(-100..=100, settings.notif_stack_overlap, SettingsMessage::NotifStackOverlap).width(Length::Fill),
                     ].spacing(2),
                     column![
-                        row![text("Notification Card Height").size(scale_sz(0.7)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.notif_card_height)).size(scale_sz(0.7)).bold().color(theme.text)],
+                        row![text("Notification Card Height").size((scale_sz(0.7)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.notif_card_height)).size((scale_sz(0.7)) as f32).bold().color(theme.text)],
                         slider(90..=240, settings.notif_card_height, SettingsMessage::NotifCardHeight).width(Length::Fill),
                     ].spacing(2),
                     column![
-                        row![text("Drop Pause").size(scale_sz(0.7)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}ms", settings.notif_drop_pause_ms)).size(scale_sz(0.7)).bold().color(theme.text)],
+                        row![text("Drop Pause").size((scale_sz(0.7)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}ms", settings.notif_drop_pause_ms)).size((scale_sz(0.7)) as f32).bold().color(theme.text)],
                         slider(0..=400, settings.notif_drop_pause_ms, SettingsMessage::NotifDropPause).width(Length::Fill),
                     ].spacing(2),
                     column![
-                        row![text("Summary Font Size").size(scale_sz(0.7)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.notif_summary_size)).size(scale_sz(0.7)).bold().color(theme.text)],
+                        row![text("Summary Font Size").size((scale_sz(0.7)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.notif_summary_size)).size((scale_sz(0.7)) as f32).bold().color(theme.text)],
                         slider(10..=36, settings.notif_summary_size as u32, |v| SettingsMessage::NotifSummarySize(v as u16)).width(Length::Fill),
                     ].spacing(2),
                 ].spacing(8).width(Length::FillPortion(1));
 
                 let col_right_sliders = column![
                     column![
-                        row![text("Sound Volume").size(scale_sz(0.7)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}%", settings.notif_volume)).size(scale_sz(0.7)).bold().color(theme.text)],
+                        row![text("Sound Volume").size((scale_sz(0.7)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}%", settings.notif_volume)).size((scale_sz(0.7)) as f32).bold().color(theme.text)],
                         slider(0..=100, settings.notif_volume, SettingsMessage::NotifVolume).width(Length::Fill),
                     ].spacing(2),
                     column![
-                        row![text("Margin X Offset").size(scale_sz(0.7)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.notif_margin_x)).size(scale_sz(0.7)).bold().color(theme.text)],
+                        row![text("Margin X Offset").size((scale_sz(0.7)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.notif_margin_x)).size((scale_sz(0.7)) as f32).bold().color(theme.text)],
                         slider(0..=150, settings.notif_margin_x, SettingsMessage::NotifMarginX).width(Length::Fill),
                     ].spacing(2),
                     column![
-                        row![text("Notification Card Width").size(scale_sz(0.7)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.notif_card_width)).size(scale_sz(0.7)).bold().color(theme.text)],
+                        row![text("Notification Card Width").size((scale_sz(0.7)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.notif_card_width)).size((scale_sz(0.7)) as f32).bold().color(theme.text)],
                         slider(250..=650, settings.notif_card_width, SettingsMessage::NotifCardWidth).width(Length::Fill),
                     ].spacing(2),
                     column![
-                        row![text("Slide-In Time").size(scale_sz(0.7)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}ms", settings.notif_slide_in_ms)).size(scale_sz(0.7)).bold().color(theme.text)],
+                        row![text("Slide-In Time").size((scale_sz(0.7)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}ms", settings.notif_slide_in_ms)).size((scale_sz(0.7)) as f32).bold().color(theme.text)],
                         slider(50..=600, settings.notif_slide_in_ms, SettingsMessage::NotifSlideIn).width(Length::Fill),
                     ].spacing(2),
                     column![
-                        row![text("Drop Travel Distance").size(scale_sz(0.7)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.notif_drop_distance_px)).size(scale_sz(0.7)).bold().color(theme.text)],
+                        row![text("Drop Travel Distance").size((scale_sz(0.7)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.notif_drop_distance_px)).size((scale_sz(0.7)) as f32).bold().color(theme.text)],
                         slider(10..=400, settings.notif_drop_distance_px, SettingsMessage::NotifDropDistance).width(Length::Fill),
                     ].spacing(2),
                     column![
-                        row![text("Body Font Size").size(scale_sz(0.7)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.notif_body_size)).size(scale_sz(0.7)).bold().color(theme.text)],
+                        row![text("Body Font Size").size((scale_sz(0.7)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.notif_body_size)).size((scale_sz(0.7)) as f32).bold().color(theme.text)],
                         slider(8..=32, settings.notif_body_size as u32, |v| SettingsMessage::NotifBodySize(v as u16)).width(Length::Fill),
                     ].spacing(2),
                 ].spacing(8).width(Length::FillPortion(1));
@@ -909,7 +909,7 @@ SettingsMessage::SaveSettings => {}
                         "#F5F557", "#132ED1", "#C51111", "#EF7D0D",
                         "#117F2D", "#D6E0F0", "#FFFFFF"
                     ];
-                    let mut swatch_row = row![text("Tag Color:").size(scale_sz(0.72)).bold().color(theme.text)].spacing(6).align_y(Alignment::Center);
+                    let mut swatch_row = row![text("Tag Color:").size((scale_sz(0.72)) as f32).bold().color(theme.text)].spacing(6).align_y(Alignment::Center);
                     for c_hex in colors {
                         let c_val = hex_to_color(c_hex);
                         let hex_str = c_hex.to_string();
@@ -928,9 +928,9 @@ SettingsMessage::SaveSettings => {}
 
                     let mut rules_col = column![
                         row![
-                            text(format!("BODY RULES ({})", p.content_rules.len())).size(scale_sz(0.72)).bold().color(theme.success),
+                            text(format!("BODY RULES ({})", p.content_rules.len())).size((scale_sz(0.72)) as f32).bold().color(theme.success),
                             row![].width(Length::Fill),
-                            button(text("+ Add Body Rule").size(scale_sz(0.68)).bold().color(theme.success))
+                            button(text("+ Add Body Rule").size((scale_sz(0.68)) as f32).bold().color(theme.success))
                                 .on_press(SettingsMessage::AddContentRule(sel_idx))
                                 .padding([3, 8])
                                 .style(move |_t, _s| button::Style {
@@ -946,10 +946,10 @@ SettingsMessage::SaveSettings => {}
                         let rd = r.readout.clone();
                         rules_col = rules_col.push(
                             row![
-                                text("When contains:").size(scale_sz(0.65)).color(theme.muted),
-                                text_input("pattern", &pat).on_input(move |v| SettingsMessage::RulePatternChanged(sel_idx, r_idx, v)).padding(4).size(scale_sz(0.68)).width(Length::Fixed(140.0)),
-                                text("TTS:").size(scale_sz(0.65)).color(theme.muted),
-                                text_input("readout", &rd).on_input(move |v| SettingsMessage::RuleReadoutChanged(sel_idx, r_idx, v)).padding(4).size(scale_sz(0.68)).width(Length::Fill),
+                                text("When contains:").size((scale_sz(0.65)) as f32).color(theme.muted),
+                                text_input("pattern", &pat).on_input(move |v| SettingsMessage::RulePatternChanged(sel_idx, r_idx, v)).padding(4).size((scale_sz(0.68)) as f32).width(Length::Fixed(140.0)),
+                                text("TTS:").size((scale_sz(0.65)) as f32).color(theme.muted),
+                                text_input("readout", &rd).on_input(move |v| SettingsMessage::RuleReadoutChanged(sel_idx, r_idx, v)).padding(4).size((scale_sz(0.68)) as f32).width(Length::Fill),
                                 button(text("✕").size(10).color(theme.danger))
                                     .on_press(SettingsMessage::DeleteContentRule(sel_idx, r_idx))
                                     .padding([3, 6])
@@ -962,9 +962,9 @@ SettingsMessage::SaveSettings => {}
 
                     column![
                         row![
-                            text(format!("CONFIGURING PING: {}", p.summary.to_uppercase())).size(scale_sz(0.8)).bold().color(theme.success),
+                            text(format!("CONFIGURING PING: {}", p.summary.to_uppercase())).size((scale_sz(0.8)) as f32).bold().color(theme.success),
                             row![].width(Length::Fill),
-                            button(text("Delete Rule").size(scale_sz(0.68)).bold().color(theme.danger))
+                            button(text("Delete Rule").size((scale_sz(0.68)) as f32).bold().color(theme.danger))
                                 .on_press(SettingsMessage::DeleteProfile(sel_idx))
                                 .padding([3, 10])
                                 .style(move |_t, _s| button::Style {
@@ -975,19 +975,19 @@ SettingsMessage::SaveSettings => {}
                         ].align_y(Alignment::Center),
 
                         row![
-                            text("Match Tag:").size(scale_sz(0.72)).bold().color(theme.text).width(Length::Fixed(100.0)),
+                            text("Match Tag:").size((scale_sz(0.72)) as f32).bold().color(theme.text).width(Length::Fixed(100.0)),
                             text_input("Name/Tag", &p_summary)
                                 .on_input(move |v| SettingsMessage::ProfileSummaryChanged(sel_idx, v))
                                 .padding(5)
-                                .size(scale_sz(0.72)),
+                                .size((scale_sz(0.72)) as f32),
                         ].align_y(Alignment::Center).spacing(8),
 
                         row![
-                            text("Base Sound:").size(scale_sz(0.72)).bold().color(theme.text).width(Length::Fixed(100.0)),
+                            text("Base Sound:").size((scale_sz(0.72)) as f32).bold().color(theme.text).width(Length::Fixed(100.0)),
                             text_input("Sound Path (opt)", &p_sound)
                                 .on_input(move |v| SettingsMessage::ProfileSoundPathChanged(sel_idx, v))
                                 .padding(5)
-                                .size(scale_sz(0.72)),
+                                .size((scale_sz(0.72)) as f32),
                             button(text("✕").size(10).color(theme.danger))
                                 .on_press(SettingsMessage::ProfileSoundPathChanged(sel_idx, "".into()))
                                 .padding([4, 8])
@@ -995,11 +995,11 @@ SettingsMessage::SaveSettings => {}
                         ].align_y(Alignment::Center).spacing(8),
 
                         row![
-                            text("Default TTS:").size(scale_sz(0.72)).bold().color(theme.text).width(Length::Fixed(100.0)),
+                            text("Default TTS:").size((scale_sz(0.72)) as f32).bold().color(theme.text).width(Length::Fixed(100.0)),
                             text_input("Message from {name}", &p_tts)
                                 .on_input(move |v| SettingsMessage::ProfileTtsTemplateChanged(sel_idx, v))
                                 .padding(5)
-                                .size(scale_sz(0.72)),
+                                .size((scale_sz(0.72)) as f32),
                         ].align_y(Alignment::Center).spacing(8),
 
                         swatch_row,
@@ -1011,13 +1011,13 @@ SettingsMessage::SaveSettings => {}
 
                 let controls_col = column![
                     row![
-                        text("NOTIFICATION CONTROLS").size(scale_sz(0.95)).bold().color(theme.success),
+                        text("NOTIFICATION CONTROLS").size((scale_sz(0.95)) as f32).bold().color(theme.success),
                         row![].width(Length::Fill),
                         test_btn,
                     ].align_y(Alignment::Center),
 
                     row![
-                        text("Notifications Active").size(scale_sz(0.8)).bold().color(theme.text),
+                        text("Notifications Active").size((scale_sz(0.8)) as f32).bold().color(theme.text),
                         row![].width(Length::Fill),
                         active_pill,
                     ].align_y(Alignment::Center),
@@ -1029,11 +1029,11 @@ SettingsMessage::SaveSettings => {}
                     row![col_left_sliders, col_right_sliders].spacing(16),
 
                     column![
-                        text("Excluded Apps (comma separated):").size(scale_sz(0.72)).bold().color(theme.text),
+                        text("Excluded Apps (comma separated):").size((scale_sz(0.72)) as f32).bold().color(theme.text),
                         text_input("greenclip, copyq", &settings.notif_excluded)
                             .on_input(SettingsMessage::NotifExcludedChanged)
                             .padding(6)
-                            .size(scale_sz(0.75)),
+                            .size((scale_sz(0.75)) as f32),
                     ].spacing(4),
 
                     container(text("")).width(Length::Fill).height(Length::Fixed(1.0)).style(move |_t| container::Style {
@@ -1060,35 +1060,35 @@ SettingsMessage::SaveSettings => {}
 
             SettingsTab::StylixSliders => column![
                 column![
-                    row![text("Top Bar Height").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.bar_height)).size(scale_sz(0.8)).bold().color(theme.text)],
+                    row![text("Top Bar Height").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.bar_height)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                     slider(30..=80, settings.bar_height, SettingsMessage::BarHeight).width(Length::Fill),
                 ].spacing(3),
                 column![
-                    row![text("Bar Global Font Size").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.global_font_size)).size(scale_sz(0.8)).bold().color(theme.text)],
+                    row![text("Bar Global Font Size").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.global_font_size)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                     slider(10..=24, settings.global_font_size as u32, |v| SettingsMessage::GlobalFontSize(v as u16)).width(Length::Fill),
                 ].spacing(3),
                 column![
-                    row![text("Overlay Window Font Size").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.overlay_font_size)).size(scale_sz(0.8)).bold().color(theme.text)],
+                    row![text("Overlay Window Font Size").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.overlay_font_size)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                     slider(11..=32, settings.overlay_font_size as u32, |v| SettingsMessage::OverlayFontSize(v as u16)).width(Length::Fill),
                 ].spacing(3),
                 column![
-                    row![text("Capsule Slant Width").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.slant_width as u32)).size(scale_sz(0.8)).bold().color(theme.text)],
+                    row![text("Capsule Slant Width").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.slant_width as u32)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                     slider(4..=32, settings.slant_width as u32, SettingsMessage::SlantWidth).width(Length::Fill),
                 ].spacing(3),
                 column![
-                    row![text("Capsule Spacing").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.capsule_spacing)).size(scale_sz(0.8)).bold().color(theme.text)],
+                    row![text("Capsule Spacing").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.capsule_spacing)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                     slider(-50..=40, settings.capsule_spacing, SettingsMessage::CapsuleSpacing).width(Length::Fill),
                 ].spacing(3),
                 column![
-                    row![text("Tray Collapsed Width").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tray_width)).size(scale_sz(0.8)).bold().color(theme.text)],
+                    row![text("Tray Collapsed Width").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tray_width)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                     slider(30..=150, settings.tray_width, SettingsMessage::TrayWidth).width(Length::Fill),
                 ].spacing(3),
                 column![
-                    row![text("Window & Card Border Width").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.global_border_width as u32)).size(scale_sz(0.8)).bold().color(theme.text)],
+                    row![text("Window & Card Border Width").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.global_border_width as u32)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                     slider(1..=10, settings.global_border_width as u32, SettingsMessage::BorderWidth).width(Length::Fill),
                 ].spacing(3),
                 column![
-                    row![text("Control / Button Border Width").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.control_border_width as u32)).size(scale_sz(0.8)).bold().color(theme.text)],
+                    row![text("Control / Button Border Width").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.control_border_width as u32)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                     slider(1..=8, settings.control_border_width as u32, SettingsMessage::ControlBorderWidth).width(Length::Fill),
                 ].spacing(3),
             ].spacing(12).into(),
@@ -1108,11 +1108,11 @@ SettingsMessage::SaveSettings => {}
 
                 let mut col = column![
                     text("🎨 PALETTE & SYSTEM ACCENT COLORS")
-                        .size(scale_sz(0.95))
+                        .size((scale_sz(0.95)) as f32)
                         .bold()
                         .color(theme.success),
                     text("Click on color swatches to apply presets, or type any valid hex color:")
-                        .size(scale_sz(0.72))
+                        .size((scale_sz(0.72)) as f32)
                         .color(theme.muted),
                 ].spacing(10);
 
@@ -1137,7 +1137,7 @@ SettingsMessage::SaveSettings => {}
                     let input = text_input("#ffffff", current_hex)
                         .on_input(move |h| SettingsMessage::ColorChanged(slot_clone.clone(), h))
                         .padding(5)
-                        .size(scale_sz(0.72))
+                        .size((scale_sz(0.72)) as f32)
                         .width(Length::Fixed(110.0));
 
                     let mut swatches_row = row![swatch_box, input].spacing(8).align_y(Alignment::Center);
@@ -1160,7 +1160,7 @@ SettingsMessage::SaveSettings => {}
                     col = col.push(
                         row![
                             swatches_row,
-                            text(name).size(scale_sz(0.75)).bold().color(theme.text),
+                            text(name).size((scale_sz(0.75)) as f32).bold().color(theme.text),
                         ]
                         .spacing(12)
                         .align_y(Alignment::Center),
@@ -1173,14 +1173,14 @@ SettingsMessage::SaveSettings => {}
             SettingsTab::GpuHardware => {
                 let mut gpu_col = column![
                     text("🎮 GPU ALERT THRESHOLDS & MONITORING")
-                        .size(scale_sz(0.95))
+                        .size((scale_sz(0.95)) as f32)
                         .bold()
                         .color(theme.success),
                 ].spacing(12).width(Length::Fill);
 
                 gpu_col = gpu_col.push(
                     text("Active GPU (shown in top bar)")
-                        .size(scale_sz(0.8))
+                        .size((scale_sz(0.8)) as f32)
                         .bold()
                         .color(theme.muted)
                 );
@@ -1191,7 +1191,7 @@ SettingsMessage::SaveSettings => {}
                 if self.detected_gpus.is_empty() {
                     selector_row = selector_row.push(
                         text("No GPUs detected")
-                            .size(scale_sz(0.72))
+                            .size((scale_sz(0.72)) as f32)
                             .color(theme.muted)
                     );
                 } else {
@@ -1201,7 +1201,7 @@ SettingsMessage::SaveSettings => {}
                         let label = gpu.name.clone();
                         let btn = button(
                             text(label)
-                                .size(scale_sz(0.68))
+                                .size((scale_sz(0.68)) as f32)
                                 .bold()
                                 .color(if is_sel { Color::BLACK } else { theme.text })
                         )
@@ -1233,7 +1233,7 @@ SettingsMessage::SaveSettings => {}
 
                     gpu_col = gpu_col.push(
                         text(section_label)
-                            .size(scale_sz(0.85))
+                            .size((scale_sz(0.85)) as f32)
                             .bold()
                             .color(theme.success)
                     );
@@ -1261,36 +1261,36 @@ SettingsMessage::SaveSettings => {}
 
                     gpu_col = gpu_col.push(column![
                         row![
-                            text("Temp Warning (°C)").size(scale_sz(0.72)).bold().color(theme.text),
+                            text("Temp Warning (°C)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
                             row![].width(Length::Fill),
-                            text(format!("{}°C", th.temp_warn)).size(scale_sz(0.72)).bold().color(theme.text)
+                            text(format!("{}°C", th.temp_warn)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
                         ],
                         slider(40..=95, th.temp_warn, tw_fn).width(Length::Fill),
                     ].spacing(2));
 
                     gpu_col = gpu_col.push(column![
                         row![
-                            text("Temp Danger (°C)").size(scale_sz(0.72)).bold().color(theme.text),
+                            text("Temp Danger (°C)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
                             row![].width(Length::Fill),
-                            text(format!("{}°C", th.temp_danger)).size(scale_sz(0.72)).bold().color(theme.text)
+                            text(format!("{}°C", th.temp_danger)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
                         ],
                         slider(50..=105, th.temp_danger, td_fn).width(Length::Fill),
                     ].spacing(2));
 
                     gpu_col = gpu_col.push(column![
                         row![
-                            text("Free VRAM Warning (GiB)").size(scale_sz(0.72)).bold().color(theme.text),
+                            text("Free VRAM Warning (GiB)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
                             row![].width(Length::Fill),
-                            text(format!("{} GiB", th.vram_warn)).size(scale_sz(0.72)).bold().color(theme.text)
+                            text(format!("{} GiB", th.vram_warn)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
                         ],
                         slider(1..=16, th.vram_warn, vw_fn).width(Length::Fill),
                     ].spacing(2));
 
                     gpu_col = gpu_col.push(column![
                         row![
-                            text("Free VRAM Danger (GiB)").size(scale_sz(0.72)).bold().color(theme.text),
+                            text("Free VRAM Danger (GiB)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
                             row![].width(Length::Fill),
-                            text(format!("{} GiB", th.vram_danger)).size(scale_sz(0.72)).bold().color(theme.text)
+                            text(format!("{} GiB", th.vram_danger)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
                         ],
                         slider(0..=8, th.vram_danger, vd_fn).width(Length::Fill),
                     ].spacing(2));
@@ -1298,9 +1298,9 @@ SettingsMessage::SaveSettings => {}
 
                 gpu_col = gpu_col.push(column![
                     row![
-                        text("Hardware Polling Interval (ms)").size(scale_sz(0.72)).bold().color(theme.text),
+                        text("Hardware Polling Interval (ms)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
                         row![].width(Length::Fill),
-                        text(format!("{}ms", settings.hardware_poll_interval_ms)).size(scale_sz(0.72)).bold().color(theme.text)
+                        text(format!("{}ms", settings.hardware_poll_interval_ms)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
                     ],
                     slider(500..=5000, settings.hardware_poll_interval_ms as u32, |v| SettingsMessage::HardwarePollInterval(v as u64)).width(Length::Fill),
                 ].spacing(2));
@@ -1322,7 +1322,7 @@ SettingsMessage::SaveSettings => {}
                     let bg = if active { theme.success } else { theme.background };
                     let fg = if active { Color::BLACK } else { theme.text };
                     let border = if active { theme.success } else { theme.text };
-                    button(text(label).size(scale_sz(0.7)).bold().color(fg))
+                    button(text(label).size((scale_sz(0.7)) as f32).bold().color(fg))
                         .on_press(msg)
                         .padding([4, 10])
                         .style(move |_t, _s| button::Style {
@@ -1336,12 +1336,12 @@ SettingsMessage::SaveSettings => {}
                 let monitors = ["All", "DP-1", "DP-2", "HDMI-A-1", "HDMI-A-2"];
                 let mut mon_row: iced::widget::Row<'a, SettingsMessage> = iced::widget::Row::new()
                     .spacing(8).align_y(Alignment::Center)
-                    .push(text("Bar Monitor:").size(scale_sz(0.85)).bold().color(theme.text));
+                    .push(text("Bar Monitor:").size((scale_sz(0.85)) as f32).bold().color(theme.text));
                 for m in monitors {
                     let is_sel = settings.bar_monitor == m;
                     let m_str = m.to_string();
                     let btn = button(
-                        text(m).size(scale_sz(0.65)).bold()
+                        text(m).size((scale_sz(0.65)) as f32).bold()
                             .color(if is_sel { Color::BLACK } else { theme.text })
                     )
                     .on_press(SettingsMessage::SelectBarMonitor(m_str))
@@ -1360,7 +1360,7 @@ SettingsMessage::SaveSettings => {}
                 }
 
                 let bg_bar_row: Element<'a, SettingsMessage> = row![
-                    text("Background Bar Shape:").size(scale_sz(0.85)).bold().color(theme.text),
+                    text("Background Bar Shape:").size((scale_sz(0.85)) as f32).bold().color(theme.text),
                     mk_toggle("SLANT", settings.bar_shape == "slant", SettingsMessage::SelectBarShape("slant".into())),
                     mk_toggle("HEXAGON", settings.bar_shape == "hexagon", SettingsMessage::SelectBarShape("hexagon".into())),
                     mk_toggle("ROUNDED", settings.bar_shape == "rounded", SettingsMessage::SelectBarShape("rounded".into())),
@@ -1368,14 +1368,14 @@ SettingsMessage::SaveSettings => {}
                 ].spacing(8).align_y(Alignment::Center).width(Length::Fill).into();
 
                 let module_slants_row: Element<'a, SettingsMessage> = row![
-                    text("Module Slants:").size(scale_sz(0.85)).bold().color(theme.text),
+                    text("Module Slants:").size((scale_sz(0.85)) as f32).bold().color(theme.text),
                     mk_toggle("LEFT", settings.slant_mode == "left", SettingsMessage::SelectSlantMode("left".into())),
                     mk_toggle("CENTER", settings.slant_mode == "center" || settings.slant_mode == "symmetric" || settings.slant_mode == "sym", SettingsMessage::SelectSlantMode("center".into())),
                     mk_toggle("RIGHT", settings.slant_mode == "right", SettingsMessage::SelectSlantMode("right".into())),
                 ].spacing(8).align_y(Alignment::Center).width(Length::Fill).into();
 
                 let module_shape_row: Element<'a, SettingsMessage> = row![
-                    text("Module Shape:").size(scale_sz(0.85)).bold().color(theme.text),
+                    text("Module Shape:").size((scale_sz(0.85)) as f32).bold().color(theme.text),
                     mk_toggle("SLANT", settings.module_shape == "slant", SettingsMessage::SelectModuleShape("slant".into())),
                     mk_toggle("HEXAGON", settings.module_shape == "hexagon", SettingsMessage::SelectModuleShape("hexagon".into())),
                     mk_toggle("ROUNDED", settings.module_shape == "rounded", SettingsMessage::SelectModuleShape("rounded".into())),
@@ -1385,21 +1385,21 @@ SettingsMessage::SaveSettings => {}
                 let top_sliders: Element<'a, SettingsMessage> = column![
                     row![
                         column![
-                            row![text("Top Bar Height").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.bar_height)).size(scale_sz(0.8)).bold().color(theme.text)],
+                            row![text("Top Bar Height").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.bar_height)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                             slider(28..=90, settings.bar_height, SettingsMessage::BarHeight).width(Length::Fill),
                         ].spacing(3).width(Length::FillPortion(1)),
                         column![
-                            row![text("Global Font Size").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.global_font_size)).size(scale_sz(0.8)).bold().color(theme.text)],
+                            row![text("Global Font Size").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.global_font_size)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                             slider(8..=32, settings.global_font_size, SettingsMessage::GlobalFontSize).width(Length::Fill),
                         ].spacing(3).width(Length::FillPortion(1)),
                     ].spacing(20).width(Length::Fill),
                     row![
                         column![
-                            row![text("Capsule Spacing").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.capsule_spacing)).size(scale_sz(0.8)).bold().color(theme.text)],
+                            row![text("Capsule Spacing").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.capsule_spacing)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                             slider(-50..=40, settings.capsule_spacing, SettingsMessage::CapsuleSpacing).width(Length::Fill),
                         ].spacing(3).width(Length::FillPortion(1)),
                         column![
-                            row![text("Capsule Slant Width").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.slant_width as u32)).size(scale_sz(0.8)).bold().color(theme.text)],
+                            row![text("Capsule Slant Width").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.slant_width as u32)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                             slider(0..=40, settings.slant_width as u32, SettingsMessage::SlantWidth).width(Length::Fill),
                         ].spacing(3).width(Length::FillPortion(1)),
                     ].spacing(20).width(Length::Fill),
@@ -1408,21 +1408,21 @@ SettingsMessage::SaveSettings => {}
                 let anim_sliders: Element<'a, SettingsMessage> = column![
                     row![
                         column![
-                            row![text("Tooltip Drop Speed").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}ms", settings.tooltip_drop_ms)).size(scale_sz(0.8)).bold().color(theme.text)],
+                            row![text("Tooltip Drop Speed").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}ms", settings.tooltip_drop_ms)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                             slider(5..=100, (settings.tooltip_drop_ms / 10).max(5).min(100), |v: u32| SettingsMessage::TooltipDropMs(v * 10)).width(Length::Fill),
                         ].spacing(3).width(Length::FillPortion(1)),
                         column![
-                            row![text("Tooltip Expand Speed").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}ms", settings.tooltip_expand_ms)).size(scale_sz(0.8)).bold().color(theme.text)],
+                            row![text("Tooltip Expand Speed").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}ms", settings.tooltip_expand_ms)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                             slider(5..=100, (settings.tooltip_expand_ms / 10).max(5).min(100), |v: u32| SettingsMessage::TooltipExpandMs(v * 10)).width(Length::Fill),
                         ].spacing(3).width(Length::FillPortion(1)),
                     ].spacing(20).width(Length::Fill),
                     row![
                         column![
-                            row![text("Tooltip Pause Time").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}ms", settings.tooltip_pause_ms)).size(scale_sz(0.8)).bold().color(theme.text)],
+                            row![text("Tooltip Pause Time").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}ms", settings.tooltip_pause_ms)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                             slider(0..=100, (settings.tooltip_pause_ms / 10).min(100), |v: u32| SettingsMessage::TooltipPauseMs(v * 10)).width(Length::Fill),
                         ].spacing(3).width(Length::FillPortion(1)),
                         column![
-                                    row![text("Tooltip Text Size").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tooltip_font_size)).size(scale_sz(0.8)).bold().color(theme.text)],
+                                    row![text("Tooltip Text Size").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tooltip_font_size)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                                     slider(8..=28, settings.tooltip_font_size, SettingsMessage::TooltipFontSize).width(Length::Fill),
                                 ].spacing(3).width(Length::FillPortion(1)),
                     ].spacing(20).width(Length::Fill),
@@ -1438,11 +1438,11 @@ SettingsMessage::SaveSettings => {}
                     let id_reset = id_str.to_string();
                     let has_override = settings.tooltip_sizes.contains_key(id_str);
 
-                    let up = button(text("▲").size(scale_sz(0.6)).color(theme.text))
+                    let up = button(text("▲").size((scale_sz(0.6)) as f32).color(theme.text))
                         .on_press(SettingsMessage::MoveCapsuleUp(id.clone()))
                         .padding([2, 6])
                         .style(move |_t, _s| button::Style { background: None, border: iced::Border::default(), ..Default::default() });
-                    let down = button(text("▼").size(scale_sz(0.6)).color(theme.text))
+                    let down = button(text("▼").size((scale_sz(0.6)) as f32).color(theme.text))
                         .on_press(SettingsMessage::MoveCapsuleDown(id.clone()))
                         .padding([2, 6])
                         .style(move |_t, _s| button::Style { background: None, border: iced::Border::default(), ..Default::default() });
@@ -1454,25 +1454,25 @@ SettingsMessage::SaveSettings => {}
 
                     let size_controls = if id_str == "tray" {
                         row![
-                            text("W:").size(scale_sz(0.6)).color(theme.muted),
+                            text("W:").size((scale_sz(0.6)) as f32).color(theme.muted),
                             slider(30..=400, settings.tray_width, move |v| SettingsMessage::TrayWidth(v)).width(Length::Fixed(80.0)),
-                            text(format!("{}", settings.tray_width)).size(scale_sz(0.6)).color(theme.text).width(Length::Fixed(25.0)),
-                            text("I:").size(scale_sz(0.6)).color(theme.muted),
+                            text(format!("{}", settings.tray_width)).size((scale_sz(0.6)) as f32).color(theme.text).width(Length::Fixed(25.0)),
+                            text("I:").size((scale_sz(0.6)) as f32).color(theme.muted),
                             slider(12..=48, settings.tray_icon_size, move |v| SettingsMessage::TrayIconSize(v)).width(Length::Fixed(80.0)),
-                            text(format!("{}px", settings.tray_icon_size)).size(scale_sz(0.6)).color(theme.text).width(Length::Fixed(25.0)),
-                            text("T:").size(scale_sz(0.6)).color(theme.muted),
+                            text(format!("{}px", settings.tray_icon_size)).size((scale_sz(0.6)) as f32).color(theme.text).width(Length::Fixed(25.0)),
+                            text("T:").size((scale_sz(0.6)) as f32).color(theme.muted),
                             slider(0..=30, settings.tray_timeout_sec, move |v| SettingsMessage::TrayTimeout(v)).width(Length::Fixed(80.0)),
-                            text(format!("{}s", settings.tray_timeout_sec)).size(scale_sz(0.6)).color(theme.text).width(Length::Fixed(25.0)),
+                            text(format!("{}s", settings.tray_timeout_sec)).size((scale_sz(0.6)) as f32).color(theme.text).width(Length::Fixed(25.0)),
                         ].spacing(4).align_y(Alignment::Center)
                     } else {
                         row![
-                            text("W:").size(scale_sz(0.6)).color(theme.muted),
+                            text("W:").size((scale_sz(0.6)) as f32).color(theme.muted),
                             slider(min_w..=1200, w_val, move |v| SettingsMessage::TooltipSizeWidth(id_w.clone(), v)).width(Length::Fixed(100.0)),
-                            text(format!("{}", w_val)).size(scale_sz(0.6)).color(theme.text).width(Length::Fixed(35.0)),
-                            text("H:").size(scale_sz(0.6)).color(theme.muted),
+                            text(format!("{}", w_val)).size((scale_sz(0.6)) as f32).color(theme.text).width(Length::Fixed(35.0)),
+                            text("H:").size((scale_sz(0.6)) as f32).color(theme.muted),
                             slider(min_h..=1000, h_val, move |v| SettingsMessage::TooltipSizeHeight(id_h.clone(), v)).width(Length::Fixed(100.0)),
-                            text(format!("{}", h_val)).size(scale_sz(0.6)).color(theme.text).width(Length::Fixed(35.0)),
-                            button(text(if has_override { "×" } else { "·" }).size(scale_sz(0.7)).color(if has_override { theme.danger } else { theme.muted }))
+                            text(format!("{}", h_val)).size((scale_sz(0.6)) as f32).color(theme.text).width(Length::Fixed(35.0)),
+                            button(text(if has_override { "×" } else { "·" }).size((scale_sz(0.7)) as f32).color(if has_override { theme.danger } else { theme.muted }))
                                 .on_press(SettingsMessage::ResetTooltipSize(id_reset))
                                 .padding([2, 6])
                                 .style(move |_t, _s| button::Style {
@@ -1485,7 +1485,7 @@ SettingsMessage::SaveSettings => {}
 
                     let btn_text = if is_visible { "HIDE" } else { "SHOW" };
                     let btn_bg = if is_visible { theme.danger } else { theme.success };
-                    let toggle_btn = button(text(btn_text).size(scale_sz(0.65)).bold().color(Color::BLACK))
+                    let toggle_btn = button(text(btn_text).size((scale_sz(0.65)) as f32).bold().color(Color::BLACK))
                         .on_press(SettingsMessage::ToggleCapsuleVisible(id.clone()))
                         .padding([4, 8])
                         .style(move |_t, _s| button::Style {
@@ -1494,7 +1494,7 @@ SettingsMessage::SaveSettings => {}
                             ..Default::default()
                         });
                     let mk_move = |lbl: &'static str, target: &'static str| {
-                        button(text(lbl).size(scale_sz(0.55)).color(theme.text))
+                        button(text(lbl).size((scale_sz(0.55)) as f32).color(theme.text))
                             .on_press(SettingsMessage::MoveCapsuleTo(id.clone(), target.into()))
                             .padding([2, 4])
                             .style(move |_t, _s| button::Style {
@@ -1510,7 +1510,7 @@ SettingsMessage::SaveSettings => {}
 
                     let base_row = row![
                         row![up, down].spacing(4),
-                        text(id_str.to_uppercase()).size(scale_sz(0.7)).bold().color(theme.text).width(Length::Fixed(110.0)),
+                        text(id_str.to_uppercase()).size((scale_sz(0.7)) as f32).bold().color(theme.text).width(Length::Fixed(110.0)),
                         size_controls,
                         row![].width(Length::Fill),
                         controls
@@ -1521,13 +1521,13 @@ SettingsMessage::SaveSettings => {}
                     if id_str == "alarm" {
                         let audio_ui = column![
                             row![
-                                text("Sound:").size(scale_sz(0.7)).color(theme.muted).width(Length::Fixed(55.0)),
+                                text("Sound:").size((scale_sz(0.7)) as f32).color(theme.muted).width(Length::Fixed(55.0)),
                                 text_input("filename.mp3", settings.alarm_sound.as_deref().unwrap_or(""))
                                     .on_input(SettingsMessage::AlarmSoundChanged)
                                     .padding(4)
-                                    .size(scale_sz(0.7))
+                                    .size((scale_sz(0.7)) as f32)
                                     .width(Length::Fill),
-                                button(text("Import").size(scale_sz(0.65)).bold().color(theme.text))
+                                button(text("Import").size((scale_sz(0.65)) as f32).bold().color(theme.text))
                                     .on_press(SettingsMessage::ImportAlarmSound)
                                     .padding([4, 8])
                                     .style(move |_t, _s| button::Style {
@@ -1535,7 +1535,7 @@ SettingsMessage::SaveSettings => {}
                                         border: iced::Border { color: theme.text, width: 1.0, radius: 4.0.into() },
                                         ..Default::default()
                                     }),
-                                button(text("Test").size(scale_sz(0.65)).bold().color(theme.text))
+                                button(text("Test").size((scale_sz(0.65)) as f32).bold().color(theme.text))
                                     .on_press(SettingsMessage::TestAlarmSound)
                                     .padding([4, 8])
                                     .style(move |_t, _s| button::Style {
@@ -1545,14 +1545,14 @@ SettingsMessage::SaveSettings => {}
                                     }),
                             ].spacing(8).align_y(Alignment::Center),
                             row![
-                                text("Duration:").size(scale_sz(0.7)).color(theme.muted).width(Length::Fixed(55.0)),
+                                text("Duration:").size((scale_sz(0.7)) as f32).color(theme.muted).width(Length::Fixed(55.0)),
                                 slider(1..=60, settings.alarm_sound_duration_sec, SettingsMessage::AlarmSoundDurationChanged).width(Length::Fill),
-                                text(format!("{}s", settings.alarm_sound_duration_sec)).size(scale_sz(0.7)).color(theme.text).width(Length::Fixed(25.0)),
+                                text(format!("{}s", settings.alarm_sound_duration_sec)).size((scale_sz(0.7)) as f32).color(theme.text).width(Length::Fixed(25.0)),
                             ].spacing(8).align_y(Alignment::Center),
                             row![
-                                text("Volume:").size(scale_sz(0.7)).color(theme.muted).width(Length::Fixed(55.0)),
+                                text("Volume:").size((scale_sz(0.7)) as f32).color(theme.muted).width(Length::Fixed(55.0)),
                                 slider(0..=100, settings.alarm_sound_volume, SettingsMessage::AlarmSoundVolumeChanged).width(Length::Fill),
-                                text(format!("{}%", settings.alarm_sound_volume)).size(scale_sz(0.7)).color(theme.text).width(Length::Fixed(25.0)),
+                                text(format!("{}%", settings.alarm_sound_volume)).size((scale_sz(0.7)) as f32).color(theme.text).width(Length::Fixed(25.0)),
                             ].spacing(8).align_y(Alignment::Center),
                         ].spacing(6).width(Length::Fill);
                         
@@ -1572,7 +1572,7 @@ SettingsMessage::SaveSettings => {}
                                 let section_header = |title: &'static str, color: Color| {
                     container(
                         row![
-                            text(title).size(scale_sz(0.85)).bold().color(color),
+                            text(title).size((scale_sz(0.85)) as f32).bold().color(color),
                             row![].width(Length::Fill),
                         ]
                     )
@@ -1618,7 +1618,7 @@ SettingsMessage::SaveSettings => {}
                 container(
                     scrollable(
                         column![
-                            text("BAR GEOMETRY, CAPSULE SHAPES & LAYOUT").size(scale_sz(1.0)).bold().color(theme.success),
+                            text("BAR GEOMETRY, CAPSULE SHAPES & LAYOUT").size((scale_sz(1.0)) as f32).bold().color(theme.success),
                             mon_row,
                             bg_bar_row,
                             module_slants_row,
@@ -1662,18 +1662,18 @@ SettingsMessage::SaveSettings => {}
 
                 let mut col = column![
                     text("🪟 OVERLAY WINDOW SIZING & GEOMETRY")
-                        .size(base_sz)
+                        .size((base_sz) as f32)
                         .bold()
                         .color(theme.success),
                     text("Adjust global hexagon corner cuts, angles, and window dimensions:")
-                        .size(scale_sz(0.72))
+                        .size((scale_sz(0.72)) as f32)
                         .color(theme.muted),
                 ].spacing(8);
 
                 col = col.push(
                     container(
                         column![
-                            text("⬡ Global Overlay Hexagon Geometry").size(scale_sz(0.8)).bold().color(theme.success),
+                            text("⬡ Global Overlay Hexagon Geometry").size((scale_sz(0.8)) as f32).bold().color(theme.success),
                             row![
                                 text("Cut:").size(11).bold().color(theme.text),
                                 slider(0..=200, settings.overlay_cut, SettingsMessage::OverlayCut).width(Length::Fixed(180.0)),
@@ -1743,7 +1743,7 @@ SettingsMessage::SaveSettings => {}
 
                     col = col.push(
                         row![
-                            text(name).size(scale_sz(0.7)).bold().color(theme.text).width(Length::Fixed(200.0)),
+                            text(name).size((scale_sz(0.7)) as f32).bold().color(theme.text).width(Length::Fixed(200.0)),
                             text("W:").size(10).color(theme.muted),
                             slider(400..=1600, w_u32, move |v| SettingsMessage::WindowWidth(id_w.clone(), v)).width(Length::Fixed(180.0)),
                             text(format!("{}px", w_u32)).size(10).color(theme.text).width(Length::Fixed(50.0)),
@@ -1769,11 +1769,11 @@ SettingsMessage::SaveSettings => {}
         let header_row = container(
             row![
                 text("⚙ SYSTEM SETTINGS & PREFERENCES")
-                    .size(scale_sz(1.15))
+                    .size((scale_sz(1.15)) as f32)
                     .bold()
                     .color(theme.text),
                 row![].width(Length::Fill),
-                button(text("✕").size(scale_sz(0.85)).bold().color(theme.danger))
+                button(text("✕").size((scale_sz(0.85)) as f32).bold().color(theme.danger))
                     .on_press(SettingsMessage::Dismiss)
                     .padding([4, 10])
                     .style(|_t, _s| button::Style { background: None, ..Default::default() }),
@@ -1799,7 +1799,7 @@ SettingsMessage::SaveSettings => {}
 
         let footer_container = container(
             text("ESC or [✕] to dismiss  •  Changes update and save live in real time")
-                .size(scale_sz(0.65))
+                .size((scale_sz(0.65)) as f32)
                 .color(theme.muted)
                 .align_x(Alignment::Center)
         )

@@ -186,13 +186,13 @@ impl RemindersOverlay {
         let task_input = text_input("What to be reminded of...", &self.task_text)
             .on_input(ReminderMessage::TaskInputChanged)
             .padding(12)
-            .size(theme.font_size_overlay);
+            .size((theme.font_size_overlay) as f32);
 
         let when_input = text_input("When (e.g. 15m, 1h 30m, 5pm, tomorrow 9am)...", &self.when_text)
             .on_input(ReminderMessage::WhenInputChanged)
             .on_submit(ReminderMessage::AddReminder)
             .padding(12)
-            .size(theme.font_size_overlay);
+            .size((theme.font_size_overlay) as f32);
 
         let quick_row = row![
             text("Quick:").size(12).bold().color(theme.muted),
@@ -221,8 +221,8 @@ impl RemindersOverlay {
             let row_item = row![
                 text("⏰").size(16),
                 column![
-                    text(&item.text).size(theme.font_size_normal).bold().color(theme.text),
-                    text(&item.target_str).size(theme.font_size_normal - 4).color(theme.muted),
+                    text(&item.text).size((theme.font_size_normal) as f32).bold().color(theme.text),
+                    text(&item.target_str).size((theme.font_size_normal - 4) as f32).color(theme.muted),
                 ]
                 .width(Length::Fill),
                 text(rem_label).size(12).color(theme.success).bold(),
@@ -245,7 +245,7 @@ impl RemindersOverlay {
         let card_content = container(
             column![
                 text("⏰ SCHEDULED REMINDERS")
-                    .size(theme.font_size_overlay)
+                    .size((theme.font_size_overlay) as f32)
                     .color(theme.text),
                 task_input,
                 when_input,

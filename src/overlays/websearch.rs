@@ -75,7 +75,7 @@ impl WebSearchOverlay {
             .on_input(WebSearchMessage::InputChanged)
             .on_submit(WebSearchMessage::ExecuteSearch)
             .padding(14)
-            .size(theme.font_size_overlay);
+            .size((theme.font_size_overlay) as f32);
 
         let card_bg = ShapeBox::new()
             .shape(ShapeType::Rounded(12))
@@ -91,13 +91,13 @@ impl WebSearchOverlay {
         let card_content = container(
             column![
                 text("🌐 WEB SEARCH")
-                    .size(theme.font_size_overlay)
+                    .size((theme.font_size_overlay) as f32)
                     .color(theme.text)
                     .align_x(Alignment::Center),
                 input,
                 button(
                     text(search_label)
-                        .size(theme.font_size_normal)
+                        .size((theme.font_size_normal) as f32)
                         .color(theme.text)
                         .bold()
                         .align_x(Alignment::Center),

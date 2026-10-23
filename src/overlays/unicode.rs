@@ -101,7 +101,7 @@ impl UnicodeOverlay {
         let input = text_input("Search unicode glyphs and symbols...", &self.search_query)
             .on_input(UnicodeMessage::SearchChanged)
             .padding(14)
-            .size(theme.font_size_overlay);
+            .size((theme.font_size_overlay) as f32);
 
         let query = self.search_query.trim().to_lowercase();
         let filtered: Vec<&UnicodeEntry> = self
@@ -147,7 +147,7 @@ impl UnicodeOverlay {
         let card_content = container(
             column![
                 text("🔣 UNICODE SEARCH")
-                    .size(theme.font_size_overlay)
+                    .size((theme.font_size_overlay) as f32)
                     .color(theme.text),
                 input,
                 scrollable(grid_col).height(Length::Fill),

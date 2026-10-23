@@ -52,7 +52,7 @@ fn label<'a, Message: 'a>(
         }
         r = r.push(
             text(txt.clone())
-                .size(size)
+                .size((size) as f32)
                 .wrapping(iced::widget::text::Wrapping::None)
                 .font(shell_font(iced::font::Weight::Bold))
                 .color(*col),
@@ -468,11 +468,11 @@ impl CapsuleRenderer {
                         .into()
                 } else {
                     let initial = item.title.chars().next().unwrap_or('?').to_uppercase().to_string();
-                    text(initial).size((icon_size * 0.7) as u16).color(theme.text).into()
+                    text(initial).size((icon_size * 0.7) as f32).color(theme.text).into()
                 }
             } else {
                 let initial = item.title.chars().next().unwrap_or('?').to_uppercase().to_string();
-                text(initial).size((icon_size * 0.7) as u16).color(theme.text).into()
+                text(initial).size((icon_size * 0.7) as f32).color(theme.text).into()
             };
 
             let activate_item = item.clone();

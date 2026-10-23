@@ -206,7 +206,7 @@ impl CalculatorOverlay {
             .on_input(CalcMessage::InputChanged)
             .on_submit(CalcMessage::CopyResult(self.result_text.clone()))
             .padding(14)
-            .size(theme.font_size_overlay);
+            .size((theme.font_size_overlay) as f32);
 
         let input_row = container(input)
             .width(Length::Fill)
@@ -218,7 +218,7 @@ impl CalculatorOverlay {
             });
 
         let result_display = text(&self.result_text)
-            .size(theme.font_size_overlay + 16)
+            .size((theme.font_size_overlay + 16) as f32)
             .color(theme.success);
 
         let card_bg = ShapeBox::new()
@@ -229,7 +229,7 @@ impl CalculatorOverlay {
 
         let header_row = container(
             text("🧮 CALCULATOR & UNIT CONVERSION")
-                .size(theme.font_size_overlay)
+                .size((theme.font_size_overlay) as f32)
                 .color(theme.text)
         )
         .width(Length::Fill)

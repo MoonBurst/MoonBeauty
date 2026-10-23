@@ -168,7 +168,7 @@ impl TodoOverlay {
 
             let cat_btn = button(
                 text(cat)
-                    .size(theme.font_size_normal)
+                    .size((theme.font_size_normal) as f32)
                     .color(col)
                     .bold(),
             )
@@ -186,7 +186,7 @@ impl TodoOverlay {
             .on_input(TodoMessage::NewTaskInputChanged)
             .on_submit(TodoMessage::AddTask)
             .padding(14)
-            .size(theme.font_size_overlay);
+            .size((theme.font_size_overlay) as f32);
 
         let mut list_col = column![].spacing(6);
         for item in self.db.todos.iter().filter(|t| {
@@ -201,9 +201,9 @@ impl TodoOverlay {
             let is_done = item.completed;
 
             let row_item = row![
-                checkbox("", is_done).on_toggle(move |_| TodoMessage::ToggleTask(id)),
+                checkbox(is_done).on_toggle(move |_| TodoMessage::ToggleTask(id)),
                 text(&item.task)
-                    .size(theme.font_size_normal)
+                    .size((theme.font_size_normal) as f32)
                     .color(if is_done { theme.muted } else { theme.text })
                     .width(Length::Fill),
                 button(text("✕").size(12).color(theme.danger))
@@ -221,7 +221,7 @@ impl TodoOverlay {
         }
 
         let filter_row = row![
-            text("Filter:").size(theme.font_size_normal).bold().color(theme.text),
+            text("Filter:").size((theme.font_size_normal) as f32).bold().color(theme.text),
             button(text("All").size(12).color(if self.filter == TodoFilter::All { theme.success } else { theme.text }))
                 .on_press(TodoMessage::FilterChanged(TodoFilter::All))
                 .style(|_t, _s| button::Style { background: None, ..Default::default() }),
@@ -244,7 +244,7 @@ impl TodoOverlay {
             column![
                 row![
                     text("✅ TASK BOARD")
-                        .size(theme.font_size_overlay)
+                        .size((theme.font_size_overlay) as f32)
                         .color(theme.text),
                     scrollable(cat_row).width(Length::Fill),
                 ]

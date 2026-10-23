@@ -204,7 +204,7 @@ impl RngOverlay {
         }
 
         let mode_row = row![
-            text("Mode:").size(theme.font_size_normal).bold().color(theme.text),
+            text("Mode:").size((theme.font_size_normal) as f32).bold().color(theme.text),
             button(text("Keep All").size(12).color(if self.keep_mode == "all" { theme.success } else { theme.text }))
                 .on_press(RngMessage::SelectMode("all".into()))
                 .style(|_t, _s| button::Style { background: None, ..Default::default() }),
@@ -220,7 +220,7 @@ impl RngOverlay {
 
         let roll_btn = button(
             text("🎲 ROLL OUTCOME")
-                .size(theme.font_size_overlay)
+                .size((theme.font_size_overlay) as f32)
                 .bold()
                 .color(theme.success)
                 .align_x(Alignment::Center),
@@ -245,7 +245,7 @@ impl RngOverlay {
         let card_content = container(
             column![
                 text("🎲 DICE, COIN & RNG ROLLER")
-                    .size(theme.font_size_overlay)
+                    .size((theme.font_size_overlay) as f32)
                     .color(theme.text),
                 dice_buttons_row,
                 mode_row,

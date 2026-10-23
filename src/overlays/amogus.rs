@@ -186,7 +186,7 @@ impl AmogusOverlay {
             column![
                 row![
                     text("ඞ AMONG US MATCH TRACKER")
-                        .size(theme.font_size_overlay)
+                        .size((theme.font_size_overlay) as f32)
                         .color(theme.text),
                     row![].width(Length::Fill),
                     button(text("↺ Reset").size(12).color(theme.warning))

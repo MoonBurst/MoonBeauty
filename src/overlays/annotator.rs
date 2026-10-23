@@ -658,12 +658,12 @@ impl canvas::Program<AnnotatorMessage> for OverlayCanvas {
         vec![frame.into_geometry()]
     }
 
-    fn update(&self, _s: &mut (), event: canvas::Event, bounds: Rectangle, cursor: mouse::Cursor)
-        -> (event::Status, Option<AnnotatorMessage>)
+    fn update(&self, _s: &mut (), event: &iced::Event, bounds: Rectangle, cursor: mouse::Cursor)
+        -> Option<iced::widget::Action<AnnotatorMessage>>
     {
-        if self.reveal_mode { return (event::Status::Ignored, None); }
+        if self.reveal_mode { return None; }
         let Some(dr) = compute_display_rect(bounds, self.image_size) else {
-            return (event::Status::Ignored, None);
+            return None;
         };
         let scale = (dr.width / self.image_size.width).max(0.0001);
         let to_img = |p: Point| Point::new((p.x - dr.x) / scale, (p.y - dr.y) / scale);
@@ -675,30 +675,30 @@ impl canvas::Program<AnnotatorMessage> for OverlayCanvas {
             p.x >= 0.0 && p.x <= self.image_size.width &&
             p.y >= 0.0 && p.y <= self.image_size.height
         };
-        if let canvas::Event::Mouse(m) = event {
+        if let iced::Event::Mouse(m) = event {
             match m {
                 mouse::Event::ButtonPressed(mouse::Button::Left) => {
                     if let Some(p) = cursor.position_in(bounds) {
                         let img = to_img(p);
                         if inside_img(img) {
-                            return (event::Status::Captured, Some(AnnotatorMessage::Pressed(img)));
+                            return Some(iced::widget::Action::publish(AnnotatorMessage::Pressed(img)));
                         }
-                        return (event::Status::Ignored, None);
+                        return None;
                     }
                 }
                 mouse::Event::CursorMoved { .. } => {
-                    if let Some(p) = cursor.position_in(bounds) {                        return (event::Status::Ignored, Some(AnnotatorMessage::Moved(clamp_img(to_img(p)))));
+                    if let Some(p) = cursor.position_in(bounds) {                        return Some(iced::widget::Action::publish(AnnotatorMessage::Moved(clamp_img(to_img(p)))));
                     }
                 }
                 mouse::Event::ButtonReleased(mouse::Button::Left) => {
                     if let Some(p) = cursor.position_in(bounds) {
-                        return (event::Status::Captured, Some(AnnotatorMessage::Released(clamp_img(to_img(p)))));
+                        return Some(iced::widget::Action::publish(AnnotatorMessage::Released(clamp_img(to_img(p)))));
                     }
                 }
                 _ => {}
             }
         }
-        (event::Status::Ignored, None)
+        None
     }
 }
 
@@ -795,8 +795,8 @@ fn draw_ann<F: Fn(Point) -> Point>(frame: &mut Frame, a: &Annotation, to_disp: &
                 position: p, // Center of the circle
                 color: Color::WHITE,
                 size: iced::Pixels(radius * 1.2),
-                horizontal_alignment: iced::alignment::Horizontal::Center,
-                vertical_alignment: iced::alignment::Vertical::Center,
+                align_x: iced::alignment::Horizontal::Center.into(),
+                align_y: iced::alignment::Vertical::Center.into(),
                 ..canvas::Text::default()
             });
         }        Tool::Ellipse => {

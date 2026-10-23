@@ -116,8 +116,8 @@ impl PowerOverlay {
                 row![
                     text(icon).size(26),
                     column![
-                        text(display_title).size(theme.font_size_overlay).bold().color(title_col),
-                        text(desc).size(theme.font_size_normal - 3).color(theme.muted),
+                        text(display_title).size((theme.font_size_overlay) as f32).bold().color(title_col),
+                        text(desc).size((theme.font_size_normal - 3) as f32).color(theme.muted),
                     ]
                     .spacing(2),
                 ]
@@ -143,7 +143,7 @@ impl PowerOverlay {
         let card_content = container(
             column![
                 text("⚡ POWER & SESSION")
-                    .size(theme.font_size_overlay)
+                    .size((theme.font_size_overlay) as f32)
                     .color(theme.text),
                 list_col,
                 text("Press action to execute  •  ESC to dismiss")

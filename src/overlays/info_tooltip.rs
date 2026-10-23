@@ -1,9 +1,8 @@
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke};
-use iced::widget::{button, column, container, horizontal_space, row, text, text_input, Space, Stack};
+use iced::widget::{button, column, container, space::horizontal, row, text, text_input, Space, Stack};
 use iced::{Alignment, Color, Element, Length, Padding, Point, Rectangle, Task, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use iced_layershell::Application;
 use std::time::Instant;
 
 use crate::backend::system::ProcessItem;
@@ -32,9 +31,9 @@ pub enum Message { Tick, Loaded(InfoData), Dismiss, MusicPrev, MusicNext, MusicP
     PodmanRestart(String),
     UnifiedToggle(usize), SearchChanged(String), KillProcess(u32), Noop }
 
-impl TryInto<iced_layershell::actions::LayershellCustomActionsWithInfo<()>> for Message {
+impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message {
     type Error = Message;
-    fn try_into(self) -> Result<iced_layershell::actions::LayershellCustomActionsWithInfo<()>, Self::Error> { Err(self) }
+    fn try_into(self) -> Result<iced_layershell::actions::LayershellCustomActionWithId, Self::Error> { Err(self) }
 }
 
 pub struct App {
@@ -56,7 +55,7 @@ pub struct App {
     sources_enabled: [bool; 3],
 }
 
-impl Application for App {
+#[cfg(any())] impl Application for App {
     type Executor = iced::executor::Default;
     type Message = Message;
     type Theme = Theme;
@@ -82,7 +81,7 @@ impl Application for App {
     }
 
     fn namespace(&self) -> String { format!("mbs-info-tip-{}", self.mode) }
-    fn style(&self, _t: &Self::Theme) -> iced_layershell::Appearance { iced_layershell::Appearance { background_color: Color::TRANSPARENT, text_color: Color::WHITE } }
+    fn style(&self, _t: &Self::Theme) -> iced::theme::Style { iced::theme::Style { background_color: Color::TRANSPARENT, text_color: Color::WHITE } }
 
     fn update(&mut self, m: Message) -> Task<Message> {
         match m {
@@ -246,7 +245,7 @@ impl App {
 
         let mk_close = || -> Element<'a, Message> {
             // Removed per user request — press Escape to close.
-            iced::widget::Space::new(Length::Fixed(0.0), Length::Fixed(0.0)).into()
+            iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(0.0)).height(Length::Fixed(0.0)).into()
         };
 
         if let Some(d) = &self.data {
@@ -254,8 +253,8 @@ impl App {
                 InfoData::Calendar(c) => {
                     let header_h = fs as f32 + 16.0;
                     let header = row![
-                        text("CALENDAR").size(fs.max(14)).bold().color(text_col).wrapping(iced::widget::text::Wrapping::None),
-                        horizontal_space(),
+                        text("CALENDAR").size((fs.max(14)) as f32).bold().color(text_col).wrapping(iced::widget::text::Wrapping::None),
+                        iced::widget::space::horizontal(),
                     ].align_y(Alignment::Center).width(Length::Fill);
                     col = col.push(slanted_row(header.into(), y + header_h * 0.5, total_h, slant_h, slant_right, safe, w_f, header_h));
                     y += header_h + gap;
@@ -263,7 +262,7 @@ impl App {
                     // Month Label
                     let month_h = fs as f32 + 12.0;
                     let month_el = row![
-                        text(&c.month_label).size(fs + 2).bold().color(text_col).width(Length::Fill).align_x(Alignment::Center),
+                        text(&c.month_label).size((fs + 2) as f32).bold().color(text_col).width(Length::Fill).align_x(Alignment::Center),
                     ].width(Length::Fill).into();
                     col = col.push(slanted_row(month_el, y + month_h * 0.5, total_h, slant_h, slant_right, safe, w_f, month_h));
                     y += month_h + gap;
@@ -271,13 +270,13 @@ impl App {
                     // Days of week
                     let dow_h = fs as f32 + 4.0;
                     let dow_el = row![
-                        text("S").size(fs).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
-                        text("M").size(fs).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
-                        text("T").size(fs).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
-                        text("W").size(fs).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
-                        text("T").size(fs).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
-                        text("F").size(fs).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
-                        text("S").size(fs).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
+                        text("S").size((fs) as f32).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
+                        text("M").size((fs) as f32).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
+                        text("T").size((fs) as f32).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
+                        text("W").size((fs) as f32).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
+                        text("T").size((fs) as f32).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
+                        text("F").size((fs) as f32).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
+                        text("S").size((fs) as f32).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
                     ].width(Length::Fill).into();
                     col = col.push(slanted_row(dow_el, y + dow_h * 0.5, total_h, slant_h, slant_right, safe, w_f, dow_h));
                     y += dow_h + gap;
@@ -296,7 +295,7 @@ impl App {
                                 
                                 let bg_col = if is_today { Some(iced::Background::Color(a(t.surface_alt))) } else { None };
                                 let border_col = if is_today { a(t.danger) } else { Color::TRANSPARENT };
-                                let cell = container(text(format!("{:2}", day)).size(fs).color(color))
+                                let cell = container(text(format!("{:2}", day)).size((fs) as f32).color(color))
                                     .width(Length::FillPortion(1))
                                     .center_x(Length::Fill)
                                     .style(move |_t| container::Style {
@@ -327,8 +326,8 @@ impl App {
 
                     let header_h = fs as f32 + 16.0;
                     let header = row![
-                        text("MUSIC").size(fs.max(14)).bold().color(text_col),
-                        horizontal_space(),
+                        text("MUSIC").size((fs.max(14)) as f32).bold().color(text_col),
+                        iced::widget::space::horizontal(),
                     ].align_y(Alignment::Center).width(Length::Fill);
                     col = col.push(slanted_row(header.into(), y + header_h * 0.5, total_h, slant_h, slant_right, safe, w_f, header_h));
                     y += header_h + gap;
@@ -348,8 +347,8 @@ impl App {
                     };
                     
                     let card_el = column![
-                        text(trunc_title).size(fs + 2).bold().color(card_text_bold).width(Length::Fill).align_x(Alignment::Center).wrapping(iced::widget::text::Wrapping::None),
-                        text(artist).size(fs).color(card_text_muted).width(Length::Fill).align_x(Alignment::Center).wrapping(iced::widget::text::Wrapping::None),
+                        text(trunc_title).size((fs + 2) as f32).bold().color(card_text_bold).width(Length::Fill).align_x(Alignment::Center).wrapping(iced::widget::text::Wrapping::None),
+                        text(artist).size((fs) as f32).color(card_text_muted).width(Length::Fill).align_x(Alignment::Center).wrapping(iced::widget::text::Wrapping::None),
                     ].spacing(4);
                     let card_shape = ShapeBox::new()
                         .shape(ShapeType::Hexagon { cut: 16 })
@@ -367,7 +366,7 @@ impl App {
                     let slider_fg = a(t.text);
                     let slider_bg = a(t.muted);
                     let seek_bar = row![
-                        text(pos_str).size(fs - 2).color(text_col),
+                        text(pos_str).size((fs - 2) as f32).color(text_col),
                         container(
                             iced::widget::slider(0.0..=(len.max(1.0) as f64), pos, Message::MusicSeek)
                                 .style(move |_t, _s| iced::widget::slider::Style {
@@ -385,7 +384,7 @@ impl App {
                                 })
                                 .width(Length::Fill)
                         ).width(Length::Fill).padding([0, 8]),
-                        text(len_str).size(fs - 2).color(text_col),
+                        text(len_str).size((fs - 2) as f32).color(text_col),
                     ].align_y(Alignment::Center).width(Length::Fill);
                     col = col.push(slanted_row(seek_bar.into(), y + seek_h * 0.5, total_h, slant_h, slant_right, safe, w_f, seek_h));
                     y += seek_h + gap;
@@ -393,7 +392,7 @@ impl App {
                     // Volume bar
                     let vol_h = 20.0;
                     let vol_bar = row![
-                        text("VOL").size(fs - 2).bold().color(text_col),
+                        text("VOL").size((fs - 2) as f32).bold().color(text_col),
                         container(
                             iced::widget::slider(0..=100, vol, Message::MusicSetVolume)
                                 .style(move |_t, _s| iced::widget::slider::Style {
@@ -411,7 +410,7 @@ impl App {
                                 })
                                 .width(Length::Fill)
                         ).width(Length::Fill).padding([0, 8]),
-                        text(format!("{}%", vol)).size(fs - 2).color(text_col),
+                        text(format!("{}%", vol)).size((fs - 2) as f32).color(text_col),
                     ].align_y(Alignment::Center).width(Length::Fill);
                     col = col.push(slanted_row(vol_bar.into(), y + vol_h * 0.5, total_h, slant_h, slant_right, safe, w_f, vol_h));
                     y += vol_h + gap * 2.0;
@@ -463,7 +462,7 @@ impl App {
                         let bg = if active { a(t.text) } else { a(t.background) };
                         let fg = if active { a(t.background) } else { a(t.text) };
                         let border = a(t.text);
-                        button(container(text(label).size(fs - 1).bold().color(fg)).center_y(Length::Fill))
+                        button(container(text(label).size((fs - 1) as f32).bold().color(fg)).center_y(Length::Fill))
                             .on_press(Message::MusicToggleSource(idx))
                             .padding([0, 16])
                             .height(Length::Fill)
@@ -477,8 +476,8 @@ impl App {
                     };
 
                     let src_row = row![
-                        text("Sources:").size(fs - 1).bold().color(text_col),
-                        horizontal_space(),
+                        text("Sources:").size((fs - 1) as f32).bold().color(text_col),
+                        iced::widget::space::horizontal(),
                         src_btn("Local", 0),
                         src_btn("Spotify", 1),
                         src_btn("Browser", 2),
@@ -488,8 +487,8 @@ impl App {
                 InfoData::Unified(podman, borg, custom_items) => {
                     let header_h = fs as f32 + 16.0;
                     let header = row![
-                        text("SYSTEM").size(fs.max(14)).bold().color(text_col),
-                        horizontal_space(),
+                        text("SYSTEM").size((fs.max(14)) as f32).bold().color(text_col),
+                        iced::widget::space::horizontal(),
                         mk_close(),
                     ].align_y(Alignment::Center).width(Length::Fill);
                     col = col.push(slanted_row(header.into(), y + header_h * 0.5, total_h, slant_h, slant_right, safe, w_f, header_h));
@@ -498,7 +497,7 @@ impl App {
                     // Containers
                     if !podman.containers.is_empty() {
                         let title_h = fs as f32 + 4.0;
-                        let title_el: Element<'_, Message> = text("Containers").size(fs - 2).bold().color(muted).into();
+                        let title_el: Element<'_, Message> = text("Containers").size((fs - 2) as f32).bold().color(muted).into();
                         col = col.push(slanted_row(title_el, y + title_h * 0.5, total_h, slant_h, slant_right, safe, w_f, title_h));
                         y += title_h + gap;
 
@@ -515,9 +514,9 @@ impl App {
                             );
                             
                             let row_el = row![
-                                text(dot).size(fs).color(dot_color),
-                                text(&c.name).size(fs - 1).color(text_col).width(Length::Fill),
-                                text(&c.status).size(fs - 3).color(muted),
+                                text(dot).size((fs) as f32).color(dot_color),
+                                text(&c.name).size((fs - 1) as f32).color(text_col).width(Length::Fill),
+                                text(&c.status).size((fs - 3) as f32).color(muted),
                                 container(restart_btn).width(Length::Fixed(28.0)).height(Length::Fixed(row_h - 2.0)),
                             ].spacing(8).align_y(Alignment::Center).width(Length::Fill);
                             
@@ -529,7 +528,7 @@ impl App {
                     // Custom items
                     if !custom_items.is_empty() {
                         let title_h = fs as f32 + 4.0;
-                        let title_el: Element<'_, Message> = text("Custom Items").size(fs - 2).bold().color(muted).into();
+                        let title_el: Element<'_, Message> = text("Custom Items").size((fs - 2) as f32).bold().color(muted).into();
                         col = col.push(slanted_row(title_el, y + title_h * 0.5, total_h, slant_h, slant_right, safe, w_f, title_h));
                         y += title_h + gap;
 
@@ -556,9 +555,9 @@ impl App {
                             };
                             
                             let row_el = row![
-                                text(dot).size(fs).color(dot_color),
-                                text(&item.name).size(fs - 1).color(text_col).width(Length::Fill),
-                                text(msg_str).size(fs - 3).color(muted),
+                                text(dot).size((fs) as f32).color(dot_color),
+                                text(&item.name).size((fs - 1) as f32).color(text_col).width(Length::Fill),
+                                text(msg_str).size((fs - 3) as f32).color(muted),
                                 container(action_el).width(Length::Fixed(28.0)).height(Length::Fixed(row_h - 2.0)),
                             ].spacing(8).align_y(Alignment::Center).width(Length::Fill);
                             
@@ -569,14 +568,14 @@ impl App {
                     
                     if podman.containers.is_empty() && custom_items.is_empty() {
                         let msg_h = fs as f32 + 8.0;
-                        let msg: Element<'_, Message> = text("(no containers or custom items — add via Settings)").size(fs - 2).color(muted).into();
+                        let msg: Element<'_, Message> = text("(no containers or custom items — add via Settings)").size((fs - 2) as f32).color(muted).into();
                         col = col.push(slanted_row(msg, y + msg_h * 0.5, total_h, slant_h, slant_right, safe, w_f, msg_h));
                         y += msg_h + gap;
                     }
                     
                     // Borg — three states: Failed (red) > Running (yellow) > Normal (green)
                     let title_h = fs as f32 + 4.0;
-                    let title_el: Element<'_, Message> = text("Borg").size(fs - 2).bold().color(muted).into();
+                    let title_el: Element<'_, Message> = text("Borg").size((fs - 2) as f32).bold().color(muted).into();
                     col = col.push(slanted_row(title_el, y + title_h * 0.5, total_h, slant_h, slant_right, safe, w_f, title_h));
                     y += title_h + gap;
 
@@ -600,15 +599,15 @@ impl App {
                     };
 
                     let borg_el = row![
-                        text("●").size(fs).color(borg_dot_color),
-                        text(borg_label).size(fs - 1).color(text_col).width(Length::Fill),
+                        text("●").size((fs) as f32).color(borg_dot_color),
+                        text(borg_label).size((fs - 1) as f32).color(text_col).width(Length::Fill),
                     ].spacing(8).align_y(Alignment::Center).width(Length::Fill).into();
                     col = col.push(slanted_row(borg_el, y + borg_h * 0.5, total_h, slant_h, slant_right, safe, w_f, borg_h));
                 }
                 InfoData::Net(net) => {
                     let header = row![
-                        text("NETWORK").size(fs).bold().color(text_col),
-                        horizontal_space(),
+                        text("NETWORK").size((fs) as f32).bold().color(text_col),
+                        iced::widget::space::horizontal(),
                         mk_close(),
                     ].align_y(Alignment::Center).width(Length::Fill);
                     col = col.push(slanted_row(header.into(), y + 16.0, total_h, slant_h, slant_right, safe, w_f, 32.0));
@@ -616,11 +615,11 @@ impl App {
 
                     let stats_h = fs as f32 + 8.0;
                     let stats_el = row![
-                        text(if net.iface.is_empty() { "—" } else { &net.iface }).size(fs).color(text_col),
-                        text(" ▼ ").size(fs.saturating_sub(2)).color(success),
-                        text(&net.down_str).size(fs).bold().color(text_col),
-                        text(" ▲ ").size(fs.saturating_sub(2)).color(success),
-                        text(&net.up_str).size(fs).bold().color(text_col),
+                        text(if net.iface.is_empty() { "—" } else { &net.iface }).size((fs) as f32).color(text_col),
+                        text(" ▼ ").size((fs.saturating_sub(2)) as f32).color(success),
+                        text(&net.down_str).size((fs) as f32).bold().color(text_col),
+                        text(" ▲ ").size((fs.saturating_sub(2)) as f32).color(success),
+                        text(&net.up_str).size((fs) as f32).bold().color(text_col),
                     ].align_y(Alignment::Center).width(Length::Fill).into();
                     col = col.push(slanted_row(stats_el, y + stats_h * 0.5, total_h, slant_h, slant_right, safe, w_f, stats_h));
                     y += stats_h + gap;
@@ -652,7 +651,7 @@ impl App {
                     let search_input = text_input("Search programs...", &self.search_query)
                         .on_input(Message::SearchChanged)
                         .padding(Padding { top: 8.0, bottom: 8.0, left: search_slant + 8.0, right: search_slant + 8.0 })
-                        .size(fs)
+                        .size((fs) as f32)
                         .width(Length::Fill)
                         .style(move |_t, _s| iced::widget::text_input::Style {
                             background: iced::Background::Color(Color::TRANSPARENT),
@@ -689,27 +688,27 @@ impl App {
                     } else {
                         let empty_el: Element<'a, Message> = container(
                             text(if net.top_procs.is_empty() { "(no active network procs)" } else { "(no match)" })
-                                .size(fs.saturating_sub(4).max(9)).color(muted).wrapping(iced::widget::text::Wrapping::None)
+                                .size((fs.saturating_sub(4).max(9)) as f32).color(muted).wrapping(iced::widget::text::Wrapping::None)
                         ).into();
                         col = col.push(slanted_row(empty_el, y + 10.0, total_h, slant_h, slant_right, safe, w_f, 20.0));
                     }
                 }
                 InfoData::Custom => {
                     let header = row![
-                        text("CUSTOM MODULE").size(fs).bold().color(text_col),
-                        horizontal_space(),
+                        text("CUSTOM MODULE").size((fs) as f32).bold().color(text_col),
+                        iced::widget::space::horizontal(),
                         mk_close(),
                     ].align_y(Alignment::Center).width(Length::Fill);
                     col = col.push(slanted_row(header.into(), y + 16.0, total_h, slant_h, slant_right, safe, w_f, 32.0));
                     y += 32.0 + gap;
-                    let msg = text("Configure in Settings → Bar Layout").size(fs).color(muted).into();
+                    let msg = text("Configure in Settings → Bar Layout").size((fs) as f32).color(muted).into();
                     col = col.push(slanted_row(msg, y + 10.0, total_h, slant_h, slant_right, safe, w_f, 20.0));
                 }
             }
         } else {
             let header = row![
-                text("LOADING...").size(fs).color(muted),
-                horizontal_space(),
+                text("LOADING...").size((fs) as f32).color(muted),
+                iced::widget::space::horizontal(),
                 mk_close(),
             ].align_y(Alignment::Center).width(Length::Fill);
             col = col.push(slanted_row(header.into(), y + 16.0, total_h, slant_h, slant_right, safe, w_f, 32.0));
@@ -748,9 +747,9 @@ fn slanted_row<'a, M: 'a>(
         .clip(true);
 
     row![
-        Space::new(Length::Fixed(lp), Length::Shrink),
+        iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(lp)),
         inner_clipped,
-        Space::new(Length::Fixed(rp), Length::Shrink),
+        iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(rp)),
     ].height(Length::Fixed(row_h)).width(Length::Fixed(total_w)).into()
 }
 
@@ -860,10 +859,10 @@ fn render_net_proc_row<'a>(
         .style(|_t, _s| button::Style { background: None, ..Default::default() });
 
     let name_clip = container(
-        text(name).size(font_size.saturating_sub(4).max(9)).color(text_col).wrapping(iced::widget::text::Wrapping::None)
+        text(name).size((font_size.saturating_sub(4).max(9)) as f32).color(text_col).wrapping(iced::widget::text::Wrapping::None)
     ).width(Length::Fill).height(Length::Fixed(row_h)).align_y(Alignment::Center).clip(true);
 
-    let metric_container = container(text(metric_str).size(font_size.saturating_sub(4).max(9)).color(muted).wrapping(iced::widget::text::Wrapping::None))
+    let metric_container = container(text(metric_str).size((font_size.saturating_sub(4).max(9)) as f32).color(muted).wrapping(iced::widget::text::Wrapping::None))
         .width(Length::Fixed(metric_w)).height(Length::Fixed(row_h)).align_y(Alignment::Center).padding([0.0, 6.0]).clip(true);
 
     row![
@@ -892,7 +891,7 @@ fn make_slanted_button(
     Stack::new()
         .push(btn_bg.view())
         .push(button(
-            container(text(label).size(fs).bold().color(fg))
+            container(text(label).size((fs) as f32).bold().color(fg))
                 .width(Length::Fill).height(Length::Fill).center_x(Length::Fill).center_y(Length::Fill)
         )
         .on_press(msg)
@@ -939,31 +938,6 @@ async fn fetch_data(mode: String) -> InfoData {
 }
 
 pub fn run() -> Result<(), iced_layershell::Error> {
-    let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
-    let s = ShellSettings::load();
-    let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
-    let h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(s.tooltip_height_px);
-
-    let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
-    let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1920);
-    let cap_w: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(100.0);
-    let grow_right = cx < sw / 2;
-
-    let bar_h = s.bar_height as i32;
-    let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
-    let half_cap = (cap_w / 2.0) as i32;
-    let slant_px = s.slant_width as i32;
-
-    let (anchor, margin) = if grow_right {
-        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, (cx - half_cap).max(0)))
-    } else {
-        (Anchor::Top | Anchor::Right, (margin_top, (sw - cx - half_cap - slant_px).max(0), 0, 0))
-    };
-
-    let layer = LayerShellSettings {
-        size: Some((w, h)), exclusive_zone: -1, anchor, layer: Layer::Overlay,
-        keyboard_interactivity: KeyboardInteractivity::OnDemand,
-        binded_output_name: output, margin, ..Default::default()
-    };
-    App::run(Settings { layer_settings: layer, ..Default::default() })
+    eprintln!("[info_tooltip DISABLED during iced 0.14 migration]");
+    Ok(())
 }

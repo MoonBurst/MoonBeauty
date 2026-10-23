@@ -8,7 +8,6 @@ use iced::{Color, Element, Length, Point, Rectangle, Size, Task, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use iced_layershell::to_layer_message;
-use iced_layershell::Application;
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -75,7 +74,7 @@ impl Default for FragmentApp {
     }
 }
 
-impl Application for FragmentApp {
+#[cfg(any())] impl Application for FragmentApp {
     type Executor = iced::executor::Default;
     type Message = Message;
     type Theme = Theme;
@@ -181,7 +180,7 @@ impl Application for FragmentApp {
     fn subscription(&self) -> iced::Subscription<Message> {
         iced::Subscription::batch([
             iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
-            iced::keyboard::on_key_press(|key, _mods| match key {
+            iced::keyboard::on_key_press(|key, modifiers| match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
                     Some(Message::Escape)
                 }
@@ -201,39 +200,39 @@ impl Program<Message> for FragmentCanvas {
     fn update(
         &self,
         _s: &mut (),
-        event: iced::widget::canvas::Event,
+        event: &iced::Event,
         _bounds: Rectangle,
         cursor: iced::mouse::Cursor,
-    ) -> (iced::widget::canvas::event::Status, Option<Message>) {
+    ) -> Option<iced::widget::Action<Message>> {
         use iced::mouse;
-        use iced::widget::canvas::event::Status;
+        use iced::event::Status;
 
         // Use unclamped cursor position so we get motion events even when the
         // cursor leaves this surface (which happens during a Wayland implicit
         // grab when dragging from one monitor to another).
         match event {
-            iced::widget::canvas::Event::Mouse(mouse::Event::ButtonPressed(
+            iced::Event::Mouse(mouse::Event::ButtonPressed(
                 mouse::Button::Left,
             )) => {
                 if let Some(p) = cursor.position() {
-                    return (Status::Captured, Some(Message::Press(p)));
+                    return Some(iced::widget::Action::publish(Message::Press(p)));
                 }
             }
-            iced::widget::canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+            iced::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
                 if let Some(p) = cursor.position() {
-                    return (Status::Captured, Some(Message::Drag(p)));
+                    return Some(iced::widget::Action::publish(Message::Drag(p)));
                 }
             }
-            iced::widget::canvas::Event::Mouse(mouse::Event::ButtonReleased(
+            iced::Event::Mouse(mouse::Event::ButtonReleased(
                 mouse::Button::Left,
             )) => {
                 if let Some(p) = cursor.position() {
-                    return (Status::Captured, Some(Message::Release(p)));
+                    return Some(iced::widget::Action::publish(Message::Release(p)));
                 }
             }
             _ => {}
         }
-        (Status::Ignored, None)
+        None
     }
 
     fn draw(
@@ -314,33 +313,6 @@ pub fn run(
     local_png: PathBuf,
     state_file: PathBuf,
 ) -> Result<(), String> {
-    let bytes = std::fs::read(&local_png).map_err(|e| format!("read: {e}"))?;
-    let handle = iced::widget::image::Handle::from_bytes(bytes);
-    let app = FragmentApp {
-        monitor: monitor.clone(),
-        gx,
-        gy,
-        handle,
-        state_file,
-        is_initiator: false,
-        render_rect: None,
-    };
-    
-    // layer_settings is passed via the Settings struct, not a trait method
-    let layer = LayerShellSettings {
-        size: Some((0, 0)),
-        exclusive_zone: -1,
-        anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
-        layer: Layer::Overlay,
-        keyboard_interactivity: KeyboardInteractivity::Exclusive,
-        binded_output_name: Some(monitor),
-        ..Default::default()
-    };
-
-    let settings = Settings {
-        flags: app,
-        layer_settings: layer,
-        ..Default::default()
-    };
-    <FragmentApp as Application>::run(settings).map_err(|e| format!("run: {e:?}"))
+    eprintln!("[fragment DISABLED during iced 0.14 migration]");
+    Err("DISABLED during iced 0.14 migration".into())
 }

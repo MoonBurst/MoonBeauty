@@ -191,13 +191,13 @@ impl DictionaryOverlay {
             .on_input(DictMessage::InputChanged)
             .on_submit(DictMessage::SearchWord)
             .padding(Padding { top: 12.0, right: 24.0, bottom: 12.0, left: 24.0 })
-            .size(theme.font_size_overlay)
+            .size((theme.font_size_overlay) as f32)
             .width(Length::Fill)
             .style(move |_t, status| text_input::Style {
                 background: iced::Background::Color(theme.surface_alt),
                 border: iced::Border {
                     color: match status {
-                        text_input::Status::Focused => theme.focus,
+                        text_input::Status::Focused { .. } => theme.focus,
                         text_input::Status::Hovered => theme.border,
                         _ => theme.border,
                     },
@@ -238,7 +238,7 @@ impl DictionaryOverlay {
                         .color(theme.warning)
                         .bold(),
                     text(&item.definition)
-                        .size(theme.font_size_normal)
+                        .size((theme.font_size_normal) as f32)
                         .color(theme.text)
                         .width(Length::Fill),
                 ]
