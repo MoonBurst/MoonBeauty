@@ -165,6 +165,7 @@ impl App {
             w: anim.w, h: anim.h, slant: slant_h,
             slant_right: self.slant_l == SlantSide::Right,
             background: theme.background, border_color: theme.text, border_width: theme.control_border_width,
+            frame: self.opened.elapsed().as_millis() as u64,
         };
         let content: Element<'_, Message> = self.build_content(&theme, &settings, anim.opacity);
         let clipped = crate::overlays::tooltip_engine::clip_content(content, anim.w, anim.h, self.grow_right);
@@ -177,9 +178,42 @@ impl App {
         // closing, drop to 2fps once settled (still catches AUTO_MS
         // timeout within 500ms of the deadline). Without this, the
         // 60fps view-tree rebuild burns ~10% CPU on an idle tooltip.
-        let _animating = self.opened.elapsed().as_millis() < 1000
+        // Animation tick. Priority:
+        //   1. MBS_TICK_MS env override (for A/B tuning without rebuild)
+        //   2. Dynamic: 80% of detected monitor refresh interval
+        //   3. Fallback: 6ms (aligns with 165Hz)
+        //
+        // The dynamic path exists because hardcoding is fragile: on 60Hz
+        // a 4ms tick wastes CPU, on 240Hz a 16ms tick chops visibly. The
+        // 80% factor gives modest headroom over vsync (source runs 25%
+        // faster than display, so dropped frames don't cascade).
+        //
+        // MBS_TICK_DIAG=1 (env, on the parent bar) enables per-frame dt
+        // logging from TooltipBg::draw for jitter diagnosis.
+        let _anim_total_ms = self.drop_ms as u64
+            + self.expand_ms as u64
+            + (self.drop_ms * 0.6) as u64;
+        let _animating = self.opened.elapsed().as_millis()
+            < (_anim_total_ms as u128).saturating_add(100)
             || self.closing_at.is_some();
-        let _tick_ms: u64 = if _animating { 16 } else { 500 };
+        let _tick_ms: u64 = if _animating {
+            std::env::var("MBS_TICK_MS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .filter(|n| *n >= 1 && *n <= 100)
+                .unwrap_or_else(|| {
+                    let hz = crate::overlays::tooltip_engine::detect_refresh_hz() as u64;
+                    // 80% of refresh period, floored at 3ms, capped at 16ms.
+                    // 60Hz  → 16ms (~62fps, plenty of vsync headroom)
+                    // 120Hz → 8ms  (125fps, 4% headroom)
+                    // 144Hz → 6ms  (167fps, 16% headroom)
+                    // 165Hz → 6ms  (167fps, 1% headroom — conservative)
+                    // 240Hz → 4ms  (250fps, 4% headroom)
+                    ((800 / hz.max(30)).max(3)).min(16)
+                })
+        } else {
+            500
+        };
 
         iced::Subscription::batch([
             iced::time::every(std::time::Duration::from_millis(_tick_ms)).map(|_| Message::Tick),
@@ -340,6 +374,7 @@ impl App {
             background: Color { a: t.surface_alt.a * alpha, ..t.surface_alt },
             border_color: Color { a: t.text.a * alpha, ..t.text },
             border_width: search_border,
+            frame: self.opened.elapsed().as_millis() as u64,
         };
 
         let input_text_col = Color { a: 1.0, ..t.text };

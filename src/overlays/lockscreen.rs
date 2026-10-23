@@ -61,8 +61,15 @@ impl LockscreenOverlay {
     /// Connect to coordinator. Returns (tx_to_send_keys, rx_for_updates).
     /// Uses two threads: one reads coordinator messages, one writes ours.
     fn connect_coordinator() -> Option<(mpsc::Sender<LockIpc>, mpsc::Receiver<LockIpc>)> {
-        let path = std::env::var("MBS_LOCK_SOCKET").ok()?;
-        let stream = std::os::unix::net::UnixStream::connect(&path).ok()?;
+        let path = match std::env::var("MBS_LOCK_SOCKET") {
+            Ok(p) => { eprintln!("[lock-child-v225] socket env set: {:?}", p); p },
+            Err(_) => { eprintln!("[lock-child-v225] MBS_LOCK_SOCKET NOT SET"); return None; },
+        };
+        eprintln!("[lock-child-v225] attempting UnixStream::connect({:?})", path);
+        let stream = match std::os::unix::net::UnixStream::connect(&path) {
+            Ok(s) => { eprintln!("[lock-child-v225] socket CONNECTED"); s },
+            Err(e) => { eprintln!("[lock-child-v225] connect failed: {}", e); return None; },
+        };
         let reader_stream = stream.try_clone().ok()?;
         let writer_stream = stream;
 

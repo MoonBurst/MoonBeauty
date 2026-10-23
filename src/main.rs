@@ -475,6 +475,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     let is_notif_surface = detect_notif_surface(&args);
     let standalone_target = detect_standalone_overlay(&args);
+    eprintln!("[main-v225] standalone_target={:?} is_notif={}", standalone_target, is_notif_surface);
     let settings = ShellSettings::load();
 
     if !is_notif_surface && standalone_target.is_none() {

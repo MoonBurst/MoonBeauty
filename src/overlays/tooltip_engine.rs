@@ -53,6 +53,12 @@ pub fn compute_close(elapsed_ms: f32, cap_w: f32, final_w: f32, h_end: f32,
 pub struct ParallelogramBg {
     pub w: f32, pub h: f32, pub slant: f32, pub slant_right: bool,
     pub background: Color, pub border_color: Color, pub border_width: f32,
+    /// Per-frame counter. Iced 0.14's reactive renderer skips repaints
+    /// when the widget tree is identical. Bumping this every view() call
+    /// changes the hidden marker text, forcing the tree to diff and the
+    /// canvas to redraw. Without this, animated tooltips tick at ~20fps
+    /// instead of 60fps because iced coalesces identical frames.
+    pub frame: u64,
 }
 
 impl ParallelogramBg {
@@ -62,7 +68,20 @@ impl ParallelogramBg {
             w: self.w, h: self.h, slant: self.slant, slant_right: self.slant_right,
             background: self.background, border_color: self.border_color, border_width: self.border_width,
         };
-        canvas::Canvas::new(inner).width(Length::Fixed(w)).height(Length::Fixed(h)).into()
+        let canvas_el: Element<'static, Message> =
+            canvas::Canvas::new(inner).width(Length::Fixed(w)).height(Length::Fixed(h)).into();
+        // V228: force tree diff. Iced 0.14 skips repaints when widget trees are
+        // identical (reactive rendering). Bumping a hidden text widget's content
+        // every frame invalidates the enclosing Stack, forcing the canvas below
+        // it to redraw. Without this, tick-only animation runs at ~20fps.
+        let marker_el: Element<'static, Message> = iced::widget::text(format!("{}", self.frame))
+            .size(1)
+            .color(Color { a: 0.001, ..Color::WHITE })
+            .into();
+        iced::widget::Stack::new()
+            .push(canvas_el)
+            .push(marker_el)
+            .into()
     }
 }
 
@@ -90,6 +109,22 @@ impl<Message> canvas::Program<Message> for TooltipBg {
     fn draw(&self, _s: &Self::State, renderer: &iced::Renderer, _t: &Theme,
             bounds: Rectangle, _c: iced::mouse::Cursor) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
+        // MBS_TICK_DIAG: opt-in per-frame timing. Set the env var on
+        // the parent bar process; tooltips inherit it. Useful for
+        // distinguishing jitter (variable dt) from consistent fps
+        // shortfall (constant dt, compositor dropping frames).
+        if std::env::var_os("MBS_TICK_DIAG").is_some() {
+            use std::sync::{Mutex, OnceLock};
+            static LAST: OnceLock<Mutex<Option<std::time::Instant>>> = OnceLock::new();
+            let m = LAST.get_or_init(|| Mutex::new(None));
+            let mut g = m.lock().unwrap();
+            let now = std::time::Instant::now();
+            if let Some(prev) = *g {
+                let us = now.duration_since(prev).as_micros() as f64;
+                eprintln!("[tick-diag] dt_ms={:.2}", us / 1000.0);
+            }
+            *g = Some(now);
+        }
         let half = self.border_width / 2.0;
         let w = self.w; let h = self.h; let sl = self.slant;
         let path = if self.slant_right {
@@ -118,3 +153,67 @@ pub fn align_to_side<'a, Message: 'a>(el: Element<'a, Message>, grow_right: bool
     iced::widget::container(el).width(Length::Fill).height(Length::Fill)
         .align_x(align).align_y(iced::alignment::Vertical::Top).into()
 }
+
+/// Detect the focused monitor's refresh rate in Hz.
+///
+/// Reads `swaymsg -t get_outputs -r` once and caches the result via
+/// `OnceLock`. Falls back to 60Hz if detection fails. Override via
+/// `MBS_REFRESH_HZ` env var if the compositor isn't sway or detection
+/// misreads the current mode.
+///
+/// Used to size the animation tick interval. At 144Hz we want ~5ms
+/// ticks (200fps source) to exceed display refresh with margin, not the
+/// 16ms (60fps) that's appropriate on a 60Hz panel.
+pub fn detect_refresh_hz() -> u32 {
+    use std::sync::OnceLock;
+    static CACHED: OnceLock<u32> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        if let Ok(v) = std::env::var("MBS_REFRESH_HZ") {
+            if let Ok(hz) = v.parse::<u32>() {
+                if hz >= 30 && hz <= 480 {
+                    eprintln!("[refresh-detect] MBS_REFRESH_HZ override = {}Hz", hz);
+                    return hz;
+                }
+            }
+        }
+        if let Ok(out) = std::process::Command::new("swaymsg")
+            .args(["-t", "get_outputs", "-r"]).output()
+        {
+            if out.status.success() {
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
+                    if let Some(arr) = v.as_array() {
+                        for o in arr {
+                            if o.get("focused").and_then(|f| f.as_bool()) == Some(true) {
+                                if let Some(hz) = o.get("current_mode")
+                                    .and_then(|m| m.get("refresh"))
+                                    .and_then(|r| r.as_u64())
+                                {
+                                    let hz = ((hz as f64) / 1000.0).round() as u32;
+                                    if hz >= 30 && hz <= 480 {
+                                        eprintln!("[refresh-detect] focused monitor = {}Hz", hz);
+                                        return hz;
+                                    }
+                                }
+                            }
+                        }
+                        for o in arr {
+                            if let Some(hz) = o.get("current_mode")
+                                .and_then(|m| m.get("refresh"))
+                                .and_then(|r| r.as_u64())
+                            {
+                                let hz = ((hz as f64) / 1000.0).round() as u32;
+                                if hz >= 30 && hz <= 480 {
+                                    eprintln!("[refresh-detect] first monitor = {}Hz", hz);
+                                    return hz;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("[refresh-detect] fallback = 60Hz");
+        60
+    })
+}
+

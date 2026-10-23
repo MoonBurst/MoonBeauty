@@ -52,7 +52,8 @@ fn resolve_user() -> String {
     static CACHE: OnceLock<String> = OnceLock::new();
     CACHE
         .get_or_init(|| {
-            if let Ok(out) = std::process::Command::new("id").arg("-un").output() {
+            let id_bin = find_bin("id").unwrap_or_else(|| std::path::PathBuf::from("id"));
+            if let Ok(out) = std::process::Command::new(&id_bin).arg("-un").output() {
                 if out.status.success() {
                     let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
                     if !s.is_empty() {
@@ -77,6 +78,39 @@ fn sha256_prefix(s: &str) -> String {
     h.update(s.as_bytes());
     let r = h.finalize();
     format!("{:02x}{:02x}{:02x}{:02x}", r[0], r[1], r[2], r[3])
+}
+
+
+/// Locate a binary reliably even when PATH is empty. NixOS puts most tools
+/// in /run/current-system/sw/bin, wrappers in /run/wrappers/bin, and user
+/// nix profile in ~/.nix-profile/bin. Fall back to PATH last.
+fn find_bin(name: &str) -> Option<std::path::PathBuf> {
+    let fallbacks: &[&str] = match name {
+        "pamtester" => &["/run/current-system/sw/bin/pamtester",
+                         "/usr/bin/pamtester", "/usr/local/bin/pamtester",
+                         "/nix/var/nix/profiles/default/bin/pamtester"],
+        "sudo"      => &["/run/wrappers/bin/sudo", "/usr/bin/sudo", "/bin/sudo"],
+        "su"        => &["/run/wrappers/bin/su", "/usr/bin/su", "/bin/su"],
+        "swaymsg"   => &["/run/current-system/sw/bin/swaymsg", "/usr/bin/swaymsg"],
+        "id"        => &["/usr/bin/id", "/bin/id"],
+        "script"    => &["/usr/bin/script", "/bin/script"],
+        "which"     => &["/usr/bin/which", "/bin/which"],
+        _ => &[],
+    };
+    for p in fallbacks {
+        if std::path::Path::new(p).exists() {
+            return Some(std::path::PathBuf::from(p));
+        }
+    }
+    if let Ok(path_env) = std::env::var("PATH") {
+        for dir in path_env.split(':') {
+            let c = std::path::Path::new(dir).join(name);
+            if c.exists() {
+                return Some(c);
+            }
+        }
+    }
+    None
 }
 
 pub struct LockCoordinator;
@@ -140,6 +174,7 @@ impl LockCoordinator {
 
     pub fn spawn() -> ! {
         let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
+        eprintln!("[lock-coord-v225] START pid={}", std::process::id());
         let pid = std::process::id();
         let socket_path = PathBuf::from(&runtime_dir)
             .join(format!("moon-beauty-lock-{}.sock", pid));
@@ -157,17 +192,6 @@ impl LockCoordinator {
         let children: Arc<Mutex<HashMap<String, Child>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
-        // Initial spawn
-        let outputs = Self::list_outputs();
-        if outputs.is_empty() {
-            eprintln!("[lock-coord] no outputs — spawning single instance");
-            Self::spawn_child("", &socket_path, &children);
-        } else {
-            eprintln!("[lock-coord] spawning {} children for {:?}", outputs.len(), outputs);
-            for output in &outputs {
-                Self::spawn_child(output, &socket_path, &children);
-            }
-        }
 
         // Startup sanity: verify sudo is on PATH
         {
@@ -185,8 +209,9 @@ impl LockCoordinator {
             }
         }
 
+        eprintln!("[lock-coord-v225] binding socket at {:?}", socket_path);
         let listener = match std::os::unix::net::UnixListener::bind(&socket_path) {
-            Ok(l) => l,
+            Ok(l) => { eprintln!("[lock-coord-v225] socket bound OK"); l }
             Err(e) => {
                 eprintln!("[lock-coord] bind failed: {}", e);
                 Self::kill_all(&children);
@@ -194,6 +219,19 @@ impl LockCoordinator {
             }
         };
         listener.set_nonblocking(true).ok();
+
+        // Initial spawn
+        let outputs = Self::list_outputs();
+        if outputs.is_empty() {
+            eprintln!("[lock-coord] no outputs — spawning single instance");
+            Self::spawn_child("", &socket_path, &children);
+        } else {
+            eprintln!("[lock-coord] spawning {} children for {:?}", outputs.len(), outputs);
+            for output in &outputs {
+                eprintln!("[lock-coord-v225] spawning child for output={:?}", output);
+            Self::spawn_child(output, &socket_path, &children);
+            }
+        }
 
         let rt = tokio::runtime::Runtime::new().expect("rt");
         rt.block_on(async move {
@@ -440,7 +478,8 @@ impl LockCoordinator {
                 None => eprintln!("[lock-coord] pamtester NOT on PATH — add 'pamtester' to flake.nix runtimeLibs"),
             }
             eprintln!("[lock-coord] trying pamtester login {} authenticate", user);
-            match tokio::process::Command::new("pamtester")
+            let _pam_bin = find_bin("pamtester").unwrap_or_else(|| std::path::PathBuf::from("pamtester"));
+            match tokio::process::Command::new(&_pam_bin)
                 .args(["login", &user, "authenticate"])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
@@ -478,7 +517,8 @@ impl LockCoordinator {
         // ── Strategy 1: sudo -S -k -v with full IO capture (V173 pattern) ──
         let pass_line = format!("{}
 ", clean);
-        match tokio::process::Command::new("sudo")
+        let _sudo_bin = find_bin("sudo").unwrap_or_else(|| std::path::PathBuf::from("sudo"));
+        match tokio::process::Command::new(&_sudo_bin)
             .args(["-S", "-k", "-v"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -525,7 +565,8 @@ impl LockCoordinator {
 
         // ── Strategy 2: sudo via script PTY ──
         eprintln!("[lock-coord] trying sudo via script(1)");
-        match tokio::process::Command::new("script")
+        let _script_bin = find_bin("script").unwrap_or_else(|| std::path::PathBuf::from("script"));
+        match tokio::process::Command::new(&_script_bin)
             .args(["-q", "-e", "-c", "sudo -k -v", "/dev/null"])
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
@@ -556,7 +597,8 @@ impl LockCoordinator {
         // ── Strategy 3: pamtester ──
         eprintln!("[lock-coord] trying pamtester");
         let user = resolve_user();
-        match tokio::process::Command::new("pamtester")
+        let _pam_bin3 = find_bin("pamtester").unwrap_or_else(|| std::path::PathBuf::from("pamtester"));
+        match tokio::process::Command::new(&_pam_bin3)
             .args(["login", &user, "authenticate"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -666,7 +708,8 @@ impl LockCoordinator {
     }
 
     fn list_outputs() -> Vec<String> {
-        let out = Command::new("swaymsg")
+        let sway_bin = find_bin("swaymsg").unwrap_or_else(|| std::path::PathBuf::from("swaymsg"));
+        let out = Command::new(&sway_bin)
             .args(["-t", "get_outputs", "-r"])
             .output()
             .ok();
