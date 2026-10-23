@@ -1,14 +1,17 @@
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Stack};
-use iced::{Alignment, Color, Element, Length};
+use iced::{Alignment, Color, Element, Length, Padding};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use tokio::process::Command;
 
+use crate::config::settings::ShellSettings;
 use crate::config::theme::ShellTheme;
-use crate::style::shape_box::{ShapeBox, ShapeType};
+use crate::style::shape_box::{ShapeBox, ShapeType, SlantSide};
 use crate::style::TextExt;
+
+pub const DICT_SEARCH_ID: &str = "dict_search";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeaningEntry {
@@ -23,6 +26,7 @@ pub enum DictMessage {
     DefinitionsLoaded(String, Vec<MeaningEntry>),
     CopyDefinition(String),
     Dismiss,
+    Refocus,
 }
 
 pub struct DictionaryOverlay {
@@ -68,7 +72,7 @@ impl DictionaryOverlay {
         base.join("moon_dict_cache.json")
     }
 
-    fn load_cache() -> HashMap<String, Vec<MeaningEntry>> {
+    pub fn load_cache() -> HashMap<String, Vec<MeaningEntry>> {
         let path = Self::cache_path();
         if path.exists() {
             if let Ok(raw) = fs::read_to_string(&path) {
@@ -151,17 +155,83 @@ impl DictionaryOverlay {
         results
     }
 
-    pub fn view<'a>(&'a self, theme: &ShellTheme) -> Element<'a, DictMessage> {
-        let input = text_input("Type word to look up [Enter to search]...", &self.word_query)
+    pub fn view<'a>(&'a self, theme: &'a ShellTheme, settings: &ShellSettings) -> Element<'a, DictMessage> {
+        let (win_w, win_h) = settings.get_window_size("dictionary", 820, 600);
+
+        let cut_f = theme.overlay_cut;
+        let angle_deg = theme.overlay_angle;
+        let rad = angle_deg.to_radians();
+        let sqrt2 = std::f32::consts::SQRT_2;
+        let dx = (cut_f * rad.cos() * sqrt2).min(win_w * 0.45).max(0.0);
+        let dy = (cut_f * rad.sin() * sqrt2).min(win_h * 0.45).max(0.0);
+
+        let pad_top = 18.0_f32;
+        let pad_bottom = 16.0_f32;
+
+        let search_inward = if dy > pad_top {
+            (dx * (1.0 - (pad_top / dy))).max(0.0) + 16.0
+        } else {
+            16.0
+        };
+
+        let list_top_inset = if dy > 72.0 {
+            (dx * (1.0 - (72.0 / dy))).max(0.0) + 16.0
+        } else {
+            16.0
+        };
+        let list_bottom_inset = if dy > 45.0 {
+            (dx * (1.0 - (45.0 / dy))).max(0.0) + 16.0
+        } else {
+            16.0
+        };
+        let list_side_inset = list_top_inset.max(list_bottom_inset).max(20.0);
+
+        let input = text_input("Type a word and press Enter...", &self.word_query)
+            .id(DICT_SEARCH_ID)
             .on_input(DictMessage::InputChanged)
             .on_submit(DictMessage::SearchWord)
-            .padding(14)
-            .size(theme.font_size_overlay);
+            .padding(Padding { top: 12.0, right: 24.0, bottom: 12.0, left: 24.0 })
+            .size(theme.font_size_overlay)
+            .width(Length::Fill)
+            .style(move |_t, status| text_input::Style {
+                background: iced::Background::Color(theme.surface_alt),
+                border: iced::Border {
+                    color: match status {
+                        text_input::Status::Focused => theme.focus,
+                        text_input::Status::Hovered => theme.border,
+                        _ => theme.border,
+                    },
+                    width: theme.control_border_width,
+                    radius: 8.0.into(),
+                },
+                icon: theme.muted,
+                placeholder: theme.muted,
+                value: theme.text,
+                selection: theme.focus,
+            });
 
-        let mut list_col = column![].spacing(8);
+        let input_row = container(input)
+            .width(Length::Fill)
+            .padding(Padding {
+                top: 0.0,
+                right: search_inward,
+                bottom: 0.0,
+                left: search_inward,
+            });
+
+        // Slanted definition rows
+        let mut list_col = column![].spacing(6).width(Length::Fill);
         for item in &self.active_definitions {
             let def_clone = item.definition.clone();
-            let row_item = button(
+
+            let item_bg = ShapeBox::new()
+                .shape(ShapeType::Slant { left: SlantSide::Left, right: SlantSide::Left })
+                .background(theme.background)
+                .border(theme.border, theme.control_border_width)
+                .slant_width(8.0)
+                .size(Length::Fill, Length::Fixed(60.0));
+
+            let item_content = container(
                 row![
                     text(format!("[{}]", item.part_of_speech))
                         .size(12)
@@ -173,45 +243,68 @@ impl DictionaryOverlay {
                         .width(Length::Fill),
                 ]
                 .spacing(10)
-                .align_y(Alignment::Center),
+                .align_y(Alignment::Center)
+                .padding(Padding { top: 0.0, right: 20.0, bottom: 0.0, left: 20.0 })
             )
-            .on_press(DictMessage::CopyDefinition(def_clone))
-            .padding([8, 12])
             .width(Length::Fill)
-            .style(|_t, _s| button::Style { background: None, ..Default::default() });
+            .height(Length::Fill)
+            .align_y(Alignment::Center);
 
-            list_col = list_col.push(row_item);
+            let item_btn = button(Stack::new().push(item_bg.view()).push(item_content))
+                .on_press(DictMessage::CopyDefinition(def_clone))
+                .padding(0)
+                .width(Length::Fill)
+                .height(Length::Fixed(60.0))
+                .style(|_t, _s| button::Style { background: None, ..Default::default() });
+
+            list_col = list_col.push(item_btn);
         }
 
+        let list_container = container(scrollable(list_col).height(Length::Fill).width(Length::Fill))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(Padding {
+                top: list_top_inset,
+                right: list_side_inset,
+                bottom: list_bottom_inset,
+                left: list_side_inset,
+            });
+
+        let footer = container(
+            text("Enter to search  •  Click definition to copy  •  ESC dismiss")
+                .size(11)
+                .color(theme.muted)
+                .align_x(Alignment::Center),
+        )
+        .width(Length::Fill);
+
         let card_bg = ShapeBox::new()
-            .shape(ShapeType::Rounded(12))
+            .shape(ShapeType::AngledHexagon { cut: cut_f, angle_deg })
             .background(theme.background)
-            .border(theme.border, theme.border_width);
+            .border(theme.border, theme.border_width)
+            .size(Length::Fixed(win_w), Length::Fixed(win_h));
 
         let card_content = container(
-            column![
-                text("📖 DICTIONARY")
-                    .size(theme.font_size_overlay)
-                    .color(theme.text),
-                input,
-                scrollable(list_col).height(Length::Fill),
-                text("Click definition to copy  •  ESC to dismiss")
-                    .size(11)
-                    .color(theme.muted)
-                    .align_x(Alignment::Center),
-            ]
-            .spacing(14)
-            .padding(20),
+            column![input_row, list_container, footer]
+                .spacing(12)
+                .width(Length::Fill)
+                .height(Length::Fill),
         )
-        .width(Length::Fixed(820.0))
-        .height(Length::Fixed(600.0));
+        .padding(Padding {
+            top: pad_top,
+            right: 0.0,
+            bottom: pad_bottom,
+            left: 0.0,
+        })
+        .width(Length::Fixed(win_w))
+        .height(Length::Fixed(win_h));
 
         let card = Stack::new().push(card_bg.view()).push(card_content);
 
         let backdrop = button(container(column![]).width(Length::Fill).height(Length::Fill))
             .on_press(DictMessage::Dismiss)
             .style(|_t, _s| button::Style {
-                background: Some(iced::Background::Color(Color::from_rgba8(0, 0, 0, 0.6))),
+                background: Some(iced::Background::Color(Color::from_rgba8(0, 0, 0, 0.65))),
                 ..Default::default()
             });
 

@@ -20,6 +20,7 @@
           freetype
           pipewire
           pam
+          pamtester
           tesseract
           imagemagick
           wl-clipboard

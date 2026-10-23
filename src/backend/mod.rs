@@ -2,6 +2,7 @@ pub mod annotator_ipc;
 pub mod audio;
 pub mod borg;
 pub mod clock;
+pub mod lock_coordinator;
 pub mod mpris;
 pub mod notif_dbus;
 pub mod podman_twitch;

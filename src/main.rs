@@ -20,6 +20,7 @@ fn detect_notif_surface(args: &[String]) -> bool {
 
 fn detect_standalone_overlay(args: &[String]) -> Option<OverlayTarget> {
     for (i, arg) in args.iter().enumerate() {
+        if arg == "--lockscreen-instance" { return Some(OverlayTarget::Lockscreen); }
         if arg == "--annotator-session" { return Some(OverlayTarget::Annotator); }
         if arg == "--overlay" || arg == "--ipc" {
             if let Some(target_str) = args.get(i + 1) {
@@ -165,6 +166,21 @@ fn resolve_exe() -> std::path::PathBuf {
 
 pub fn main() -> Result<(), iced_layershell::Error> {
     let args: Vec<String> = std::env::args().collect();
+
+    // ── Lock auth test mode ──
+    if args.iter().any(|a| a == "--test-lock-auth") {
+        moon_beauty_shell::backend::lock_coordinator::LockCoordinator::run_auth_test();
+    }
+
+    // ── Multi-monitor lock coordinator (parent mode) ──
+    // If called as `--lockscreen` (and NOT `--lockscreen-instance`),
+    // act as the coordinator: spawn one child per output, broker auth,
+    // watch hotplug. Blocks forever (exits via process::exit).
+    if args.iter().any(|a| a == "--lockscreen")
+        && !args.iter().any(|a| a == "--lockscreen-instance")
+    {
+        moon_beauty_shell::backend::lock_coordinator::LockCoordinator::spawn();
+    }
 
     // --quickshot was replaced by --screenshot --annotate.
     if args.iter().any(|a| a == "--quickshot" || a == "quickshot") {
@@ -596,6 +612,21 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             binded_output_name,
             ..Default::default()
         }
+    } else if standalone_target.as_ref() == Some(&OverlayTarget::Lockscreen) {
+        // Each lock child is bound to a specific output (or the primary if
+        // no arg was provided — single-monitor fallback).
+        let lock_output = std::env::var("MBS_LOCK_OUTPUT").ok()
+            .filter(|s| !s.is_empty())
+            .or(binded_output_name.clone());
+        LayerShellSettings {
+            size: None,
+            exclusive_zone: -1,
+            anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
+            layer: Layer::Overlay,
+            keyboard_interactivity: KeyboardInteractivity::Exclusive,
+            binded_output_name: lock_output,
+            ..Default::default()
+        }
     } else if standalone_target.as_ref() == Some(&OverlayTarget::Annotator) {
         // Floating annotator window. wlr-layer-shell centers when all four
         // sides are anchored with a fixed size. Overlay layer keeps it above
@@ -915,7 +946,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
         };
 
         let notif_screen_at_startup = settings.notif_screen_name.clone();
-        let app = Self {
+        let mut app = Self {
             settings_ui: SettingsOverlay::new(&settings),
             settings,
             theme,
@@ -1034,6 +1065,19 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 },
                 |_| Message::Pass(PassMessage::Refocus),
             ));
+        } else if matches!(app.active_overlay, Some(OverlayTarget::Dictionary)) {
+            init_tasks.push(
+                iced::widget::text_input::focus(moon_beauty_shell::overlays::dictionary::DICT_SEARCH_ID)
+                    .map(Message::Dict),
+            );
+            init_tasks.push(Command::perform(
+                async {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                },
+                |_| Message::Dict(DictMessage::Refocus),
+            ));
+        } else if matches!(app.active_overlay, Some(OverlayTarget::Lockscreen)) {
+            // No widget to focus — keyboard capture is via subscription
         } else if matches!(app.active_overlay, Some(OverlayTarget::Clipboard)) {
             init_tasks.push(Command::perform(
                 ClipboardOverlay::reload(),
@@ -1631,6 +1675,24 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                         }, |_| Message::DismissActiveOverlay);
                     }
 
+                    if let Some(definition) = cmd.strip_prefix("dict:") {
+                        // Ignore sentinel entries (pending/hint)
+                        if definition == "__pending__" || definition == "__hint__" {
+                            return Command::none();
+                        }
+                        let def = definition.to_string();
+                        eprintln!("[launcher] dict copy: {}...", &def.chars().take(40).collect::<String>());
+                        let _ = std::process::Command::new("wl-copy").arg(&def).spawn();
+                        let _ = std::process::Command::new("notify-send")
+                            .args(["-a", "Dictionary", "Copied", &def])
+                            .spawn();
+                        if self.is_standalone {
+                            std::process::exit(0);
+                        }
+                        self.active_overlay = None;
+                        return Command::none();
+                    }
+
                     if let Some(key) = cmd.strip_prefix("pass:") {
                         eprintln!("[launcher] pass copy: {}", key);
                         // Detached: `pass -c` may block on GPG pinentry, so we
@@ -1928,11 +1990,34 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                     if self.is_standalone { std::process::exit(0); }
                     self.active_overlay = None;
                 }
+                DictMessage::Refocus => {
+                    return iced::widget::text_input::focus(
+                        moon_beauty_shell::overlays::dictionary::DICT_SEARCH_ID,
+                    ).map(Message::Dict);
+                }
                 DictMessage::SearchWord => {
                     let w = self.dict.word_query.clone();
+                    // Check cache first
+                    if let Some(cached) = self.dict.cache.get(&w.to_lowercase()).cloned() {
+                        self.dict.update(DictMessage::DefinitionsLoaded(w, cached));
+                        return Command::none();
+                    }
                     return Command::perform(async move { (w.clone(), DictionaryOverlay::lookup_word(&w).await) }, |(w, defs)| {
                         Message::Dict(DictMessage::DefinitionsLoaded(w, defs))
                     });
+                }
+                DictMessage::CopyDefinition(def) => {
+                    if self.is_standalone {
+                        let def = def.clone();
+                        let rt = tokio::runtime::Runtime::new().unwrap();
+                        rt.block_on(async move {
+                            let _ = tokio::process::Command::new("wl-copy").arg(&def).status().await;
+                        });
+                        std::process::exit(0);
+                    }
+                    return Command::perform(async move {
+                        let _ = tokio::process::Command::new("wl-copy").arg(&def).status().await;
+                    }, |_| Message::DismissActiveOverlay);
                 }
                 _ => self.dict.update(msg),
             },
@@ -2186,18 +2271,23 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 }
             }
             Message::Lock(msg) => match msg {
-                LockMessage::SubmitUnlock => {
-                    let pass = self.lockscreen.password_buffer.clone();
-                    return Command::perform(async move { LockscreenOverlay::authenticate_pam(&pass).await }, |ok| {
-                        if ok { Message::Lock(LockMessage::UnlockSuccess) } else { Message::Lock(LockMessage::UnlockFailed) }
-                    });
+                LockMessage::KeyPress(key) => {
+                    self.lockscreen.forward_key(&key);
+                    return Command::none();
                 }
-                LockMessage::UnlockSuccess => {
-                    self.lockscreen.update(msg);
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
+                LockMessage::PollIpc => {
+                    if let Some(effect) = self.lockscreen.drain_ipc() {
+                        match effect {
+                            LockMessage::AuthSuccess => {
+                                eprintln!("[lock] coordinator signaled success — exiting");
+                                std::process::exit(0);
+                            }
+                            _ => {}
+                        }
+                    }
+                    return Command::none();
                 }
-                _ => self.lockscreen.update(msg),
+                _ => {}
             },
             Message::CollapseTray => {
                 self.close_tray();
@@ -2365,6 +2455,66 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             iced::Subscription::none()
         };
 
+        let lock_key_sub = if matches!(self.active_overlay, Some(OverlayTarget::Lockscreen)) {
+            iced::keyboard::on_key_press(|key, mods| {
+                let mods_str = format!(
+                    "shift={} ctrl={} alt={} logo={}",
+                    mods.shift(), mods.control(), mods.alt(), mods.logo()
+                );
+                // Log EVERY key press that reaches the lockscreen. If a key
+                // you typed doesn't show up here, the loss is upstream of our
+                // code (compositor, surface focus, subscription registration).
+                eprintln!("[lock-key-raw] {:?} mods({})", key, mods_str);
+
+                match &key {
+                    iced::keyboard::Key::Character(c) => {
+                        // Normalize shift+lowercase-ASCII → uppercase. Iced on
+                        // layer-shell surfaces sometimes reports the unshifted
+                        // character even though mods.shift() is true (known
+                        // bug in the winit→iced KeyboardEvent path). This is
+                        // idempotent if iced already applied shift:
+                        // `"P".to_uppercase() == "P"`.
+                        let normalized: String = if mods.shift()
+                            && !c.is_empty()
+                            && c.chars().all(|ch| ch.is_ascii_lowercase())
+                        {
+                            c.to_uppercase()
+                        } else {
+                            c.to_string()
+                        };
+                        eprintln!(
+                            "[lock-key] Character({:?}) shift={} → sending {:?}",
+                            c, mods.shift(), normalized
+                        );
+                        Some(Message::Lock(LockMessage::KeyPress(
+                            iced::keyboard::Key::Character(normalized.into()),
+                        )))
+                    }
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => {
+                        eprintln!("[lock-key] Backspace → send");
+                        Some(Message::Lock(LockMessage::KeyPress(key.clone())))
+                    }
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
+                        eprintln!("[lock-key] Enter → SUBMIT");
+                        Some(Message::Lock(LockMessage::KeyPress(key.clone())))
+                    }
+                    other => {
+                        eprintln!("[lock-key] ignoring {:?}", other);
+                        None
+                    }
+                }
+            })
+        } else {
+            iced::Subscription::none()
+        };
+
+        let lock_ipc_sub = if matches!(self.active_overlay, Some(OverlayTarget::Lockscreen)) {
+            iced::time::every(std::time::Duration::from_millis(16))
+                .map(|_| Message::Lock(LockMessage::PollIpc))
+        } else {
+            iced::Subscription::none()
+        };
+
         let esc_sub = if self.annotator.text_editing.is_some() {
             iced::keyboard::on_key_press(|key, _mods| match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
@@ -2372,6 +2522,9 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 }
                 _ => None,
             })
+        } else if matches!(self.active_overlay, Some(OverlayTarget::Lockscreen)) {
+            // Lock screen cannot be dismissed with Escape
+            iced::Subscription::none()
         } else {
             iced::keyboard::on_key_press(|key, _modifiers| {
                 if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
@@ -2439,7 +2592,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
         };
         iced::Subscription::batch(vec![clock_sub, toast_sub, hw_sub, weather_sub, anim_sub, esc_sub,
             enter_sub, ipc_sub, notif_sub, resize_sub, clip_sub, annotator_sub, text_typing_sub,
-            launcher_sub])
+            launcher_sub, lock_key_sub, lock_ipc_sub])
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -2500,7 +2653,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             Some(OverlayTarget::Power) => Some(self.power.view(&self.theme).map(Message::Power)),
             Some(OverlayTarget::Todo) => Some(self.todo.view(&self.theme).map(Message::Todo)),
             Some(OverlayTarget::Reminders) => Some(self.reminders.view(&self.theme).map(Message::Reminders)),
-            Some(OverlayTarget::Dictionary) => Some(self.dict.view(&self.theme).map(Message::Dict)),
+            Some(OverlayTarget::Dictionary) => Some(self.dict.view(&self.theme, &self.settings).map(Message::Dict)),
             Some(OverlayTarget::Unicode) => Some(self.unicode.view(&self.theme).map(Message::Unicode)),
             Some(OverlayTarget::Web) => Some(self.web.view(&self.theme).map(Message::Web)),
             Some(OverlayTarget::Amogus) => Some(self.amogus.view(&self.theme).map(Message::Amogus)),

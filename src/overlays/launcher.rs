@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use tokio::process::Command;
 
 use super::calc::CalculatorOverlay;
+use super::dictionary::{DictionaryOverlay, MeaningEntry};
 use super::pass::PassOverlay;
 use crate::config::settings::ShellSettings;
 use crate::config::theme::ShellTheme;
@@ -29,6 +30,7 @@ pub enum LauncherMessage {
     SelectPrev,
     SelectDown,
     SelectUp,
+    DictLookupReady(String, Vec<MeaningEntry>),
 }
 
 pub const LAUNCHER_SEARCH_ID: &str = "launcher_search";
@@ -39,6 +41,8 @@ pub struct AppLauncher {
     pub filtered_apps: Vec<AppEntry>,
     pub focus_requested: bool,
     pub selected_index: usize,
+    dict_cache: std::collections::HashMap<String, Vec<MeaningEntry>>,
+    dict_pending: Option<String>,
 }
 
 impl Default for AppLauncher {
@@ -70,6 +74,8 @@ impl AppLauncher {
             all_apps,
             focus_requested: true,
             selected_index: 0,
+            dict_cache: DictionaryOverlay::load_cache(),
+            dict_pending: None,
         }
     }
 
@@ -272,6 +278,81 @@ impl AppLauncher {
         // Currency
         if let Some(r) = Self::convert_currency(num, unit) { return Some(r); }
         None
+    }
+
+    fn compute_dict_entries(&self, query: &str) -> Option<Vec<AppEntry>> {
+        let q = query.trim_start();
+        let lower = q.to_lowercase();
+
+        let word_part = if let Some(rest) = lower.strip_prefix("def ") {
+            rest
+        } else if let Some(rest) = lower.strip_prefix("define ") {
+            rest
+        } else if let Some(rest) = lower.strip_prefix("dict ") {
+            rest
+        } else if let Some(rest) = lower.strip_prefix("dictionary ") {
+            rest
+        } else if lower == "def" || lower == "define" || lower == "dict" || lower == "dictionary" {
+            // Show hint
+            return Some(vec![AppEntry {
+                name: "Dictionary — type a word after 'def '".to_string(),
+                exec: "dict:__hint__".to_string(),
+                icon: ">".to_string(),
+                icon_path: None,
+            }]);
+        } else {
+            return None;
+        };
+
+        let word = word_part.trim().split_whitespace().next().unwrap_or("");
+        if word.len() < 2 {
+            return Some(vec![AppEntry {
+                name: "Dictionary — type a word after 'def '".to_string(),
+                exec: "dict:__hint__".to_string(),
+                icon: ">".to_string(),
+                icon_path: None,
+            }]);
+        }
+
+        if let Some(defs) = self.dict_cache.get(word) {
+            return Some(defs.iter().map(|d| {
+                let truncated = if d.definition.chars().count() > 80 {
+                    let mut s: String = d.definition.chars().take(77).collect();
+                    s.push_str("...");
+                    s
+                } else {
+                    d.definition.clone()
+                };
+                AppEntry {
+                    name: format!("[{}] {}", d.part_of_speech, truncated),
+                    exec: format!("dict:{}", d.definition),
+                    icon: ">".to_string(),
+                    icon_path: None,
+                }
+            }).collect());
+        }
+
+        // Not cached — show pending placeholder
+        Some(vec![AppEntry {
+            name: format!("Looking up '{}'...", word),
+            exec: "dict:__pending__".to_string(),
+            icon: ">".to_string(),
+            icon_path: None,
+        }])
+    }
+
+    fn dict_word_to_lookup(&self, query: &str) -> Option<String> {
+        let q = query.trim_start();
+        let lower = q.to_lowercase();
+        let word_part = lower.strip_prefix("def ")
+            .or_else(|| lower.strip_prefix("define "))
+            .or_else(|| lower.strip_prefix("dict "))
+            .or_else(|| lower.strip_prefix("dictionary "))?;
+        let word = word_part.trim().split_whitespace().next().unwrap_or("");
+        if word.len() < 2 { return None; }
+        if self.dict_cache.contains_key(word) { return None; }
+        if self.dict_pending.as_deref() == Some(word) { return None; }
+        Some(word.to_string())
     }
 
     /// Cached pass-store entries — reads the filesystem once per launcher session.
@@ -495,6 +576,15 @@ impl AppLauncher {
                 }
                 return iced::Task::none();
             }
+            LauncherMessage::DictLookupReady(word, defs) => {
+                eprintln!("[launcher-dict] lookup done: {:?} → {} definitions", word, defs.len());
+                self.dict_cache.insert(word.clone(), defs);
+                if self.dict_pending.as_deref() == Some(&word) {
+                    self.dict_pending = None;
+                }
+                let q = self.search_query.clone();
+                return self.update(LauncherMessage::SearchChanged(q));
+            }
             LauncherMessage::SelectDown => {
                 if !self.filtered_apps.is_empty() {
                     let math_count = self.filtered_apps.iter()
@@ -539,6 +629,28 @@ impl AppLauncher {
                     }
                     f
                 };
+
+                // Dictionary search — takes priority if the query starts with 'def ', 'dict ', etc.
+                if let Some(dict_entries) = self.compute_dict_entries(&q) {
+                    eprintln!("[launcher-dict] {:?} → {} entries", q, dict_entries.len());
+                    let mut dict_items = dict_entries;
+                    dict_items.append(&mut filtered);
+                    filtered = dict_items;
+
+                    // Fire lookup if word not cached and not pending
+                    if let Some(word) = self.dict_word_to_lookup(&q) {
+                        self.dict_pending = Some(word.clone());
+                        self.filtered_apps = filtered;
+                        let w1 = word.clone();
+                        let w2 = word.clone();
+                        return iced::Task::perform(
+                            async move {
+                                DictionaryOverlay::lookup_word(&w1).await
+                            },
+                            move |defs| LauncherMessage::DictLookupReady(w2.clone(), defs),
+                        );
+                    }
+                }
 
                 // Password store search — takes priority if the query starts with a pass-prefix
                 if let Some(pass_entries) = Self::compute_pass_entries(&q) {

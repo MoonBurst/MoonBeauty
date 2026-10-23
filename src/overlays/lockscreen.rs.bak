@@ -1,0 +1,268 @@
+use chrono::Local;
+use iced::widget::{column, container, text};
+use iced::{Alignment, Color, Element, Length, Padding};
+use std::sync::mpsc;
+use crate::backend::lock_coordinator::LockIpc;
+
+use crate::config::theme::ShellTheme;
+use crate::style::shape_box::{ShapeBox, ShapeType};
+use crate::style::TextExt;
+
+#[derive(Debug, Clone)]
+pub enum LockMessage {
+    KeyPress(iced::keyboard::Key),
+    PollIpc,
+    AuthFailed,
+    AuthSuccess,
+}
+
+pub struct LockscreenOverlay {
+    pub buffer_len: usize,
+    pub auth_failed: bool,
+    pub is_caps_lock: bool,
+    ipc_tx: Option<mpsc::Sender<LockIpc>>,
+    ipc_rx: Option<mpsc::Receiver<LockIpc>>,
+}
+
+impl Default for LockscreenOverlay {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LockscreenOverlay {
+    pub fn new() -> Self {
+        let (ipc_tx, ipc_rx) = match Self::connect_coordinator() {
+            Some(pair) => {
+                eprintln!("[lock-child] connected to coordinator");
+                (Some(pair.0), Some(pair.1))
+            }
+            None => {
+                eprintln!("[lock-child] !!! no coordinator socket — lock will be inoperable");
+                (None, None)
+            }
+        };
+        Self {
+            buffer_len: 0,
+            auth_failed: false,
+            is_caps_lock: Self::check_caps_lock(),
+            ipc_tx,
+            ipc_rx,
+        }
+    }
+
+    /// Connect to coordinator. Returns (tx_to_send_keys, rx_for_updates).
+    /// Uses two threads: one reads coordinator messages, one writes ours.
+    fn connect_coordinator() -> Option<(mpsc::Sender<LockIpc>, mpsc::Receiver<LockIpc>)> {
+        let path = std::env::var("MBS_LOCK_SOCKET").ok()?;
+        let stream = std::os::unix::net::UnixStream::connect(&path).ok()?;
+        let reader_stream = stream.try_clone().ok()?;
+        let writer_stream = stream;
+
+        let (out_tx, out_rx) = mpsc::channel::<LockIpc>();
+        let (in_tx, in_rx) = mpsc::channel::<LockIpc>();
+
+        // Reader thread: coordinator → us
+        std::thread::spawn(move || {
+            use std::io::{BufRead, BufReader};
+            let reader = BufReader::new(reader_stream);
+            for line in reader.lines() {
+                let Ok(line) = line else { break; };
+                let Ok(msg) = serde_json::from_str::<LockIpc>(&line) else { continue; };
+                if in_tx.send(msg).is_err() { break; }
+            }
+            eprintln!("[lock-child] coordinator reader closed");
+        });
+
+        // Writer thread: us → coordinator
+        std::thread::spawn(move || {
+            use std::io::Write;
+            let mut w = writer_stream;
+            while let Ok(msg) = out_rx.recv() {
+                let mut line = serde_json::to_string(&msg).unwrap_or_default();
+                line.push('\n');
+                if w.write_all(line.as_bytes()).is_err() { break; }
+            }
+            eprintln!("[lock-child] coordinator writer closed");
+        });
+
+        Some((out_tx, in_rx))
+    }
+
+    pub fn check_caps_lock() -> bool {
+        for i in 0..6 {
+            let p = format!("/sys/class/leds/input{}::capslock/brightness", i);
+            if let Ok(c) = std::fs::read_to_string(p) {
+                if c.trim() == "1" {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Drain pending IPC messages. Returns one of:
+    ///   Some(LockMessage::AuthSuccess)  — coordinator signaled success
+    ///   None otherwise (updates applied in-place)
+    pub fn drain_ipc(&mut self) -> Option<LockMessage> {
+        let mut result = None;
+        let Some(rx) = self.ipc_rx.as_ref() else { return None; };
+        while let Ok(msg) = rx.try_recv() {
+            match msg {
+                LockIpc::BufferUpdate(n) => {
+                    self.buffer_len = n;
+                    self.auth_failed = false;
+                }
+                LockIpc::Reset => {
+                    self.buffer_len = 0;
+                    self.auth_failed = true;
+                }
+                LockIpc::Success => {
+                    result = Some(LockMessage::AuthSuccess);
+                }
+                _ => {}
+            }
+        }
+        result
+    }
+
+    /// Forward a key event to the coordinator. Applies optimistic local
+    /// updates so dots appear immediately without waiting for the round-trip
+    /// confirmation. Coordinator's BufferUpdate will overwrite if drift occurs.
+    pub fn forward_key(&mut self, key: &iced::keyboard::Key) {
+        let (msg, delta) = match key {
+            iced::keyboard::Key::Character(c) => {
+                (Some(LockIpc::Key(c.to_string())), 1_i32)
+            }
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => {
+                (Some(LockIpc::Backspace), -1_i32)
+            }
+            iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
+                (Some(LockIpc::Submit), 0_i32)
+            }
+            _ => (None, 0_i32),
+        };
+
+        let Some(msg) = msg else { return; };
+        if let Some(tx) = self.ipc_tx.as_ref() {
+            let _ = tx.send(msg);
+        }
+
+        // Optimistic local update — instant visual feedback
+        if delta > 0 {
+            self.buffer_len = self.buffer_len.saturating_add(delta as usize);
+        } else if delta < 0 {
+            self.buffer_len = self.buffer_len.saturating_sub((-delta) as usize);
+        }
+    }
+
+    pub fn view<'a>(&'a self, theme: &'a ShellTheme) -> Element<'a, LockMessage> {
+        let time_str = Local::now().format("%H:%M").to_string();
+        let date_str = Local::now().format("%A, %B %d").to_string();
+
+        let card_w = 640.0_f32;
+        let card_h = 460.0_f32;
+        let cut_f = theme.overlay_cut;
+        let angle_deg = theme.overlay_angle;
+
+        // Bordered password field
+        let (display_text, display_color, field_border) = if self.auth_failed {
+            ("Incorrect password".to_string(), theme.danger, theme.danger)
+        } else if self.buffer_len == 0 {
+            ("Enter password…".to_string(), theme.muted, theme.border)
+        } else {
+            let mut s = String::new();
+            for i in 0..self.buffer_len {
+                if i > 0 && i % 4 == 0 {
+                    s.push(' ');
+                }
+                s.push('•');
+            }
+            (s, theme.text_strong, theme.border)
+        };
+
+        let dots_row = container(
+            container(
+                text(display_text)
+                    .size(18)
+                    .bold()
+                    .color(display_color)
+                    .align_x(Alignment::Center)
+                    .wrapping(iced::widget::text::Wrapping::None)
+            )
+            .width(Length::Fixed(280.0))
+            .height(Length::Fixed(44.0))
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .style(move |_t| container::Style {
+                background: Some(iced::Background::Color(theme.surface_alt)),
+                border: iced::Border {
+                    color: field_border,
+                    width: theme.control_border_width.min(2.0),
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
+        )
+        .width(Length::Fill)
+        .center_x(Length::Fill)
+        .clip(true)
+        .padding(Padding { top: 28.0, right: 0.0, bottom: 0.0, left: 0.0 });
+
+        let mut inner: iced::widget::Column<'a, LockMessage> = column![
+            text(time_str).size(64).bold().color(theme.text_strong),
+            text(date_str).size(16).color(theme.muted),
+        ]
+        .spacing(2)
+        .align_x(Alignment::Center);
+
+        inner = inner.push(dots_row);
+
+        if self.is_caps_lock {
+            inner = inner.push(
+                container(text("⇪ CAPS LOCK ON").size(11).bold().color(theme.warning))
+                    .padding(Padding { top: 12.0, right: 0.0, bottom: 0.0, left: 0.0 })
+            );
+        }
+
+        inner = inner.push(
+            container(text("Type to unlock  •  Enter to submit").size(10).color(theme.muted))
+                .padding(Padding { top: 24.0, right: 0.0, bottom: 0.0, left: 0.0 })
+        );
+
+        let card_content = container(inner)
+            .width(Length::Fixed(card_w - 80.0))
+            .height(Length::Fixed(card_h - 80.0))
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
+            .clip(true);
+
+        let card_bg = ShapeBox::new()
+            .shape(ShapeType::AngledHexagon { cut: cut_f, angle_deg })
+            .background(theme.background)
+            .border(
+                if self.auth_failed { theme.danger } else { theme.text },
+                theme.border_width,
+            )
+            .size(Length::Fixed(card_w), Length::Fixed(card_h));
+
+        let centered = container(card_content)
+            .width(Length::Fixed(card_w))
+            .height(Length::Fixed(card_h))
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center);
+
+        let card = iced::widget::Stack::new()
+            .push(card_bg.view())
+            .push(centered);
+
+        container(container(card).center_x(Length::Fill).center_y(Length::Fill))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_t| container::Style {
+                background: Some(iced::Background::Color(theme.background)),
+                ..Default::default()
+            })
+            .into()
+    }
+}
