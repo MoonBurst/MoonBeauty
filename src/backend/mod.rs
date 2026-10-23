@@ -14,14 +14,15 @@ pub use borg::{BorgBackend, BorgStatus};
 pub use clock::{CalendarViewData, ClockBackend, WorldZoneColumn};
 pub use mpris::{MprisBackend, MprisTrack};
 pub use podman_twitch::{PodmanBackend, PodmanStatus, WatcherDetails};
-pub use system::{BatteryMetrics, CpuMetrics, GpuMetrics, NetMetrics, RamMetrics, SystemCollector};
+pub use system::{BatteryMetrics, CpuMetrics, GpuInfo, GpuMetrics, NetMetrics, RamMetrics, SystemCollector};
 pub use weather::{WeatherAlert, WeatherBackend, WeatherData};
-pub use tray_watcher::{TrayItem, fetch_tray_items, activate_tray_item, context_menu_tray_item};
+pub use tray_watcher::{TrayItem, TrayMenuItem, fetch_tray_items, activate_tray_item, get_menu_tree, trigger_menu_item};
 
 #[derive(Debug, Clone)]
 pub struct UnifiedTelemetry {
     pub cpu: CpuMetrics,
     pub gpu: GpuMetrics,
+    pub gpu_selected_idx: usize,
     pub ram: RamMetrics,
     pub net: NetMetrics,
     pub battery: BatteryMetrics,

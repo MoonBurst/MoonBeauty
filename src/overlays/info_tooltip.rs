@@ -1,15 +1,17 @@
-use iced::widget::{button, column, container, horizontal_space, row, text, Stack};
-use iced::{Alignment, Color, Element, Length, Padding, Task, Theme};
+use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke};
+use iced::widget::{button, column, container, horizontal_space, row, text, text_input, Space, Stack};
+use iced::{Alignment, Color, Element, Length, Padding, Point, Rectangle, Task, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use iced_layershell::Application;
 use std::time::Instant;
 
+use crate::backend::system::ProcessItem;
 use crate::backend::{BorgBackend, BorgStatus, ClockBackend, MprisBackend, MprisTrack,
                      PodmanBackend, PodmanStatus, SystemCollector};
 use crate::config::theme::ShellTheme;
 use crate::config::ShellSettings;
-use crate::style::shape_box::SlantSide;
+use crate::style::shape_box::{ShapeBox, ShapeType, SlantSide};
 use crate::style::TextExt;
 
 const W_START: f32 = 130.0;
@@ -25,7 +27,8 @@ pub enum InfoData {
 }
 
 #[derive(Debug, Clone)]
-pub enum Message { Tick, Loaded(InfoData), Dismiss, MusicPrev, MusicNext, MusicPlayPause }
+pub enum Message { Tick, Loaded(InfoData), Dismiss, MusicPrev, MusicNext, MusicPlayPause, MusicSeek(f64), MusicSetVolume(u8), MusicOpenFolder(Option<String>), MusicTrashConfirm, MusicTrashExecute(Option<String>),
+    MusicToggleSource(usize), SearchChanged(String), KillProcess(u32), Noop }
 
 impl TryInto<iced_layershell::actions::LayershellCustomActionsWithInfo<()>> for Message {
     type Error = Message;
@@ -46,6 +49,9 @@ pub struct App {
     #[allow(dead_code)]
     slant_r: SlantSide,
     closing_at: Option<Instant>,
+    search_query: String,
+    trash_confirm: bool,
+    sources_enabled: [bool; 3],
 }
 
 impl Application for App {
@@ -59,8 +65,7 @@ impl Application for App {
         let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|s| s.parse().ok()).unwrap_or(200);
         let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|s| s.parse().ok()).unwrap_or(1920);
         let grow_right = std::env::var("MBS_GROW_RIGHT").map(|v| v == "1").unwrap_or_else(|_| cx < sw / 2);
-        let _h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
-    let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
+        let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
         let s = ShellSettings::load();
         let h = s.tooltip_height_px;
         let drop_ms = s.tooltip_drop_ms as f32;
@@ -69,7 +74,7 @@ impl Application for App {
         let sl = std::env::var("MBS_SLANT_L").ok().map(|s| if s == "R" { SlantSide::Right } else { SlantSide::Left }).unwrap_or(SlantSide::Left);
         let sr = std::env::var("MBS_SLANT_R").ok().map(|s| if s == "R" { SlantSide::Right } else { SlantSide::Left }).unwrap_or(SlantSide::Left);
 
-        let app = Self { opened: Instant::now(), mode: mode.clone(), data: None, grow_right, w, w_start, slant_l: sl, slant_r: sr, h, drop_ms, expand_ms, closing_at: None};
+        let app = Self { opened: Instant::now(), mode: mode.clone(), data: None, grow_right, w, w_start, slant_l: sl, slant_r: sr, h, drop_ms, expand_ms, closing_at: None, search_query: String::new(), trash_confirm: false, sources_enabled: [true, true, true] };
         let task = Task::perform(fetch_data(mode), Message::Loaded);
         (app, task)
     }
@@ -86,11 +91,56 @@ impl Application for App {
                 } else if self.opened.elapsed().as_millis() > AUTO_MS {
                     std::process::exit(0);
                 } }
+            Message::SearchChanged(q) => { self.search_query = q; }
+            Message::KillProcess(pid) => {
+                let target = self.mode.clone();
+                return Task::batch([
+                    Task::perform(SystemCollector::kill_process(pid), |_| Message::Noop),
+                    Task::perform(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                        match target.as_str() {
+                            "net" => {
+                                let mut sc = SystemCollector::new();
+                                let _ = sc.update_net();
+                                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                                InfoData::Net(sc.update_net())
+                            },
+                            _ => InfoData::Custom,
+                        }
+                    }, Message::Loaded)
+                ]);
+            }
+            Message::Noop => {}
             Message::Loaded(d) => { self.data = Some(d); }
             Message::Dismiss => { self.closing_at = Some(Instant::now()); }
             Message::MusicPrev => { let _ = std::process::Command::new("playerctl").arg("previous").status(); }
             Message::MusicNext => { let _ = std::process::Command::new("playerctl").arg("next").status(); }
             Message::MusicPlayPause => { let _ = std::process::Command::new("playerctl").arg("play-pause").status(); }
+            Message::MusicSeek(secs) => {
+                let secs = secs;
+                return Task::perform(async move {
+                    let _ = crate::backend::MprisBackend::set_position(secs).await;
+                }, |_| Message::Noop);
+            }
+            Message::MusicSetVolume(vol) => {
+                let vol = vol;
+                return Task::perform(async move {
+                    let _ = crate::backend::MprisBackend::set_volume(vol).await;
+                }, |_| Message::Noop);
+            }
+            Message::MusicOpenFolder(url) => {
+                return Task::perform(async move {
+                    crate::backend::MprisBackend::open_track_folder(url.as_deref()).await;
+                }, |_| Message::Noop);
+            }
+            Message::MusicToggleSource(idx) => { self.sources_enabled[idx] = !self.sources_enabled[idx]; }
+            Message::MusicTrashConfirm => { self.trash_confirm = true; }
+            Message::MusicTrashExecute(url) => {
+                self.trash_confirm = false;
+                return Task::perform(async move {
+                    crate::backend::MprisBackend::trash_current_track(url.as_deref()).await;
+                }, |_| Message::Noop);
+            }
         }
         Task::none()
     }
@@ -134,7 +184,7 @@ impl Application for App {
             border_width: theme.control_border_width,
         };
 
-        let content: Element<'_, Message> = self.build_content(&theme);
+        let content: Element<'_, Message> = self.build_content(&theme, &settings, anim.opacity);
         let clipped = crate::overlays::tooltip_engine::clip_content(content, anim.w, anim.h, self.grow_right);
         let stacked: Element<'_, Message> = Stack::new().push(bg.view()).push(clipped).into();
         crate::overlays::tooltip_engine::align_to_side(stacked, self.grow_right)
@@ -150,119 +200,605 @@ impl Application for App {
 }
 
 impl App {
-    fn build_content(&self, t: &ShellTheme) -> Element<'_, Message> {
-        let pad = Padding { top: 16.0, right: 24.0, bottom: 16.0, left: 24.0 };
-        let close: Element<'_, Message> = button(text("✕").size(11).color(t.muted)).on_press(Message::Dismiss).into();
-        let header = |title: &'static str| -> Element<'_, Message> {
-            row![text(title).size(13).bold().color(t.success), horizontal_space(), close].align_y(Alignment::Center).into()
+    fn build_content<'a>(&'a self, t: &ShellTheme, settings: &ShellSettings, alpha: f32) -> Element<'a, Message> {
+        let a = move |c: Color| Color { a: c.a * alpha, ..c };
+        let text_col = a(t.text);
+        let muted = a(t.muted);
+        let danger = a(t.danger);
+        let warning = a(t.warning);
+        let success = a(t.success);
+        let half_tt = settings.control_border_width * 0.5;
+                let success = a(t.success);
+
+        let fs = settings.tooltip_font_size;
+        let total_h = self.h as f32;
+        let bar_h = settings.bar_height.max(1) as f32;
+        let slant_h = t.slant_width * (total_h / bar_h);
+        let slant_right = self.slant_l == SlantSide::Right;
+        let tooltip_slope = slant_h / (total_h - 2.0 * half_tt);
+        let safe = 16.0;
+        let vpad = 14.0;
+        let gap = 8.0;
+        let w_f = self.w as f32;
+
+        let mut y = vpad;
+        let mut col = column![].spacing(gap).width(Length::Fill);
+
+        let mk_close = || -> Element<'a, Message> {
+            button(text("x").size(fs.saturating_sub(2).max(10)).color(muted))
+                .on_press(Message::Dismiss).padding([2, 6]).into()
         };
 
-        let body: Element<'_, Message> = match self.data.as_ref() {
-            None => column![text("Loading…").size(13).color(t.muted)].into(),
-            Some(InfoData::Calendar(c)) => {
-                let day_of_week = chrono::Local::now().format("%A").to_string();
-                let month = chrono::Local::now().format("%B %Y").to_string();
-                // Week containing today
-                let today = c.today_day;
-                let sun0 = today.saturating_sub(c.first_day_offset as u32 + 6).max(1);
-                let _ = sun0;
-                let week_start = today.saturating_sub((c.first_day_offset as u32 + 7 - (c.first_day_offset as u32 + 7)) / 1).max(1);
-                let _ = week_start;
-                // Simple 7-day strip around today
-                let start = today.saturating_sub(3).max(1);
-                let mut strip: iced::widget::Row<'_, Message> = iced::widget::Row::new().spacing(6);
-                for i in 0..7 {
-                    let d = start + i;
-                    if d > c.days_in_month { break; }
-                    let is_today = d == today;
-                    let color = if is_today { t.danger } else { t.text };
-                    let weight = if is_today { iced::font::Weight::Bold } else { iced::font::Weight::Normal };
-                    strip = strip.push(
-                        text(format!("{:>2}", d)).size(15)
-                            .color(color)
-                            .font(iced::Font { weight, ..Default::default() })
+        if let Some(d) = &self.data {
+            match d {
+                InfoData::Calendar(c) => {
+                    let header_h = fs as f32 + 16.0;
+                    let header = row![
+                        text("CALENDAR").size(fs.max(14)).bold().color(text_col).wrapping(iced::widget::text::Wrapping::None),
+                        horizontal_space(),
+                    ].align_y(Alignment::Center).width(Length::Fill);
+                    col = col.push(slanted_row(header.into(), y + header_h * 0.5, total_h, slant_h, slant_right, safe, w_f, header_h));
+                    y += header_h + gap;
+
+                    // Month Label
+                    let month_h = fs as f32 + 12.0;
+                    let month_el = row![
+                        text(&c.month_label).size(fs + 2).bold().color(text_col).width(Length::Fill).align_x(Alignment::Center),
+                    ].width(Length::Fill).into();
+                    col = col.push(slanted_row(month_el, y + month_h * 0.5, total_h, slant_h, slant_right, safe, w_f, month_h));
+                    y += month_h + gap;
+
+                    // Days of week
+                    let dow_h = fs as f32 + 4.0;
+                    let dow_el = row![
+                        text("S").size(fs).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
+                        text("M").size(fs).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
+                        text("T").size(fs).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
+                        text("W").size(fs).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
+                        text("T").size(fs).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
+                        text("F").size(fs).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
+                        text("S").size(fs).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
+                    ].width(Length::Fill).into();
+                    col = col.push(slanted_row(dow_el, y + dow_h * 0.5, total_h, slant_h, slant_right, safe, w_f, dow_h));
+                    y += dow_h + gap;
+
+                    let mut day = 1;
+                    let cell_h = fs as f32 + 8.0;
+
+                    for _row in 0..6 {
+                        let mut row_widgets = row![].width(Length::Fill);
+                        for col_idx in 0..7 {
+                            if _row == 0 && col_idx < c.first_day_offset {
+                                row_widgets = row_widgets.push(text("").width(Length::FillPortion(1)));
+                            } else if day <= c.days_in_month {
+                                let is_today = day == c.today_day;
+                                let color = if is_today { a(t.danger) } else { text_col };
+                                
+                                let bg_col = if is_today { Some(iced::Background::Color(a(t.surface_alt))) } else { None };
+                                let border_col = if is_today { a(t.danger) } else { Color::TRANSPARENT };
+                                let cell = container(text(format!("{:2}", day)).size(fs).color(color))
+                                    .width(Length::FillPortion(1))
+                                    .center_x(Length::Fill)
+                                    .style(move |_t| container::Style {
+                                        background: bg_col,
+                                        border: iced::Border { color: border_col, width: if is_today { 1.5 } else { 0.0 }, radius: 4.0.into() },
+                                        ..Default::default()
+                                    });
+                                    
+                                row_widgets = row_widgets.push(cell);
+                                day += 1;
+                            } else {
+                                row_widgets = row_widgets.push(text("").width(Length::FillPortion(1)));
+                            }
+                        }
+                        col = col.push(slanted_row(row_widgets.into(), y + cell_h * 0.5, total_h, slant_h, slant_right, safe, w_f, cell_h));
+                        y += cell_h + 2.0;
+                        if day > c.days_in_month { break; }
+                    }
+                }
+                InfoData::Music(track_opt) => {
+                    let (title, artist, _album, playing, pos, len, _url, vol) = match track_opt {
+                        Some(tr) => (tr.title.clone(), tr.artist.clone(), tr.album.clone(), tr.is_playing, tr.position_sec, tr.length_sec, tr.url.clone(), tr.volume_pct),
+                        None => ("No Track".into(), "No Artist".into(), "".into(), false, 0.0, 0.0, None, 100),
+                    };
+
+                    let pos_str = format!("{}:{:02}", (pos as u32) / 60, (pos as u32) % 60);
+                    let len_str = format!("{}:{:02}", (len as u32) / 60, (len as u32) % 60);
+
+                    let header_h = fs as f32 + 16.0;
+                    let header = row![
+                        text("MUSIC").size(fs.max(14)).bold().color(text_col),
+                        horizontal_space(),
+                    ].align_y(Alignment::Center).width(Length::Fill);
+                    col = col.push(slanted_row(header.into(), y + header_h * 0.5, total_h, slant_h, slant_right, safe, w_f, header_h));
+                    y += header_h + gap;
+
+                    // Track card
+                    let card_h = 80.0;
+                    let card_bg_col = a(t.background);
+                    let card_border_col = a(t.text);
+                    let card_text_bold = a(t.text);
+                    let card_text_muted = Color { a: a(t.text).a * 0.8, ..a(t.text) };
+                    
+                    let trunc_title = if title.chars().count() > 24 {
+                        let s: String = title.chars().take(21).collect();
+                        format!("{}...", s)
+                    } else {
+                        title.clone()
+                    };
+                    
+                    let card_el = column![
+                        text(trunc_title).size(fs + 2).bold().color(card_text_bold).width(Length::Fill).align_x(Alignment::Center).wrapping(iced::widget::text::Wrapping::None),
+                        text(artist).size(fs).color(card_text_muted).width(Length::Fill).align_x(Alignment::Center).wrapping(iced::widget::text::Wrapping::None),
+                    ].spacing(4);
+                    let card_shape = ShapeBox::new()
+                        .shape(ShapeType::Hexagon { cut: 16 })
+                        .background(card_bg_col)
+                        .border(card_border_col, 1.5)
+                        .size(Length::Fill, Length::Fill);
+                    let card_layer = Stack::new()
+                        .push(card_shape.view())
+                        .push(container(card_el).width(Length::Fill).height(Length::Fill).center_x(Length::Fill).center_y(Length::Fill));
+                    col = col.push(slanted_row(card_layer.into(), y + card_h * 0.5, total_h, slant_h, slant_right, safe, w_f, card_h));
+                    y += card_h + gap * 2.0;
+
+                    // Seek bar
+                    let seek_h = 20.0;
+                    let slider_fg = a(t.text);
+                    let slider_bg = a(t.muted);
+                    let seek_bar = row![
+                        text(pos_str).size(fs - 2).color(text_col),
+                        container(
+                            iced::widget::slider(0.0..=(len.max(1.0) as f64), pos, Message::MusicSeek)
+                                .style(move |_t, _s| iced::widget::slider::Style {
+                                    rail: iced::widget::slider::Rail {
+                                        backgrounds: (iced::Background::Color(slider_fg), iced::Background::Color(slider_bg)),
+                                        width: 2.0,
+                                        border: iced::Border::default(),
+                                    },
+                                    handle: iced::widget::slider::Handle {
+                                        shape: iced::widget::slider::HandleShape::Rectangle { width: 10, border_radius: 0.0.into() },
+                                        background: iced::Background::Color(slider_fg),
+                                        border_color: slider_fg,
+                                        border_width: 0.0,
+                                    },
+                                })
+                                .width(Length::Fill)
+                        ).width(Length::Fill).padding([0, 8]),
+                        text(len_str).size(fs - 2).color(text_col),
+                    ].align_y(Alignment::Center).width(Length::Fill);
+                    col = col.push(slanted_row(seek_bar.into(), y + seek_h * 0.5, total_h, slant_h, slant_right, safe, w_f, seek_h));
+                    y += seek_h + gap;
+
+                    // Volume bar
+                    let vol_h = 20.0;
+                    let vol_bar = row![
+                        text("VOL").size(fs - 2).bold().color(text_col),
+                        container(
+                            iced::widget::slider(0..=100, vol, Message::MusicSetVolume)
+                                .style(move |_t, _s| iced::widget::slider::Style {
+                                    rail: iced::widget::slider::Rail {
+                                        backgrounds: (iced::Background::Color(slider_fg), iced::Background::Color(slider_bg)),
+                                        width: 2.0,
+                                        border: iced::Border::default(),
+                                    },
+                                    handle: iced::widget::slider::Handle {
+                                        shape: iced::widget::slider::HandleShape::Rectangle { width: 10, border_radius: 0.0.into() },
+                                        background: iced::Background::Color(slider_fg),
+                                        border_color: slider_fg,
+                                        border_width: 0.0,
+                                    },
+                                })
+                                .width(Length::Fill)
+                        ).width(Length::Fill).padding([0, 8]),
+                        text(format!("{}%", vol)).size(fs - 2).color(text_col),
+                    ].align_y(Alignment::Center).width(Length::Fill);
+                    col = col.push(slanted_row(vol_bar.into(), y + vol_h * 0.5, total_h, slant_h, slant_right, safe, w_f, vol_h));
+                    y += vol_h + gap * 2.0;
+
+                    // Playback controls
+                    let ctrl_h = 32.0;
+                    let btn_fs = fs - 2;
+                    let text_col_l = a(t.text);
+                    let bg_col_l = a(t.background);
+
+                    let prev_btn = make_slanted_button(
+                        "⏮ Prev".into(), Message::MusicPrev,
+                        bg_col_l, text_col_l, text_col_l, 6.0, btn_fs,
                     );
+                    let play_btn = if playing {
+                        make_slanted_button("⏸ Pause".into(), Message::MusicPlayPause, text_col_l, bg_col_l, text_col_l, 6.0, btn_fs)
+                    } else {
+                        make_slanted_button("⏵ Play".into(), Message::MusicPlayPause, bg_col_l, text_col_l, text_col_l, 6.0, btn_fs)
+                    };
+                    let next_btn = make_slanted_button(
+                        "⏭ Next".into(), Message::MusicNext,
+                        bg_col_l, text_col_l, text_col_l, 6.0, btn_fs,
+                    );
+                    let ctrl_row: Element<'_, Message> = row![prev_btn, play_btn, next_btn]
+                        .spacing(8).width(Length::Fill).height(Length::Fixed(ctrl_h)).into();
+                    col = col.push(slanted_row(ctrl_row, y + ctrl_h * 0.5, total_h, slant_h, slant_right, safe, w_f, ctrl_h));
+                    y += ctrl_h + gap * 2.0;
+
+                    // Actions (folder / trash)
+                    let act_h = 28.0;
+                    let folder_btn = make_slanted_button(
+                        "Folder".into(), Message::MusicOpenFolder(_url.clone()),
+                        bg_col_l, text_col_l, text_col_l, 4.0, btn_fs,
+                    );
+                    let trash_btn = if self.trash_confirm {
+                        make_slanted_button("Confirm?".into(), Message::MusicTrashExecute(_url.clone()), bg_col_l, danger, danger, 4.0, btn_fs)
+                    } else {
+                        make_slanted_button("Trash".into(), Message::MusicTrashConfirm, bg_col_l, text_col_l, text_col_l, 4.0, btn_fs)
+                    };
+                    let act_row: Element<'_, Message> = row![folder_btn, trash_btn]
+                        .spacing(8).width(Length::Fill).height(Length::Fixed(act_h)).into();
+                    col = col.push(slanted_row(act_row, y + act_h * 0.5, total_h, slant_h, slant_right, safe, w_f, act_h));
+                    y += act_h + gap * 2.0;
+
+                    // Sources row
+                    let src_h = 36.0;
+                    let src_btn = |label: &'static str, idx: usize| -> Element<'_, Message> {
+                        let active = self.sources_enabled[idx];
+                        let bg = if active { a(t.text) } else { a(t.background) };
+                        let fg = if active { a(t.background) } else { a(t.text) };
+                        let border = a(t.text);
+                        button(container(text(label).size(fs - 1).bold().color(fg)).center_y(Length::Fill))
+                            .on_press(Message::MusicToggleSource(idx))
+                            .padding([0, 16])
+                            .height(Length::Fill)
+                            .style(move |_t, _s| button::Style { 
+                                background: Some(iced::Background::Color(bg)), 
+                                border: iced::Border { color: border, width: 1.0, radius: 4.0.into() }, 
+                                text_color: fg,
+                                ..Default::default() 
+                            })
+                            .into()
+                    };
+
+                    let src_row = row![
+                        text("Sources:").size(fs - 1).bold().color(text_col),
+                        horizontal_space(),
+                        src_btn("Local", 0),
+                        src_btn("Spotify", 1),
+                        src_btn("Browser", 2),
+                    ].align_y(Alignment::Center).width(Length::Fill);
+                    col = col.push(slanted_row(src_row.into(), y + src_h * 0.5, total_h, slant_h, slant_right, safe, w_f, src_h));
                 }
-                column![
-                    header("📅 CALENDAR"),
-                    text(day_of_week).size(16).color(t.text),
-                    text(month).size(12).color(t.muted),
-                    container(text("")).height(Length::Fixed(1.0)),
-                    strip,
-                ].spacing(8).padding(pad)
-                 .width(Length::Fixed(self.w as f32)).height(Length::Fixed(self.h as f32)).into()
-            }
-            Some(InfoData::Music(track_opt)) => {
-                let (title, artist, album, playing, pos, len) = match track_opt {
-                    Some(tr) => (tr.title.clone(), tr.artist.clone(), tr.album.clone(), tr.is_playing, tr.position_sec, tr.length_sec),
-                    None => ("No track".into(), "".into(), "".into(), false, 0.0, 0.0),
-                };
-                let pos_str = format!("{}:{:02}", (pos as u32) / 60, (pos as u32) % 60);
-                let len_str = format!("{}:{:02}", (len as u32) / 60, (len as u32) % 60);
-                let pct = if len > 0.0 { (pos / len).clamp(0.0, 1.0) } else { 0.0 };
-                let bar_w = (self.w as f32 - 64.0).max(100.0);
-                let played = bar_w * pct as f32;
-                let icon = if playing { "⏸" } else { "▶" };
-                column![
-                    header("🎵 NOW PLAYING"),
-                    text(title).size(15).bold().color(t.text),
-                    text(format!("{} — {}", artist, album)).size(12).color(t.muted),
-                    row![
-                        container(text("")).width(Length::Fixed(played)).height(Length::Fixed(3.0)),
-                        container(text("")).width(Length::Fixed((bar_w - played).max(0.0))).height(Length::Fixed(3.0)),
-                    ],
-                    row![text(pos_str).size(11).color(t.muted), horizontal_space(), text(len_str).size(11).color(t.muted)],
-                    row![
-                        button(text("⏮").size(20).color(t.text)).on_press(Message::MusicPrev).padding([2, 12]),
-                        button(text(icon).size(20).color(t.success)).on_press(Message::MusicPlayPause).padding([2, 12]),
-                        button(text("⏭").size(20).color(t.text)).on_press(Message::MusicNext).padding([2, 12]),
-                    ].spacing(16).align_y(Alignment::Center),
-                ].spacing(8).padding(pad)
-                 .width(Length::Fixed(self.w as f32)).height(Length::Fixed(self.h as f32)).into()
-            }
-            Some(InfoData::Unified(podman, borg)) => {
-                let mut col: iced::widget::Column<'_, Message> = iced::widget::Column::new().spacing(4);
-                for c in podman.containers.iter().take(3) {
-                    let dot = if c.is_running { "●" } else { "○" };
-                    let color = if c.is_running { t.success } else { t.muted };
-                    col = col.push(row![
-                        text(dot).size(12).color(color),
-                        text(&c.name).size(12).color(t.text).width(Length::Fill),
-                        text(&c.status).size(10).color(t.muted),
-                    ].spacing(6).align_y(Alignment::Center));
+                InfoData::Unified(podman, borg) => {
+                    let header = row![
+                        text("SYSTEM").size(fs).bold().color(text_col),
+                        horizontal_space(),
+                        mk_close(),
+                    ].align_y(Alignment::Center).width(Length::Fill);
+                    col = col.push(slanted_row(header.into(), y + 16.0, total_h, slant_h, slant_right, safe, w_f, 32.0));
+                    y += 32.0 + gap;
+
+                    let mut list_col = column![].spacing(4);
+                    for c in podman.containers.iter().take(4) {
+                        let dot = if c.is_running { "●" } else { "○" };
+                        let color = if c.is_running { success } else { muted };
+                        list_col = list_col.push(row![
+                            text(dot).size(fs).color(color),
+                            text(&c.name).size(fs).color(text_col).width(Length::Fill),
+                            text(&c.status).size(fs-2).color(muted),
+                        ].spacing(6).align_y(Alignment::Center));
+                    }
+                    col = col.push(slanted_row(list_col.into(), y + 40.0, total_h, slant_h, slant_right, safe, w_f, 80.0));
+                    y += 80.0 + gap;
+
+                    let borg_el = row![text("BORG:").size(fs).bold().color(muted), text(&borg.state_label).size(fs).color(text_col)].into();
+                    col = col.push(slanted_row(borg_el, y + 10.0, total_h, slant_h, slant_right, safe, w_f, 20.0));
                 }
-                if podman.containers.is_empty() {
-                    col = col.push(text("No containers").size(12).color(t.muted));
+                InfoData::Net(net) => {
+                    let header = row![
+                        text("NETWORK").size(fs).bold().color(text_col),
+                        horizontal_space(),
+                        mk_close(),
+                    ].align_y(Alignment::Center).width(Length::Fill);
+                    col = col.push(slanted_row(header.into(), y + 16.0, total_h, slant_h, slant_right, safe, w_f, 32.0));
+                    y += 32.0 + gap;
+
+                    let stats_h = fs as f32 + 8.0;
+                    let stats_el = row![
+                        text(if net.iface.is_empty() { "—" } else { &net.iface }).size(fs).color(text_col),
+                        text(" ▼ ").size(fs.saturating_sub(2)).color(success),
+                        text(&net.down_str).size(fs).bold().color(text_col),
+                        text(" ▲ ").size(fs.saturating_sub(2)).color(success),
+                        text(&net.up_str).size(fs).bold().color(text_col),
+                    ].align_y(Alignment::Center).width(Length::Fill).into();
+                    col = col.push(slanted_row(stats_el, y + stats_h * 0.5, total_h, slant_h, slant_right, safe, w_f, stats_h));
+                    y += stats_h + gap;
+
+                    // Search Bar
+                    let search_h = 40.0;
+                    let y_mid_search = y + search_h * 0.5;
+                    let frac_s = (y_mid_search / total_h.max(1.0)).clamp(0.0, 1.0);
+                    let (lp_s, rp_s) = if slant_right {
+                        (slant_h * (1.0 - frac_s) + safe, slant_h * frac_s + safe)
+                    } else {
+                        (slant_h * frac_s + safe, slant_h * (1.0 - frac_s) + safe)
+                    };
+                    let search_w = (w_f - lp_s - rp_s).max(100.0);
+                    let search_border = settings.control_border_width;
+                    let half_s = search_border * 0.5;
+                    let search_slant = tooltip_slope * (search_h - 2.0 * half_s);
+
+                    let search_bg = crate::overlays::tooltip_engine::ParallelogramBg {
+                        w: search_w, h: search_h, slant: search_slant, slant_right,
+                        background: a(t.surface_alt),
+                        border_color: a(t.text),
+                        border_width: search_border,
+                    };
+                    
+                    let input_muted = Color { a: 1.0, ..t.muted };
+                    let input_text = Color { a: 1.0, ..t.text };
+                    let input_focus = Color { a: 1.0, ..t.focus };
+                    let search_input = text_input("Search programs...", &self.search_query)
+                        .on_input(Message::SearchChanged)
+                        .padding(Padding { top: 8.0, bottom: 8.0, left: search_slant + 8.0, right: search_slant + 8.0 })
+                        .size(fs)
+                        .width(Length::Fill)
+                        .style(move |_t, _s| iced::widget::text_input::Style {
+                            background: iced::Background::Color(Color::TRANSPARENT),
+                            border: iced::Border::default(),
+                            icon: input_muted,
+                            placeholder: input_muted,
+                            value: input_text,
+                            selection: input_focus,
+                        });
+                    let search_layer: Element<'a, Message> = Stack::new()
+                        .push(search_bg.view())
+                        .push(
+                            container(search_input).width(Length::Fixed(search_w)).height(Length::Fixed(search_h)).center_x(Length::Fill).center_y(Length::Fill)
+                        )
+                        .width(Length::Fixed(search_w)).height(Length::Fixed(search_h)).into();
+
+                    col = col.push(slanted_row(search_layer, y_mid_search, total_h, slant_h, slant_right, safe, w_f, search_h));
+                    y += search_h + gap;
+
+                    // Process List
+                    let proc_h = fs as f32 + 10.0;
+                    let proc_gap = 2.0;
+                    let mut procs_col = column![].spacing(proc_gap).width(Length::Fill);
+                    let q = self.search_query.to_lowercase();
+                    let mut items: Vec<&ProcessItem> = net.top_procs.iter().filter(|p| q.is_empty() || p.name.to_lowercase().contains(&q)).collect();
+                    for &p in items.iter().take(10) {
+                        let inner_w = w_f - (slant_h * (1.0 - (y + proc_h * 0.5) / total_h.max(1.0)) + safe) - (slant_h * ((y + proc_h * 0.5) / total_h.max(1.0)) + safe);
+                        let proc_row = render_net_proc_row(p, t, fs, alpha, inner_w, proc_h, slant_right, tooltip_slope);
+                        procs_col = procs_col.push(slanted_row(proc_row, y + proc_h * 0.5, total_h, slant_h, slant_right, safe, w_f, proc_h));
+                        y += proc_h + proc_gap;
+                    }
+                    if !items.is_empty() {
+                        col = col.push(procs_col);
+                    } else {
+                        let empty_el: Element<'a, Message> = container(
+                            text(if net.top_procs.is_empty() { "(no active network procs)" } else { "(no match)" })
+                                .size(fs.saturating_sub(4).max(9)).color(muted).wrapping(iced::widget::text::Wrapping::None)
+                        ).into();
+                        col = col.push(slanted_row(empty_el, y + 10.0, total_h, slant_h, slant_right, safe, w_f, 20.0));
+                    }
                 }
-                column![
-                    header("⚙ SYSTEM STATUS"),
-                    col,
-                    container(text("")).height(Length::Fixed(1.0)),
-                    row![text("BORG:").size(11).bold().color(t.muted), text(&borg.state_label).size(11).color(t.text)],
-                ].spacing(8).padding(pad)
-                 .width(Length::Fixed(self.w as f32)).height(Length::Fixed(self.h as f32)).into()
+                InfoData::Custom => {
+                    let header = row![
+                        text("CUSTOM MODULE").size(fs).bold().color(text_col),
+                        horizontal_space(),
+                        mk_close(),
+                    ].align_y(Alignment::Center).width(Length::Fill);
+                    col = col.push(slanted_row(header.into(), y + 16.0, total_h, slant_h, slant_right, safe, w_f, 32.0));
+                    y += 32.0 + gap;
+                    let msg = text("Configure in Settings → Bar Layout").size(fs).color(muted).into();
+                    col = col.push(slanted_row(msg, y + 10.0, total_h, slant_h, slant_right, safe, w_f, 20.0));
+                }
             }
-            Some(InfoData::Net(net)) => {
-                column![
-                    header("🌐 NETWORK"),
-                    text(format!("{} ({})", if net.iface.is_empty() { "—" } else { &net.iface }, if net.hw_type.is_empty() { "?" } else { &net.hw_type })).size(13).color(t.text),
-                    text(format!("IP: {}", if net.ip.is_empty() { "—" } else { &net.ip })).size(11).color(t.muted),
-                    container(text("")).height(Length::Fixed(1.0)),
-                    row![text("▼ ").size(13).color(t.success), text(&net.down_str).size(15).bold().color(t.text)],
-                    row![text("▲ ").size(13).color(t.success), text(&net.up_str).size(15).bold().color(t.text)],
-                ].spacing(8).padding(pad)
-                 .width(Length::Fixed(self.w as f32)).height(Length::Fixed(self.h as f32)).into()
-            }
-            Some(InfoData::Custom) => {
-                column![
-                    header("⚙ CUSTOM MODULE"),
-                    text("Configure in Settings → Bar Layout").size(12).color(t.muted),
-                ].spacing(8).padding(pad)
-                 .width(Length::Fixed(self.w as f32)).height(Length::Fixed(self.h as f32)).into()
-            }
+        } else {
+            let header = row![
+                text("LOADING...").size(fs).color(muted),
+                horizontal_space(),
+                mk_close(),
+            ].align_y(Alignment::Center).width(Length::Fill);
+            col = col.push(slanted_row(header.into(), y + 16.0, total_h, slant_h, slant_right, safe, w_f, 32.0));
+        }
+
+        container(col)
+            .padding(Padding { top: vpad, right: 0.0, bottom: vpad, left: 0.0 })
+            .width(Length::Fixed(self.w as f32))
+            .height(Length::Fixed(self.h as f32))
+            .clip(true)
+            .into()
+    }
+}
+
+fn slanted_row<'a, M: 'a>(
+    inner: Element<'a, M>,
+    y_mid: f32,
+    total_h: f32,
+    slant: f32,
+    slant_right: bool,
+    safe: f32,
+    total_w: f32,
+    row_h: f32,
+) -> Element<'a, M> {
+    let frac = (y_mid / total_h.max(1.0)).clamp(0.0, 1.0);
+    let (lp, rp) = if slant_right {
+        (slant * (1.0 - frac) + safe, slant * frac + safe)
+    } else {
+        (slant * frac + safe, slant * (1.0 - frac) + safe)
+    };
+    let inner_w = (total_w - lp - rp).max(10.0);
+
+    let inner_clipped = container(inner)
+        .width(Length::Fixed(inner_w))
+        .height(Length::Fixed(row_h))
+        .clip(true);
+
+    row![
+        Space::new(Length::Fixed(lp), Length::Shrink),
+        inner_clipped,
+        Space::new(Length::Fixed(rp), Length::Shrink),
+    ].height(Length::Fixed(row_h)).width(Length::Fixed(total_w)).into()
+}
+
+struct KillButtonShape {
+    w: f32, h: f32, slant: f32, slant_right: bool,
+    background: Color, border_color: Color, border_width: f32, x_color: Color,
+}
+
+impl<Message> canvas::Program<Message> for KillButtonShape {
+    type State = ();
+    fn draw(
+        &self, _state: &Self::State, renderer: &iced::Renderer, _theme: &Theme,
+        bounds: Rectangle, _cursor: iced::mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = Frame::new(renderer, bounds.size());
+        let half = self.border_width / 2.0;
+        let w = self.w; let h = self.h; let sl = self.slant;
+
+        let path = if self.slant_right {
+            Path::new(|b| {
+                b.move_to(Point::new(sl + half, half));
+                b.line_to(Point::new(w - half, half));
+                b.line_to(Point::new(w - sl - half, h - half));
+                b.line_to(Point::new(half, h - half));
+                b.close();
+            })
+        } else {
+            Path::new(|b| {
+                b.move_to(Point::new(half, half));
+                b.line_to(Point::new(w - sl - half, half));
+                b.line_to(Point::new(w - half, h - half));
+                b.line_to(Point::new(sl + half, h - half));
+                b.close();
+            })
         };
 
-        body
+        if self.background.a > 0.0 {
+            frame.fill(&path, self.background);
+        }
+        if self.border_width > 0.0 && self.border_color.a > 0.0 {
+            frame.stroke(&path, Stroke::default().with_color(self.border_color).with_width(self.border_width));
+        }
+
+        let cx = w / 2.0; let cy = h / 2.0;
+        let r_x = (w * 0.26).max(3.0);
+        let r_y = (h * 0.26).max(3.0);
+        let stroke_w = (h * 0.09).max(1.5);
+
+        let inner_h = (h - 2.0 * half).max(1.0);
+        let sl_sign = if self.slant_right { 1.0 } else { -1.0 };
+        let delta = sl_sign * sl * r_y / inner_h;
+
+        let tl = Point::new(cx - r_x + delta, cy - r_y);
+        let tr = Point::new(cx + r_x + delta, cy - r_y);
+        let bl = Point::new(cx - r_x - delta, cy + r_y);
+        let br = Point::new(cx + r_x - delta, cy + r_y);
+
+        let x_stroke = Stroke::default().with_color(self.x_color).with_width(stroke_w).with_line_cap(canvas::LineCap::Round);
+        let diag_a = Path::new(|b| { b.move_to(tl); b.line_to(br); });
+        let diag_b = Path::new(|b| { b.move_to(bl); b.line_to(tr); });
+        frame.stroke(&diag_a, x_stroke);
+        frame.stroke(&diag_b, x_stroke);
+
+        vec![frame.into_geometry()]
+    }
+}
+
+fn render_net_proc_row<'a>(
+    p: &'a ProcessItem, t: &ShellTheme, font_size: u16, alpha: f32, row_w: f32, row_h: f32, slant_right: bool, tooltip_slope: f32
+) -> Element<'a, Message> {
+    let apply = |c: Color| Color { a: c.a * alpha, ..c };
+    let name = if p.name.chars().count() > 22 {
+        let mut s: String = p.name.chars().take(19).collect();
+        s.push_str("...");
+        s
+    } else {
+        p.name.clone()
+    };
+    let pid = p.pid;
+    let muted = apply(t.muted);
+    let danger = apply(t.danger);
+    let text_col = apply(t.text);
+    let surface_alt = apply(t.surface_alt);
+
+    let metric_str = &p.metric;
+
+    let kill_w = 32.0; let kill_h = 24.0;
+    let kill_border = t.control_border_width;
+    let half_k = kill_border * 0.5;
+    let x_slant = tooltip_slope * (kill_h - 2.0 * half_k);
+    let metric_w = 140.0;
+    let spacing = 8.0;
+
+    let kill_shape = KillButtonShape {
+        w: kill_w, h: kill_h, slant: x_slant, slant_right,
+        background: surface_alt, border_color: danger, border_width: kill_border, x_color: danger,
+    };
+
+    let kill_canvas: Element<'a, Message> = Canvas::new(kill_shape)
+        .width(Length::Fixed(kill_w)).height(Length::Fixed(kill_h)).into();
+
+    let kill_btn = button(kill_canvas)
+        .on_press(Message::KillProcess(pid))
+        .padding(0)
+        .width(Length::Fixed(kill_w))
+        .height(Length::Fixed(row_h))
+        .style(|_t, _s| button::Style { background: None, ..Default::default() });
+
+    let name_clip = container(
+        text(name).size(font_size.saturating_sub(4).max(9)).color(text_col).wrapping(iced::widget::text::Wrapping::None)
+    ).width(Length::Fill).height(Length::Fixed(row_h)).align_y(Alignment::Center).clip(true);
+
+    let metric_container = container(text(metric_str).size(font_size.saturating_sub(4).max(9)).color(muted).wrapping(iced::widget::text::Wrapping::None))
+        .width(Length::Fixed(metric_w)).height(Length::Fixed(row_h)).align_y(Alignment::Center).padding([0.0, 6.0]).clip(true);
+
+    row![
+        name_clip,
+        metric_container,
+        kill_btn,
+    ].spacing(spacing).align_y(Alignment::Center).width(Length::Fixed(row_w)).into()
+}
+
+
+fn make_slanted_button(
+    label: String,
+    msg: Message,
+    bg: Color,
+    fg: Color,
+    border: Color,
+    slant: f32,
+    fs: u16,
+) -> Element<'static, Message> {
+    let btn_bg = ShapeBox::new()
+        .shape(ShapeType::Slant { left: SlantSide::Left, right: SlantSide::Left })
+        .background(bg)
+        .border(border, 1.0)
+        .slant_width(slant)
+        .size(Length::Fill, Length::Fill);
+    Stack::new()
+        .push(btn_bg.view())
+        .push(button(
+            container(text(label).size(fs).bold().color(fg))
+                .width(Length::Fill).height(Length::Fill).center_x(Length::Fill).center_y(Length::Fill)
+        )
+        .on_press(msg)
+        .padding(0)
+        .style(|_t, _s| button::Style { background: None, border: iced::Border::default(), ..Default::default() })
+        ).into()
+}
+
+fn make_slider_style(fg: Color, bg: Color) -> impl Fn(&Theme, iced::widget::slider::Status) -> iced::widget::slider::Style + 'static {
+    move |_t, _s| iced::widget::slider::Style {
+        rail: iced::widget::slider::Rail {
+            backgrounds: (iced::Background::Color(fg), iced::Background::Color(bg)),
+            width: 2.0,
+            border: iced::Border::default(),
+        },
+        handle: iced::widget::slider::Handle {
+            shape: iced::widget::slider::HandleShape::Rectangle { width: 10, border_radius: 0.0.into() },
+            background: iced::Background::Color(fg),
+            border_color: fg,
+            border_width: 0.0,
+        },
     }
 }
 
@@ -286,42 +822,31 @@ async fn fetch_data(mode: String) -> InfoData {
 }
 
 pub fn run() -> Result<(), iced_layershell::Error> {
+    let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
     let s = ShellSettings::load();
-    let h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
     let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
+    let h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(s.tooltip_height_px);
+
     let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
     let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1920);
-    let grow_right = std::env::var("MBS_GROW_RIGHT").map(|v| v == "1").unwrap_or_else(|_| cx < sw / 2);
-    let cap_w: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(W_START);
-    let half_start = (cap_w / 2.0) as i32;
+    let cap_w: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(100.0);
+    let grow_right = cx < sw / 2;
+
     let bar_h = s.bar_height as i32;
-    let sl_str = std::env::var("MBS_SLANT_L").unwrap_or_else(|_| "L".into());
-    let sr_str = if grow_right { sl_str.clone() } else {
-        std::env::var("MBS_SLANT_R").unwrap_or_else(|_| "R".into())
-    };
-    let sw_cap = s.slant_width;
-    let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
     let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
+    let half_cap = (cap_w / 2.0) as i32;
+    let slant_px = s.slant_width as i32;
 
     let (anchor, margin) = if grow_right {
-        let sl_left = sl_str == "L";
-        let shift = if sl_left { sw_cap } else { 0.0 };
-        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, ((cx - half_start) as f32 + shift).max(0.0).min((sw - w as i32).max(0) as f32) as i32))
+        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, (cx - half_cap).max(0)))
     } else {
-        let sr_right = sr_str == "R";
-        let shift = if sr_right { sw_cap } else { 0.0 };
-        (Anchor::Top | Anchor::Right, (margin_top, ((sw - cx - half_start) as f32 + shift).max(0.0).min((sw - w as i32).max(0) as f32) as i32, 0, 0))
+        (Anchor::Top | Anchor::Right, (margin_top, (sw - cx - half_cap - slant_px).max(0), 0, 0))
     };
 
-        let layer = LayerShellSettings {
-        size: Some((w, h)),
-        exclusive_zone: -1,
-        anchor,
-        layer: Layer::Overlay,
+    let layer = LayerShellSettings {
+        size: Some((w, h)), exclusive_zone: -1, anchor, layer: Layer::Overlay,
         keyboard_interactivity: KeyboardInteractivity::OnDemand,
-        binded_output_name: output,
-        margin,
-        ..Default::default()
+        binded_output_name: output, margin, ..Default::default()
     };
     App::run(Settings { layer_settings: layer, ..Default::default() })
 }

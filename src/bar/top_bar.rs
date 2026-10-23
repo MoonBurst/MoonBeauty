@@ -16,8 +16,6 @@ pub enum TopBarMessage {
 
 pub struct TopBar;
 
-
-
 impl TopBar {
     pub fn view<'a>(
         settings: &ShellSettings,
@@ -34,23 +32,23 @@ impl TopBar {
                 let (sl, sr) = match settings.slant_mode.as_str() {
                     "left" => (SlantSide::Left, SlantSide::Left),
                     "right" => (SlantSide::Right, SlantSide::Right),
-                    _ => (SlantSide::Left, SlantSide::Left), // Slant towards center
+                    _ => (SlantSide::Left, SlantSide::Left),
                 };
                 if id == "tray" && tray_expanded {
                     left_row = left_row.push(CapsuleRenderer::render_tray_expanded(
-                        tray_items, theme, sl, sr, "left", TopBarMessage::Action,
+                        tray_items, theme, settings, sl, sr, "left", TopBarMessage::Action,
                     ));
                 } else {
-                    left_row = left_row.push(CapsuleRenderer::render(
-                        id,
-                        telemetry,
-                        theme,
-                        sl,
-                        sr,
-                        &settings.module_shape,
-                        "left",
-                        TopBarMessage::Action,
-                    ));
+                    let cap = CapsuleRenderer::render(
+                        id, telemetry, theme, settings, sl, sr, &settings.module_shape, "left", TopBarMessage::Action,
+                    );
+                    if id == "tray" {
+                        left_row = left_row.push(
+                            container(cap).width(Length::Fixed(settings.tray_width as f32))
+                        );
+                    } else {
+                        left_row = left_row.push(cap);
+                    }
                 }
             }
         }
@@ -66,30 +64,26 @@ impl TopBar {
                 "left" => (SlantSide::Left, SlantSide::Left),
                 "right" => (SlantSide::Right, SlantSide::Right),
                 _ => {
-                    if i == keystone_idx {
-                        (SlantSide::Left, SlantSide::Right) // Keystone /\
-                    } else if i < keystone_idx {
-                        (SlantSide::Left, SlantSide::Left) // Left of keystone //
-                    } else {
-                        (SlantSide::Right, SlantSide::Right) // Right of keystone \\
-                    }
+                    if i == keystone_idx { (SlantSide::Left, SlantSide::Right) }
+                    else if i < keystone_idx { (SlantSide::Left, SlantSide::Left) }
+                    else { (SlantSide::Right, SlantSide::Right) }
                 }
             };
             if id.as_str() == "tray" && tray_expanded {
                 center_row = center_row.push(CapsuleRenderer::render_tray_expanded(
-                    tray_items, theme, sl, sr, "center", TopBarMessage::Action,
+                    tray_items, theme, settings, sl, sr, "center", TopBarMessage::Action,
                 ));
             } else {
-                center_row = center_row.push(CapsuleRenderer::render(
-                    id,
-                    telemetry,
-                    theme,
-                    sl,
-                    sr,
-                    &settings.module_shape,
-                    "center",
-                    TopBarMessage::Action,
-                ));
+                let cap = CapsuleRenderer::render(
+                    id, telemetry, theme, settings, sl, sr, &settings.module_shape, "center", TopBarMessage::Action,
+                );
+                if id.as_str() == "tray" {
+                    center_row = center_row.push(
+                        container(cap).width(Length::Fixed(settings.tray_width as f32))
+                    );
+                } else {
+                    center_row = center_row.push(cap);
+                }
             }
         }
 
@@ -99,37 +93,52 @@ impl TopBar {
                 let (sl, sr) = match settings.slant_mode.as_str() {
                     "left" => (SlantSide::Left, SlantSide::Left),
                     "right" => (SlantSide::Right, SlantSide::Right),
-                    _ => (SlantSide::Right, SlantSide::Right), // Slant towards center
+                    _ => (SlantSide::Right, SlantSide::Right),
                 };
                 if id == "tray" && tray_expanded {
                     right_row = right_row.push(CapsuleRenderer::render_tray_expanded(
-                        tray_items, theme, sl, sr, "right", TopBarMessage::Action,
+                        tray_items, theme, settings, sl, sr, "right", TopBarMessage::Action,
                     ));
                 } else {
-                    right_row = right_row.push(CapsuleRenderer::render(
-                        id,
-                        telemetry,
-                        theme,
-                        sl,
-                        sr,
-                        &settings.module_shape,
-                        "right",
-                        TopBarMessage::Action,
-                    ));
+                    let cap = CapsuleRenderer::render(
+                        id, telemetry, theme, settings, sl, sr, &settings.module_shape, "right", TopBarMessage::Action,
+                    );
+                    if id == "tray" {
+                        right_row = right_row.push(
+                            container(cap).width(Length::Fixed(settings.tray_width as f32))
+                        );
+                    } else {
+                        right_row = right_row.push(cap);
+                    }
                 }
             }
         }
 
+        // Summary log every time tray state changes
+        {
+            use std::sync::atomic::{AtomicBool, Ordering};
+            static LAST_EXPANDED: AtomicBool = AtomicBool::new(false);
+            let was = LAST_EXPANDED.swap(tray_expanded, Ordering::Relaxed);
+            if was != tray_expanded {
+                let mut total = 0.0f32;
+                let mut count = 0;
+                for id in settings.bar_left.iter().chain(settings.bar_center.iter()).chain(settings.bar_right.iter()) {
+                    if settings.visible_capsules.get(id).copied().unwrap_or(true) {
+                        if let Some(w) = super::capsules::lookup_width(id) {
+                            total += w;
+                            count += 1;
+                        }
+                    }
+                }
+                eprintln!("[bar-layout] {} visible capsules, sum={:.1}px", count, total);
+            }
+        }
+
         let bar_shape = match settings.bar_shape.as_str() {
-            "hexagon" => ShapeType::Hexagon {
-                cut: (theme.slant_width * 1.5) as u16,
-            },
+            "hexagon" => ShapeType::Hexagon { cut: (theme.slant_width * 1.5) as u16 },
             "rounded" => ShapeType::Rounded(((theme.slant_width * 1.5) as u16).max(4)),
             "flat" => ShapeType::Flat,
-            _ => ShapeType::Slant {
-                left: SlantSide::Left,
-                right: SlantSide::Right,
-            },
+            _ => ShapeType::Slant { left: SlantSide::Left, right: SlantSide::Right },
         };
 
         let bar_background = ShapeBox::new()
@@ -140,9 +149,9 @@ impl TopBar {
 
         let content = row![
             left_row,
-            row![].width(Length::Fill),
+            iced::widget::horizontal_space(),
             center_row,
-            row![].width(Length::Fill),
+            iced::widget::horizontal_space(),
             right_row,
         ]
         .padding([4, 16])

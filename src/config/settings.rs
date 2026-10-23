@@ -153,6 +153,12 @@ pub struct ShellSettings {
     pub global_padding: u16,
     #[serde(default = "default_capsule_spacing", alias = "capsuleSpacing")]
     pub capsule_spacing: i32,
+    #[serde(default = "default_tray_width", alias = "trayWidth")]
+    pub tray_width: u32,
+    #[serde(default = "default_tray_timeout", alias = "trayTimeout")]
+    pub tray_timeout_sec: u32,
+    #[serde(default = "default_tray_icon_size", alias = "trayIconSize")]
+    pub tray_icon_size: u32,
     #[serde(default = "default_poll_interval", alias = "hardwarePollInterval", alias = "hardware_poll_interval_ms")]
     pub hardware_poll_interval_ms: u64,
 
@@ -222,6 +228,8 @@ pub struct ShellSettings {
     pub gpu0: GpuThresholds,
     #[serde(default, alias = "gpu1")]
     pub gpu1: GpuThresholds,
+    #[serde(default = "default_gpu_selected_id", alias = "gpuSelectedId", alias = "gpu_selected")]
+    pub gpu_selected_id: String,
     #[serde(default, alias = "customColors", alias = "palette")]
     pub palette: Base16Palette,
     #[serde(default, alias = "ttsCommand")]
@@ -248,6 +256,9 @@ fn default_global_border_width() -> f32 { 3.0 }
 fn default_control_border_width() -> f32 { 2.0 }
 fn default_global_padding() -> u16 { 12 }
 fn default_capsule_spacing() -> i32 { 2 }
+fn default_tray_width() -> u32 { 60 }
+fn default_tray_timeout() -> u32 { 3 }
+fn default_tray_icon_size() -> u32 { 20 }
 fn default_poll_interval() -> u64 { 2000 }
 fn default_true() -> bool { true }
 
@@ -270,6 +281,7 @@ fn default_body_size() -> u16 { 22 }
 fn default_excluded() -> String { "greenclip, copyq".to_string() }
 fn default_alarm_sound_duration() -> u32 { 5 }
 fn default_alarm_sound_volume() -> u32 { 100 }
+fn default_gpu_selected_id() -> String { "card0".to_string() }
 fn default_overlay_cut() -> u32 { 24 }
 fn default_overlay_angle() -> u32 { 45 }
 
@@ -312,6 +324,9 @@ impl Default for ShellSettings {
             control_border_width: default_control_border_width(),
             global_padding: default_global_padding(),
             capsule_spacing: default_capsule_spacing(),
+            tray_width: default_tray_width(),
+            tray_timeout_sec: default_tray_timeout(),
+            tray_icon_size: default_tray_icon_size(),
             hardware_poll_interval_ms: default_poll_interval(),
             notifications_enabled: true,
             notif_hold_duration_sec: default_notif_hold(),
@@ -350,6 +365,7 @@ impl Default for ShellSettings {
                 vram_warn: 1,
                 vram_danger: 0,
             },
+            gpu_selected_id: default_gpu_selected_id(),
             palette: Base16Palette::default(),
             tts_command: None,
             overlay_cut: default_overlay_cut(),

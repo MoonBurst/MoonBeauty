@@ -3,6 +3,7 @@ use std::sync::{Mutex, OnceLock};
 use iced::{Alignment, Color, Element, Length};
 
 use crate::backend::UnifiedTelemetry;
+use crate::config::settings::ShellSettings;
 use crate::config::theme::{hex_to_color, ShellTheme};
 use crate::style::shape_box::{ShapeBox, ShapeType, SlantSide};
 use crate::style::shell_font;
@@ -17,6 +18,7 @@ pub enum CapsuleAction {
     ToggleSinkMute,
     ToggleSourceMute,
     CycleGpu,
+    CycleGpuTarget,
     ToggleNotificationDnd,
     ToggleCustomMode,
     ToggleTrayExpanded,
@@ -68,6 +70,10 @@ fn widths_map() -> &'static Mutex<std::collections::HashMap<String, f32>> {
 
 pub fn record_width(id: &str, w: f32) {
     if let Ok(mut m) = widths_map().lock() {
+        let old = m.get(id).copied();
+        if old != Some(w) {
+            eprintln!("[capsule-width] {} = {:.1}px", id, w);
+        }
         m.insert(id.to_string(), w);
     }
 }
@@ -83,6 +89,7 @@ impl CapsuleRenderer {
         id: &str,
         telemetry: &'a UnifiedTelemetry,
         theme: &ShellTheme,
+        settings: &ShellSettings,
         slant_left: SlantSide,
         slant_right: SlantSide,
         module_shape: &str,
@@ -148,7 +155,7 @@ impl CapsuleRenderer {
                         };
                         (format!("{}{}°F/{}°C", prefix, w.temp_f, w.temp_c), col)
                     }
-                    None => ("55°F/13°C".into(), theme.text),
+                    None => ("--°F/--°C".into(), theme.text),
                 };
                 let elem = label::<Message>(&[(txt, col)], theme.font_size_normal);
                 (elem, CapsuleAction::OpenOverlay("weather".into()), col)
@@ -241,8 +248,13 @@ impl CapsuleRenderer {
                 (elem, CapsuleAction::OpenOverlay("cpu".into()), border_col)
             }
             "gpu" => {
-                let temp_col = if telemetry.gpu.temp_c >= theme.gpu0_temp_danger { theme.danger } else if telemetry.gpu.temp_c >= theme.gpu0_temp_warn { theme.warning } else { theme.text };
-                let vram_col = if telemetry.gpu.vram_free_gib <= theme.gpu0_vram_danger { theme.danger } else if telemetry.gpu.vram_free_gib <= theme.gpu0_vram_warn { theme.warning } else { theme.text };
+                let (tw, td, vw, vd) = if telemetry.gpu_selected_idx == 0 {
+                    (theme.gpu0_temp_warn, theme.gpu0_temp_danger, theme.gpu0_vram_warn, theme.gpu0_vram_danger)
+                } else {
+                    (settings.gpu1.temp_warn, settings.gpu1.temp_danger, settings.gpu1.vram_warn, settings.gpu1.vram_danger)
+                };
+                let temp_col = if telemetry.gpu.temp_c >= td { theme.danger } else if telemetry.gpu.temp_c >= tw { theme.warning } else { theme.text };
+                let vram_col = if telemetry.gpu.vram_free_gib <= vd { theme.danger } else if telemetry.gpu.vram_free_gib <= vw { theme.warning } else { theme.text };
                 let name = if telemetry.gpu.name.is_empty() { "GPU".to_string() } else { telemetry.gpu.name.clone() };
                 let elem = label::<Message>(&[
                     (format!("{}:", name), theme.success),
@@ -255,7 +267,7 @@ impl CapsuleRenderer {
                     (" ".to_string(), theme.text),
                     (format!("{}GiB", telemetry.gpu.vram_free_gib), vram_col),
                 ], theme.font_size_normal);
-                let border_col = if telemetry.gpu.temp_c >= theme.gpu0_temp_danger || telemetry.gpu.vram_free_gib <= theme.gpu0_vram_danger { theme.danger } else if telemetry.gpu.temp_c >= theme.gpu0_temp_warn || telemetry.gpu.vram_free_gib <= theme.gpu0_vram_warn { theme.warning } else { theme.border };
+                let border_col = if telemetry.gpu.temp_c >= td || telemetry.gpu.vram_free_gib <= vd { theme.danger } else if telemetry.gpu.temp_c >= tw || telemetry.gpu.vram_free_gib <= vw { theme.warning } else { theme.border };
                 (elem, CapsuleAction::OpenOverlay("gpu".into()), border_col)
             }
             "ram" => {
@@ -314,7 +326,14 @@ impl CapsuleRenderer {
         };
 
         let text_w = LABEL_W.with(|w| w.get());
-        let min_width = text_w + theme.slant_width * 2.0 + 24.0;
+        let min_width = if id == "tray" {
+            // tray_width means the VISIBLE parallelogram width.
+            // The ShapeBox::Slant clips `slant_width` off each side, so
+            // the bounding box must be wider by 2*slant_width.
+            settings.tray_width as f32 + theme.slant_width * 2.0
+        } else {
+            text_w + theme.slant_width * 2.0 + 24.0
+        };
         record_width(id, min_width);
 
         let border_color = if border_color == theme.border { theme.text } else { border_color };
@@ -353,6 +372,10 @@ impl CapsuleRenderer {
             MouseArea::new(action_btn)
                 .on_right_press(on_action(CapsuleAction::CancelTooltip(id_str)))
                 .into()
+        } else if id == "gpu" {
+            MouseArea::new(action_btn)
+                .on_right_press(on_action(CapsuleAction::CycleGpuTarget))
+                .into()
         } else {
             action_btn.into()
         }
@@ -361,12 +384,13 @@ impl CapsuleRenderer {
     pub fn render_tray_expanded<'a, Message: 'static + Clone>(
         items: &[crate::backend::TrayItem],
         theme: &ShellTheme,
+        settings: &crate::config::settings::ShellSettings,
         slant_left: SlantSide,
         slant_right: SlantSide,
         region: &str,
         on_action: impl Fn(CapsuleAction) -> Message + 'static + Copy,
     ) -> Element<'a, Message> {
-        let icon_size = 20.0_f32;
+        let icon_size = settings.tray_icon_size as f32;
         let icon_pad = 4.0_f32;
         let icon_slot = icon_size + icon_pad * 2.0;
         let close_slot = 24.0_f32;
@@ -405,12 +429,24 @@ impl CapsuleRenderer {
         let mut icons_row = Row::new().spacing(spacing).align_y(Alignment::Center);
         for item in items.iter().take(shown) {
             let icon_elem: Element<'a, Message> = if let Some(p) = &item.icon_path {
-                iced::widget::image(iced::widget::image::Handle::from_path(p.clone()))
-                    .width(Length::Fixed(icon_size))
-                    .height(Length::Fixed(icon_size))
-                    .into()
+                let exists = std::path::Path::new(p).exists();
+                if exists && p.ends_with(".svg") {
+                    iced::widget::svg(iced::widget::svg::Handle::from_path(p.clone()))
+                        .width(Length::Fixed(icon_size))
+                        .height(Length::Fixed(icon_size))
+                        .into()
+                } else if exists {
+                    iced::widget::image(iced::widget::image::Handle::from_path(p.clone()))
+                        .width(Length::Fixed(icon_size))
+                        .height(Length::Fixed(icon_size))
+                        .into()
+                } else {
+                    let initial = item.title.chars().next().unwrap_or('?').to_uppercase().to_string();
+                    text(initial).size((icon_size * 0.7) as u16).color(theme.text).into()
+                }
             } else {
-                text("\u{25CF}").size(icon_size * 0.7).color(theme.success).into()
+                let initial = item.title.chars().next().unwrap_or('?').to_uppercase().to_string();
+                text(initial).size((icon_size * 0.7) as u16).color(theme.text).into()
             };
 
             let activate_item = item.clone();
@@ -463,9 +499,10 @@ impl CapsuleRenderer {
             .padding([0, pad_x]);
         if items.is_empty() {
             content = content.push(
-                text("No tray apps — restart Steam/CoreCtrl/etc.")
-                    .size(12)
-                    .color(theme.muted),
+                container(text("Empty").size(11).color(theme.muted))
+                    .width(Length::Fixed(min_width - pad_x as f32 * 2.0))
+                    .center_x(Length::Fill)
+                    .clip(true)
             );
         }
 
@@ -479,7 +516,7 @@ impl CapsuleRenderer {
             .slant_width(theme.slant_width)
             .size(Length::Fixed(min_width), Length::Fill);
 
-        Stack::new()
+        container(Stack::new()
             .push(background_shape.view())
             .push(
                 container(content)
@@ -487,7 +524,9 @@ impl CapsuleRenderer {
                     .height(Length::Fill)
                     .align_x(Alignment::Center)
                     .align_y(Alignment::Center),
-            )
+            ))
+            .width(Length::Fixed(min_width))
+            .clip(true)
             .into()
     }
 

@@ -493,6 +493,24 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         std::process::exit(0);
     }
 
+    if let Some(idx) = args.iter().position(|a| a == "--tray-context-menu") {
+        let json_path = args.get(idx + 1).cloned().unwrap_or_default();
+        let bus = args.get(idx + 2).cloned().unwrap_or_default();
+        let menu_path = args.get(idx + 3).cloned().unwrap_or_default();
+        let w = args.get(idx + 4).and_then(|s| s.parse().ok()).unwrap_or(250u32);
+        let h = args.get(idx + 5).and_then(|s| s.parse().ok()).unwrap_or(400u32);
+        if let Ok(json) = std::fs::read_to_string(&json_path) {
+            if let Ok(items) = serde_json::from_str::<Vec<moon_beauty_shell::backend::TrayMenuItem>>(&json) {
+                let _ = std::fs::remove_file(&json_path);
+                std::process::exit(match moon_beauty_shell::overlays::tray_context::run(items, bus, menu_path, w, h) {
+                    Ok(_) => 0,
+                    Err(_) => 1,
+                });
+            }
+        }
+        std::process::exit(1);
+    }
+
     let is_notif_surface = detect_notif_surface(&args);
     let standalone_target = detect_standalone_overlay(&args);
     let settings = ShellSettings::load();
@@ -620,12 +638,6 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         }
     }
 
-    if args.iter().any(|a| a == "--tray-popup") {
-        match moon_beauty_shell::overlays::tray_popup::run() {
-            Ok(()) => std::process::exit(0),
-            Err(e) => { eprintln!("[tray-popup] {e}"); std::process::exit(1); }
-        }
-    }
 
     if args.iter().any(|a| a == "--weather-tooltip") {
         match moon_beauty_shell::overlays::weather_tooltip::run() {
@@ -657,6 +669,8 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 #[derive(Debug, Clone)]
 pub enum Message {
     TickHardware,
+    TickWeather,
+    WeatherLoaded(Option<moon_beauty_shell::backend::WeatherData>),
     TickClock,
     TickToasts,
     MetricsCollected(CpuMetrics, RamMetrics, GpuMetrics, AudioStatus, AudioStatus, Option<MprisTrack>),
@@ -686,6 +700,8 @@ pub enum Message {
     Lock(LockMessage),
     DismissActiveOverlay,
     CloseShell,
+    TrayItemsLoaded(Vec<moon_beauty_shell::backend::TrayItem>),
+    CollapseTray,
 }
 
 impl TryInto<iced_layershell::actions::LayershellCustomActionsWithInfo<()>> for Message {
@@ -719,6 +735,9 @@ pub struct MoonBeautyShellApp {
     window_w: f32,
     notif_screen_at_startup: String,
     notif_surface_size: (u32, u32),
+    tray_expanded: bool,
+    tray_items: Vec<moon_beauty_shell::backend::TrayItem>,
+    detected_gpus: Vec<moon_beauty_shell::backend::GpuInfo>,
 
     launcher: AppLauncher,
     calc: CalculatorOverlay,
@@ -804,9 +823,28 @@ impl iced_layershell::Application for MoonBeautyShellApp {
     fn new(_flags: Self::Flags) -> (Self, Command<Message>) {
         let args: Vec<String> = std::env::args().collect();
         let standalone_target = detect_standalone_overlay(&args);
-        let is_notif_surface = detect_notif_surface(&args);
+        if let Some(idx) = args.iter().position(|a| a == "--tray-context-menu") {
+        let json_path = args.get(idx + 1).cloned().unwrap_or_default();
+        let bus = args.get(idx + 2).cloned().unwrap_or_default();
+        let menu_path = args.get(idx + 3).cloned().unwrap_or_default();
+        let w = args.get(idx + 4).and_then(|s| s.parse().ok()).unwrap_or(250u32);
+        let h = args.get(idx + 5).and_then(|s| s.parse().ok()).unwrap_or(400u32);
+        if let Ok(json) = std::fs::read_to_string(&json_path) {
+            if let Ok(items) = serde_json::from_str::<Vec<moon_beauty_shell::backend::TrayMenuItem>>(&json) {
+                let _ = std::fs::remove_file(&json_path);
+                std::process::exit(match moon_beauty_shell::overlays::tray_context::run(items, bus, menu_path, w, h) {
+                    Ok(_) => 0,
+                    Err(_) => 1,
+                });
+            }
+        }
+        std::process::exit(1);
+    }
+
+    let is_notif_surface = detect_notif_surface(&args);
         let is_standalone = standalone_target.is_some();
         let settings = ShellSettings::load();
+        eprintln!("[startup] tray_width={} tray_timeout={}s", settings.tray_width, settings.tray_timeout_sec);
         let theme = ShellTheme::from_settings(&settings);
 
         let (ipc_tx, ipc_rx) = std::sync::mpsc::channel::<IpcCommand>();
@@ -849,6 +887,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
         let notif_rx = if is_notif_surface {
             let (tx, rx) = std::sync::mpsc::channel();
             moon_beauty_shell::backend::notif_dbus::spawn(tx);
+            moon_beauty_shell::backend::tray_watcher::spawn();
             Some(rx)
         } else {
             None
@@ -862,6 +901,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             telemetry: UnifiedTelemetry {
                 cpu: Default::default(),
                 gpu: Default::default(),
+                gpu_selected_idx: 0,
                 ram: Default::default(),
                 net: Default::default(),
                 battery: Default::default(),
@@ -887,6 +927,9 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             window_w: 1920.0,
             notif_screen_at_startup,
             notif_surface_size: if is_notif_surface { (1, 1) } else { (0, 0) },
+            tray_expanded: false,
+            tray_items: Vec::new(),
+            detected_gpus: if is_notif_surface || is_standalone { Vec::new() } else { SystemCollector::list_gpus_sync() },
 
             launcher: AppLauncher::new(),
             calc: CalculatorOverlay::new(),
@@ -920,18 +963,22 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             lockscreen: LockscreenOverlay::new(),
         };
 
-        let init_task = if matches!(app.active_overlay, Some(OverlayTarget::Launcher)) {
-            iced::widget::text_input::focus("launcher_search")
-                .map(Message::Launcher)
+        let mut init_tasks = vec![
+            Command::perform(async {
+                moon_beauty_shell::backend::WeatherBackend::fetch().await.ok()
+            }, Message::WeatherLoaded)
+        ];
+
+        if matches!(app.active_overlay, Some(OverlayTarget::Launcher)) {
+            init_tasks.push(iced::widget::text_input::focus("launcher_search").map(Message::Launcher));
         } else if matches!(app.active_overlay, Some(OverlayTarget::Clipboard)) {
-            Command::perform(
+            init_tasks.push(Command::perform(
                 ClipboardOverlay::reload(),
                 |entries| Message::Clipboard(ClipboardMessage::Reloaded(entries)),
-            )
-        } else {
-            Command::none()
-        };
-        (app, init_task)
+            ));
+        }
+        
+        (app, Command::batch(init_tasks))
     }
 
     fn style(&self, _theme: &Self::Theme) -> iced_layershell::Appearance {
@@ -1094,16 +1141,27 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             Message::TickToasts => {
                 self.notifs.tick_toasts(self.settings.notif_hold_duration_sec);
             }
+            Message::TickWeather => {
+                return Command::perform(async {
+                    moon_beauty_shell::backend::WeatherBackend::fetch().await.ok()
+                }, Message::WeatherLoaded);
+            }
+            Message::WeatherLoaded(w) => {
+                self.telemetry.weather = w;
+            }
             Message::TickHardware => {
+                self.telemetry.gpu_selected_idx = self.detected_gpus.iter().position(|g| g.card_id == self.settings.gpu_selected_id).unwrap_or(0);
                 let bat = SystemCollector::collect_battery();
                 self.telemetry.battery = bat;
                 self.telemetry.net = self.system_collector.update_net();
+
+                let gpu_id = self.settings.gpu_selected_id.clone();
 
                 return Command::perform(
                     async move {
                         let cpu = SystemCollector::collect_cpu().await;
                         let ram = SystemCollector::collect_ram().await;
-                        let gpu = SystemCollector::collect_gpu("card0", false, 0).await;
+                        let gpu = SystemCollector::collect_gpu_by_card_id(&gpu_id).await;
                         let audio = AudioBackend::get_sink().await;
                         let mic = AudioBackend::get_source().await;
                         let mpris = MprisBackend::poll().await;
@@ -1204,7 +1262,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                             eprintln!("[topbar-action] OpenOverlay: id = {:?}", id);
 
                             // 1. DROPDOWN TOOLTIPS (Alarm, CPU, GPU, RAM, Weather, Tray)
-                            if matches!(id.as_str(), "weather" | "cpu" | "gpu" | "ram" | "tray" | "alarm" | "calendar" | "music" | "unified" | "net" | "custom") {
+                            if matches!(id.as_str(), "weather" | "cpu" | "gpu" | "ram" | "alarm" | "calendar" | "music" | "unified" | "net" | "custom") {
                                 // Toggle off if already open
                                 let running = self.weather_tooltip_child.as_mut()
                                     .and_then(|c| c.try_wait().ok())
@@ -1233,8 +1291,6 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                                     cmd.arg("--alarm-tooltip");
                                 } else if id == "weather" {
                                     cmd.arg("--weather-tooltip");
-                                } else if id == "tray" {
-                                    cmd.arg("--tray-popup");
                                 } else if matches!(id.as_str(), "calendar" | "music" | "unified" | "net" | "custom") {
                                     cmd.arg("--info-tooltip").env("MBS_INFO_MODE", &id);
                                 } else {
@@ -1384,6 +1440,55 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                         }
                         CapsuleAction::ToggleSourceMute => {
                             return Command::perform(AudioBackend::toggle_source_mute(), |_| Message::TopBar(TopBarMessage::Noop));
+                        }
+                        CapsuleAction::ToggleTrayExpanded => {
+                            eprintln!("[tray] ToggleTrayExpanded clicked. New state: {}", !self.tray_expanded);
+                            self.tray_expanded = !self.tray_expanded;
+                            if self.tray_expanded {
+                                return Command::perform(
+                                    moon_beauty_shell::backend::tray_watcher::fetch_tray_items(),
+                                    Message::TrayItemsLoaded,
+                                );
+                            }
+                        }
+                        CapsuleAction::TrayActivate(item) => {
+                            self.tray_expanded = false;
+                            return Command::perform(
+                                async move {
+                                    let _ = moon_beauty_shell::backend::tray_watcher::activate_tray_item(&item.bus, &item.path).await;
+                                },
+                                |_| Message::TopBar(TopBarMessage::Noop)
+                            );
+                        }
+                        CapsuleAction::TrayContextMenu(item) => {
+                            let item_clone = item.clone();
+                            return Command::perform(async move {
+                                if let Some((menu_path, items)) = moon_beauty_shell::backend::tray_watcher::get_menu_tree(&item_clone.bus, &item_clone.path).await {
+                                    let json = serde_json::to_string(&items).unwrap();
+                                    let tmp_path = format!("/tmp/mbs-tray-menu-{}.json", std::process::id());
+                                    std::fs::write(&tmp_path, json).unwrap();
+                                    let exe = resolve_exe();
+                                    let h = (items.len() as u32 * 36).clamp(100, 600) + 40;
+                                    let _ = std::process::Command::new(exe)
+                                        .args(["--tray-context-menu", &tmp_path, &item_clone.bus, &menu_path, "250", &h.to_string()])
+                                        .spawn();
+                                }
+                            }, |_| Message::TopBar(TopBarMessage::Noop));
+                        }
+                        CapsuleAction::CycleGpuTarget => {
+                            let gpus = &self.detected_gpus;
+                            if !gpus.is_empty() {
+                                let current = &self.settings.gpu_selected_id;
+                                let next_idx = gpus
+                                    .iter()
+                                    .position(|g| &g.card_id == current)
+                                    .map(|i| (i + 1) % gpus.len())
+                                    .unwrap_or(0);
+                                self.settings.gpu_selected_id = gpus[next_idx].card_id.clone();
+                                let _ = self.settings.save();
+                                eprintln!("[bar] right-click GPU: switched to {}", self.settings.gpu_selected_id);
+                                return Command::done(Message::TickHardware);
+                            }
                         }
                         _ => {}
                     }
@@ -1924,6 +2029,12 @@ impl iced_layershell::Application for MoonBeautyShellApp {
                 }
                 _ => self.lockscreen.update(msg),
             },
+            Message::CollapseTray => {
+                self.tray_expanded = false;
+            }
+            Message::TrayItemsLoaded(items) => {
+                self.tray_items = items;
+            }
             Message::DismissActiveOverlay => {
                 // Persist if we're closing the Settings overlay via Esc.
                 if matches!(self.active_overlay, Some(OverlayTarget::Settings)) {
@@ -1953,6 +2064,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             iced::Subscription::none()
         };
         let hw_sub = iced::time::every(std::time::Duration::from_millis(self.settings.hardware_poll_interval_ms)).map(|_| Message::TickHardware);
+        let weather_sub = iced::time::every(std::time::Duration::from_secs(900)).map(|_| Message::TickWeather);
 
         let clip_sub = if matches!(self.active_overlay, Some(OverlayTarget::Clipboard)) {
             iced::keyboard::on_key_press(|key, _mods| match key {
@@ -2067,7 +2179,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
         };
         let resize_sub = iced::window::resize_events()
             .map(|(_id, size)| Message::WindowResized(size.width));
-        iced::Subscription::batch(vec![clock_sub, toast_sub, hw_sub, esc_sub,
+        iced::Subscription::batch(vec![clock_sub, toast_sub, hw_sub, weather_sub, esc_sub,
             enter_sub, ipc_sub, notif_sub, resize_sub, clip_sub, annotator_sub, text_typing_sub])
     }
 
@@ -2153,7 +2265,7 @@ impl iced_layershell::Application for MoonBeautyShellApp {
             }
         }
 
-        let bar_view = TopBar::view(&self.settings, &self.theme, &self.telemetry, false, &[]).map(Message::TopBar);
+        let bar_view = TopBar::view(&self.settings, &self.theme, &self.telemetry, self.tray_expanded, &self.tray_items).map(Message::TopBar);
         let base_content = Stack::new().push(bar_view);
 
         if let Some(overlay) = overlay_element {

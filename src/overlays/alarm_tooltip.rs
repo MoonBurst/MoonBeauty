@@ -1,5 +1,6 @@
-use iced::widget::{button, column, container, row, scrollable, text, Stack};
-use iced::{Alignment, Color, Element, Length, Padding, Task, Theme};
+use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke};
+use iced::widget::{button, column, container, horizontal_space, row, scrollable, text, text_input, Space, Stack};
+use iced::{Alignment, Color, Element, Length, Padding, Point, Rectangle, Task, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use iced_layershell::Application;
@@ -331,8 +332,8 @@ impl App {
 
         // ── Hex spinner with border highlight for active field ──
         macro_rules! hex_spinner {
-            ($val:expr, $up_msg:expr, $down_msg:expr, $w:expr, $border:expr) => {{
-                let btn_w = $w;
+        ($val:expr, $up_msg:expr, $down_msg:expr, $w:expr, $border:expr) => {{
+            let btn_w = $w;
                 let btn_h = 42.0;
                 let cut = (btn_w * 0.08) as u16;
                 let bg = ShapeBox::new()
@@ -351,8 +352,6 @@ impl App {
                 stacked
             }};
         }
-
-        let btn_w = (content_w - 16.0) / 2.0;
 
         // Spinner width calc — sized to fit all buttons on one row
         let cd_spinner_w = ((content_w - 60.0 - 16.0) / 2.0).max(70.0);
@@ -465,41 +464,73 @@ impl App {
     }
 }
 
+fn slanted_row<'a, M: 'a>(
+    inner: Element<'a, M>,
+    y_mid: f32,
+    total_h: f32,
+    slant: f32,
+    slant_right: bool,
+    safe: f32,
+    total_w: f32,
+    row_h: f32,
+) -> Element<'a, M> {
+    let frac = (y_mid / total_h.max(1.0)).clamp(0.0, 1.0);
+    let (lp, rp) = if slant_right {
+        (slant * (1.0 - frac) + safe, slant * frac + safe)
+    } else {
+        (slant * frac + safe, slant * (1.0 - frac) + safe)
+    };
+    let inner_w = (total_w - lp - rp).max(10.0);
+
+    let inner_clipped = container(inner)
+        .width(Length::Fixed(inner_w))
+        .height(Length::Fixed(row_h))
+        .clip(true);
+
+    row![
+        Space::new(Length::Fixed(lp), Length::Shrink),
+        inner_clipped,
+        Space::new(Length::Fixed(rp), Length::Shrink),
+    ].height(Length::Fixed(row_h)).width(Length::Fixed(total_w)).into()
+}
+
+
 pub fn run() -> Result<(), iced_layershell::Error> {
+    let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
     let s = ShellSettings::load();
-    let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
-    let h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(H);
+    let mut w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
+    let mut h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(s.tooltip_height_px);
+    if std::env::var("MBS_SYS_TARGET").unwrap_or_default() == "ram" {
+        w = w.max(540);
+        h = h.max(480);
+    }
+
     let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
     let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1920);
-    let grow_right = std::env::var("MBS_GROW_RIGHT").map(|v| v == "1").unwrap_or_else(|_| cx < sw / 2);
-    let cap_w: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(W_START);
-    let half_start = (cap_w / 2.0) as i32;
+    let cap_w: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(100.0);
+    let grow_right = cx < sw / 2;
+
     let bar_h = s.bar_height as i32;
-    let sl_str = std::env::var("MBS_SLANT_L").unwrap_or_else(|_| "L".into());
-    let sr_str = std::env::var("MBS_SLANT_R").unwrap_or_else(|_| "L".into());
-    let sw_cap = s.slant_width;
     let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
-    let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
+    
+    let half_cap = (cap_w / 2.0) as i32;
+    let slant_px = s.slant_width as i32;
 
     let (anchor, margin) = if grow_right {
-        let sl_left = sl_str == "L";
-        let shift = if sl_left { sw_cap } else { 0.0 };
-        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, ((cx - half_start) as f32 + shift).max(0.0).min((sw - w as i32).max(0) as f32) as i32))
+        // Left side: left edge of tooltip binds to left edge of capsule
+        let left_edge = (cx - half_cap).max(0);
+        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, left_edge))
     } else {
-        let sr_right = sr_str == "R";
-        let shift = if sr_right { sw_cap } else { 0.0 };
-        (Anchor::Top | Anchor::Right, (margin_top, ((sw - cx - half_start) as f32 + shift).max(0.0).min((sw - w as i32).max(0) as f32) as i32, 0, 0))
+        // Right side: right edge of tooltip binds to right edge of capsule.
+        // We subtract `slant_px` to account for the Parallelogram's inner slant.
+        let right_edge = sw - cx - half_cap - slant_px;
+        (Anchor::Top | Anchor::Right, (margin_top, right_edge.max(0), 0, 0))
     };
 
-                let layer = LayerShellSettings {
-        size: Some((w, h)),
-        exclusive_zone: -1,
-        anchor,
-        layer: Layer::Overlay,
-        keyboard_interactivity: KeyboardInteractivity::Exclusive,
-        binded_output_name: output,
-        margin,
-        ..Default::default()
+    let layer = LayerShellSettings {
+        size: Some((w, h)), exclusive_zone: -1, anchor, layer: Layer::Overlay,
+        keyboard_interactivity: KeyboardInteractivity::OnDemand,
+        binded_output_name: output, margin, ..Default::default()
     };
     App::run(Settings { layer_settings: layer, ..Default::default() })
 }

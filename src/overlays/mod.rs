@@ -21,6 +21,7 @@ pub mod unicode;
 pub mod websearch;
 pub mod weather_tooltip;
 pub mod system_tooltip;
+pub mod tray_context;
 pub mod tray_popup;
 pub mod tooltip_engine;
 

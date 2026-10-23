@@ -23,6 +23,8 @@
           tesseract
           imagemagick
           wl-clipboard
+          pciutils
+          nerd-fonts.symbols-only
         ];
       in {
         devShells.default = pkgs.mkShell {
@@ -36,6 +38,8 @@
             stdenv.cc
             gcc
             binutils
+          mold
+          lld
           ];
           buildInputs = runtimeLibs;
           shellHook = ''
@@ -50,7 +54,7 @@
           cargoLock = {
             lockFile = ./Cargo.lock;
           };
-          nativeBuildInputs = with pkgs; [ pkg-config stdenv.cc ];
+          nativeBuildInputs = with pkgs; [ pkg-config stdenv.cc mold lld ];
           buildInputs = runtimeLibs;
         };
       });

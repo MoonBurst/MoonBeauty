@@ -1,6 +1,7 @@
 use iced::widget::{button, column, container, row, scrollable, slider, text, text_input, Stack};
 use iced::{Alignment, Color, Element, Length, Padding};
 
+use crate::backend::system::{GpuInfo, SystemCollector};
 use crate::config::settings::{ContentRule, FriendProfile, ShellSettings};
 
 /// Unbuffered debug — writes to /tmp/mbs-settings-dbg.log immediately.
@@ -45,6 +46,9 @@ pub enum SettingsMessage {
     BorderWidth(u32),
     ControlBorderWidth(u32),
     CapsuleSpacing(i32),
+    TrayWidth(u32),
+    TrayIconSize(u32),
+    TrayTimeout(u32),
     HardwarePollInterval(u64),
 
     // Bar Geometry
@@ -117,6 +121,12 @@ pub enum SettingsMessage {
     TestAlarmSound,
     ImportAlarmSound,
 
+    SelectGpuId(String),
+    Gpu1TempWarn(u32),
+    Gpu1TempDanger(u32),
+    Gpu1VramWarn(u32),
+    Gpu1VramDanger(u32),
+
     SaveSettings,
     TestNotification,
     ToggleEditModule(String),
@@ -132,6 +142,7 @@ pub struct SettingsOverlay {
     pub editing_module: Option<String>,
     preview_child: Option<std::process::Child>,
     last_preview: std::time::Instant,
+    pub detected_gpus: Vec<GpuInfo>,
 }
 
 impl SettingsOverlay {
@@ -144,6 +155,7 @@ impl SettingsOverlay {
             editing_module: None,
             preview_child: None,
             last_preview: std::time::Instant::now() - std::time::Duration::from_secs(60),
+            detected_gpus: SystemCollector::list_gpus_sync(),
         }
     }
 
@@ -178,8 +190,19 @@ impl SettingsOverlay {
                 | SettingsMessage::MoveCapsuleUp(_)
                 | SettingsMessage::MoveCapsuleDown(_)
                 | SettingsMessage::ColorChanged(_, _)
+                | SettingsMessage::SelectGpuId(_)
+                | SettingsMessage::TrayIconSize(_)
         );
         match message {
+            SettingsMessage::TrayIconSize(v) => settings.tray_icon_size = v.clamp(12, 48),
+            SettingsMessage::SelectGpuId(id) => {
+                settings.gpu_selected_id = id;
+            }
+            SettingsMessage::Gpu1TempWarn(v) => settings.gpu1.temp_warn = v,
+            SettingsMessage::Gpu1TempDanger(v) => settings.gpu1.temp_danger = v,
+            SettingsMessage::Gpu1VramWarn(v) => settings.gpu1.vram_warn = v,
+            SettingsMessage::Gpu1VramDanger(v) => settings.gpu1.vram_danger = v,
+
             SettingsMessage::SelectBarMonitor(s) => {
                 settings.bar_monitor = s.clone();
                 let _ = settings.save();
@@ -215,7 +238,13 @@ impl SettingsOverlay {
                     self.spawn_tooltip_preview(&id, wv, hv, settings);
                 }
             },SettingsMessage::ResetTooltipSize(id) => { self.kill_preview(); settings.tooltip_sizes.remove(&id); }
-            SettingsMessage::SelectTab(t) => { self.kill_preview(); self.active_tab = t; }
+            SettingsMessage::SelectTab(t) => {
+                self.kill_preview();
+                self.active_tab = t;
+                if t == SettingsTab::GpuHardware {
+                    self.detected_gpus = SystemCollector::list_gpus_sync();
+                }
+            }
 
             SettingsMessage::BarHeight(v) => settings.bar_height = v.clamp(28, 90),
             SettingsMessage::GlobalFontSize(v) => settings.global_font_size = v.clamp(8, 32),
@@ -230,6 +259,8 @@ impl SettingsOverlay {
             SettingsMessage::BorderWidth(v) => settings.global_border_width = (v as f32).clamp(1.0, 12.0),
             SettingsMessage::ControlBorderWidth(v) => settings.control_border_width = (v as f32).clamp(1.0, 8.0),
             SettingsMessage::CapsuleSpacing(v) => settings.capsule_spacing = v.clamp(-50, 40),
+            SettingsMessage::TrayWidth(v) => settings.tray_width = v.clamp(50, 400),
+            SettingsMessage::TrayTimeout(v) => settings.tray_timeout_sec = v.clamp(0, 30),
             SettingsMessage::HardwarePollInterval(v) => settings.hardware_poll_interval_ms = v.clamp(500, 10000),
 
             SettingsMessage::SelectBarShape(s) => settings.bar_shape = s,
@@ -1049,6 +1080,10 @@ SettingsMessage::SaveSettings => {}
                     slider(-50..=40, settings.capsule_spacing, SettingsMessage::CapsuleSpacing).width(Length::Fill),
                 ].spacing(3),
                 column![
+                    row![text("Tray Collapsed Width").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tray_width)).size(scale_sz(0.8)).bold().color(theme.text)],
+                    slider(30..=150, settings.tray_width, SettingsMessage::TrayWidth).width(Length::Fill),
+                ].spacing(3),
+                column![
                     row![text("Window & Card Border Width").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.global_border_width as u32)).size(scale_sz(0.8)).bold().color(theme.text)],
                     slider(1..=10, settings.global_border_width as u32, SettingsMessage::BorderWidth).width(Length::Fill),
                 ].spacing(3),
@@ -1135,32 +1170,147 @@ SettingsMessage::SaveSettings => {}
                 col.into()
             }
 
-            SettingsTab::GpuHardware => column![
-                text("🎮 GPU ALERT THRESHOLDS & MONITORING").size(scale_sz(0.95)).bold().color(theme.success),
+            SettingsTab::GpuHardware => {
+                let mut gpu_col = column![
+                    text("🎮 GPU ALERT THRESHOLDS & MONITORING")
+                        .size(scale_sz(0.95))
+                        .bold()
+                        .color(theme.success),
+                ].spacing(12).width(Length::Fill);
 
-                column![
-                    row![text("GPU 0 Temp Warning (°C)").size(scale_sz(0.72)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}°C", settings.gpu0.temp_warn)).size(scale_sz(0.72)).bold().color(theme.text)],
-                    slider(40..=95, settings.gpu0.temp_warn, SettingsMessage::GpuTempWarn).width(Length::Fill),
-                ].spacing(2),
-                column![
-                    row![text("GPU 0 Temp Danger (°C)").size(scale_sz(0.72)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}°C", settings.gpu0.temp_danger)).size(scale_sz(0.72)).bold().color(theme.text)],
-                    slider(50..=105, settings.gpu0.temp_danger, SettingsMessage::GpuTempDanger).width(Length::Fill),
-                ].spacing(2),
-                column![
-                    row![text("GPU 0 Free VRAM Warning (GiB)").size(scale_sz(0.72)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{} GiB", settings.gpu0.vram_warn)).size(scale_sz(0.72)).bold().color(theme.text)],
-                    slider(1..=16, settings.gpu0.vram_warn, SettingsMessage::GpuVramWarn).width(Length::Fill),
-                ].spacing(2),
-                column![
-                    row![text("GPU 0 Free VRAM Danger (GiB)").size(scale_sz(0.72)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{} GiB", settings.gpu0.vram_danger)).size(scale_sz(0.72)).bold().color(theme.text)],
-                    slider(0..=8, settings.gpu0.vram_danger, SettingsMessage::GpuVramDanger).width(Length::Fill),
-                ].spacing(2),
-                column![
-                    row![text("Hardware Polling Interval (ms)").size(scale_sz(0.72)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}ms", settings.hardware_poll_interval_ms)).size(scale_sz(0.72)).bold().color(theme.text)],
+                gpu_col = gpu_col.push(
+                    text("Active GPU (shown in top bar)")
+                        .size(scale_sz(0.8))
+                        .bold()
+                        .color(theme.muted)
+                );
+
+                let mut selector_row: iced::widget::Row<'a, SettingsMessage> =
+                    iced::widget::Row::new().spacing(8).align_y(Alignment::Center);
+
+                if self.detected_gpus.is_empty() {
+                    selector_row = selector_row.push(
+                        text("No GPUs detected")
+                            .size(scale_sz(0.72))
+                            .color(theme.muted)
+                    );
+                } else {
+                    for gpu in &self.detected_gpus {
+                        let is_sel = settings.gpu_selected_id == gpu.card_id;
+                        let card_id = gpu.card_id.clone();
+                        let label = gpu.name.clone();
+                        let btn = button(
+                            text(label)
+                                .size(scale_sz(0.68))
+                                .bold()
+                                .color(if is_sel { Color::BLACK } else { theme.text })
+                        )
+                        .on_press(SettingsMessage::SelectGpuId(card_id))
+                        .padding([4, 12])
+                        .style(move |_t, _s| button::Style {
+                            background: Some(iced::Background::Color(
+                                if is_sel { theme.text } else { Color::TRANSPARENT }
+                            )),
+                            border: iced::Border {
+                                color: if is_sel { theme.text } else { theme.border },
+                                width: 1.0,
+                                radius: 4.0.into(),
+                            },
+                            ..Default::default()
+                        });
+                        selector_row = selector_row.push(btn);
+                    }
+                }
+                gpu_col = gpu_col.push(selector_row);
+
+                for idx in 0usize..2 {
+                    let th = if idx == 0 { &settings.gpu0 } else { &settings.gpu1 };
+                    let gpu_name = self.detected_gpus.get(idx).map(|g| g.name.clone());
+                    let section_label = match gpu_name {
+                        Some(n) => format!("── GPU {}: {} ──", idx, n),
+                        None => format!("── GPU {} (not detected) ──", idx),
+                    };
+
+                    gpu_col = gpu_col.push(
+                        text(section_label)
+                            .size(scale_sz(0.85))
+                            .bold()
+                            .color(theme.success)
+                    );
+
+                    let tw_fn: fn(u32) -> SettingsMessage = if idx == 0 {
+                        SettingsMessage::GpuTempWarn
+                    } else {
+                        SettingsMessage::Gpu1TempWarn
+                    };
+                    let td_fn: fn(u32) -> SettingsMessage = if idx == 0 {
+                        SettingsMessage::GpuTempDanger
+                    } else {
+                        SettingsMessage::Gpu1TempDanger
+                    };
+                    let vw_fn: fn(u32) -> SettingsMessage = if idx == 0 {
+                        SettingsMessage::GpuVramWarn
+                    } else {
+                        SettingsMessage::Gpu1VramWarn
+                    };
+                    let vd_fn: fn(u32) -> SettingsMessage = if idx == 0 {
+                        SettingsMessage::GpuVramDanger
+                    } else {
+                        SettingsMessage::Gpu1VramDanger
+                    };
+
+                    gpu_col = gpu_col.push(column![
+                        row![
+                            text("Temp Warning (°C)").size(scale_sz(0.72)).bold().color(theme.text),
+                            row![].width(Length::Fill),
+                            text(format!("{}°C", th.temp_warn)).size(scale_sz(0.72)).bold().color(theme.text)
+                        ],
+                        slider(40..=95, th.temp_warn, tw_fn).width(Length::Fill),
+                    ].spacing(2));
+
+                    gpu_col = gpu_col.push(column![
+                        row![
+                            text("Temp Danger (°C)").size(scale_sz(0.72)).bold().color(theme.text),
+                            row![].width(Length::Fill),
+                            text(format!("{}°C", th.temp_danger)).size(scale_sz(0.72)).bold().color(theme.text)
+                        ],
+                        slider(50..=105, th.temp_danger, td_fn).width(Length::Fill),
+                    ].spacing(2));
+
+                    gpu_col = gpu_col.push(column![
+                        row![
+                            text("Free VRAM Warning (GiB)").size(scale_sz(0.72)).bold().color(theme.text),
+                            row![].width(Length::Fill),
+                            text(format!("{} GiB", th.vram_warn)).size(scale_sz(0.72)).bold().color(theme.text)
+                        ],
+                        slider(1..=16, th.vram_warn, vw_fn).width(Length::Fill),
+                    ].spacing(2));
+
+                    gpu_col = gpu_col.push(column![
+                        row![
+                            text("Free VRAM Danger (GiB)").size(scale_sz(0.72)).bold().color(theme.text),
+                            row![].width(Length::Fill),
+                            text(format!("{} GiB", th.vram_danger)).size(scale_sz(0.72)).bold().color(theme.text)
+                        ],
+                        slider(0..=8, th.vram_danger, vd_fn).width(Length::Fill),
+                    ].spacing(2));
+                }
+
+                gpu_col = gpu_col.push(column![
+                    row![
+                        text("Hardware Polling Interval (ms)").size(scale_sz(0.72)).bold().color(theme.text),
+                        row![].width(Length::Fill),
+                        text(format!("{}ms", settings.hardware_poll_interval_ms)).size(scale_sz(0.72)).bold().color(theme.text)
+                    ],
                     slider(500..=5000, settings.hardware_poll_interval_ms as u32, |v| SettingsMessage::HardwarePollInterval(v as u64)).width(Length::Fill),
-                ].spacing(2),
-            ]
-            .spacing(12)
-            .into(),
+                ].spacing(2));
+
+                let body: Element<'a, SettingsMessage> = scrollable(gpu_col)
+                    .height(Length::Fill)
+                    .into();
+                body
+            }
+
 
             SettingsTab::BarLayout => {
                 let all_capsules = [
@@ -1271,9 +1421,13 @@ SettingsMessage::SaveSettings => {}
                             row![text("Tooltip Pause Time").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}ms", settings.tooltip_pause_ms)).size(scale_sz(0.8)).bold().color(theme.text)],
                             slider(0..=100, (settings.tooltip_pause_ms / 10).min(100), |v: u32| SettingsMessage::TooltipPauseMs(v * 10)).width(Length::Fill),
                         ].spacing(3).width(Length::FillPortion(1)),
-                        column![].width(Length::FillPortion(1)),
+                        column![
+                                    row![text("Tooltip Text Size").size(scale_sz(0.8)).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tooltip_font_size)).size(scale_sz(0.8)).bold().color(theme.text)],
+                                    slider(8..=28, settings.tooltip_font_size, SettingsMessage::TooltipFontSize).width(Length::Fill),
+                                ].spacing(3).width(Length::FillPortion(1)),
                     ].spacing(20).width(Length::Fill),
                 ].spacing(12).width(Length::Fill).into();
+
 
 
                 let render_row = |id_str: &str, is_visible: bool| -> Element<'a, SettingsMessage> {
@@ -1297,22 +1451,37 @@ SettingsMessage::SaveSettings => {}
                         "alarm" => (400, 280), "calendar" => (380, 260), "music" => (380, 280),
                         "unified" => (380, 260), "net" => (380, 260), _ => (280, 200),
                     };
-                    let size_controls = row![
-                        text("W:").size(scale_sz(0.6)).color(theme.muted),
-                        slider(min_w..=1200, w_val, move |v| SettingsMessage::TooltipSizeWidth(id_w.clone(), v)).width(Length::Fixed(100.0)),
-                        text(format!("{}", w_val)).size(scale_sz(0.6)).color(theme.text).width(Length::Fixed(35.0)),
-                        text("H:").size(scale_sz(0.6)).color(theme.muted),
-                        slider(min_h..=1000, h_val, move |v| SettingsMessage::TooltipSizeHeight(id_h.clone(), v)).width(Length::Fixed(100.0)),
-                        text(format!("{}", h_val)).size(scale_sz(0.6)).color(theme.text).width(Length::Fixed(35.0)),
-                        button(text(if has_override { "×" } else { "·" }).size(scale_sz(0.7)).color(if has_override { theme.danger } else { theme.muted }))
-                            .on_press(SettingsMessage::ResetTooltipSize(id_reset))
-                            .padding([2, 6])
-                            .style(move |_t, _s| button::Style {
-                                background: Some(iced::Background::Color(theme.background)),
-                                border: iced::Border { color: if has_override { theme.danger } else { theme.border }, width: 1.0, radius: 3.0.into() },
-                                ..Default::default()
-                            }),
-                    ].spacing(4).align_y(Alignment::Center);
+
+                    let size_controls = if id_str == "tray" {
+                        row![
+                            text("W:").size(scale_sz(0.6)).color(theme.muted),
+                            slider(30..=400, settings.tray_width, move |v| SettingsMessage::TrayWidth(v)).width(Length::Fixed(80.0)),
+                            text(format!("{}", settings.tray_width)).size(scale_sz(0.6)).color(theme.text).width(Length::Fixed(25.0)),
+                            text("I:").size(scale_sz(0.6)).color(theme.muted),
+                            slider(12..=48, settings.tray_icon_size, move |v| SettingsMessage::TrayIconSize(v)).width(Length::Fixed(80.0)),
+                            text(format!("{}px", settings.tray_icon_size)).size(scale_sz(0.6)).color(theme.text).width(Length::Fixed(25.0)),
+                            text("T:").size(scale_sz(0.6)).color(theme.muted),
+                            slider(0..=30, settings.tray_timeout_sec, move |v| SettingsMessage::TrayTimeout(v)).width(Length::Fixed(80.0)),
+                            text(format!("{}s", settings.tray_timeout_sec)).size(scale_sz(0.6)).color(theme.text).width(Length::Fixed(25.0)),
+                        ].spacing(4).align_y(Alignment::Center)
+                    } else {
+                        row![
+                            text("W:").size(scale_sz(0.6)).color(theme.muted),
+                            slider(min_w..=1200, w_val, move |v| SettingsMessage::TooltipSizeWidth(id_w.clone(), v)).width(Length::Fixed(100.0)),
+                            text(format!("{}", w_val)).size(scale_sz(0.6)).color(theme.text).width(Length::Fixed(35.0)),
+                            text("H:").size(scale_sz(0.6)).color(theme.muted),
+                            slider(min_h..=1000, h_val, move |v| SettingsMessage::TooltipSizeHeight(id_h.clone(), v)).width(Length::Fixed(100.0)),
+                            text(format!("{}", h_val)).size(scale_sz(0.6)).color(theme.text).width(Length::Fixed(35.0)),
+                            button(text(if has_override { "×" } else { "·" }).size(scale_sz(0.7)).color(if has_override { theme.danger } else { theme.muted }))
+                                .on_press(SettingsMessage::ResetTooltipSize(id_reset))
+                                .padding([2, 6])
+                                .style(move |_t, _s| button::Style {
+                                    background: Some(iced::Background::Color(theme.background)),
+                                    border: iced::Border { color: if has_override { theme.danger } else { theme.border }, width: 1.0, radius: 3.0.into() },
+                                    ..Default::default()
+                                }),
+                        ].spacing(4).align_y(Alignment::Center)
+                    };
 
                     let btn_text = if is_visible { "HIDE" } else { "SHOW" };
                     let btn_bg = if is_visible { theme.danger } else { theme.success };

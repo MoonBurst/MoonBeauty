@@ -1,4 +1,4 @@
-use iced::widget::{button, column, row, text, Stack};
+use iced::widget::{column, container, row, text, Space, Stack};
 use iced::{Alignment, Color, Element, Length, Padding, Task, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
@@ -10,18 +10,17 @@ use crate::backend::WeatherBackend;
 use crate::config::theme::ShellTheme;
 use crate::config::ShellSettings;
 use crate::style::shape_box::SlantSide;
+use crate::style::TextExt;
 
 const W_START: f32 = 130.0;
-const AUTO_MS: u128 = 10_000;
+const AUTO_MS: u128 = 20_000;
 
 #[derive(Debug, Clone)]
 pub enum Message { Tick, Loaded(Option<WeatherData>), Dismiss }
 
 impl TryInto<iced_layershell::actions::LayershellCustomActionsWithInfo<()>> for Message {
     type Error = Message;
-    fn try_into(self) -> Result<iced_layershell::actions::LayershellCustomActionsWithInfo<()>, Self::Error> {
-        Err(self)
-    }
+    fn try_into(self) -> Result<iced_layershell::actions::LayershellCustomActionsWithInfo<()>, Self::Error> { Err(self) }
 }
 
 pub struct App {
@@ -48,12 +47,12 @@ impl Application for App {
 
     fn new(_: ()) -> (Self, Task<Message>) {
         let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|s| s.parse().ok()).unwrap_or(200);
-        let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|s| s.parse().ok()).unwrap_or(1920);
+        let sw: i32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|s| s.parse().ok()).unwrap_or(1920);
         let grow_right = std::env::var("MBS_GROW_RIGHT").map(|v| v == "1").unwrap_or_else(|_| cx < sw / 2);
-        let _h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
-    let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
+        let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(420);
         let s = ShellSettings::load();
-        let h = s.tooltip_height_px;
+        let h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(520);
+        
         let drop_ms = s.tooltip_drop_ms as f32;
         let expand_ms = s.tooltip_expand_ms as f32;
         let w_start: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(W_START);
@@ -62,26 +61,23 @@ impl Application for App {
         let slant_l = if sl_str == "R" { SlantSide::Right } else { SlantSide::Left };
         let slant_r = if sr_str == "R" { SlantSide::Right } else { SlantSide::Left };
 
-        let app = Self { opened: Instant::now(), weather: None, fetched: false, grow_right, w, w_start, slant_l, slant_r, h, drop_ms, expand_ms, closing_at: None};
+        let app = Self { opened: Instant::now(), weather: None, fetched: false, grow_right, w, w_start, slant_l, slant_r, h, drop_ms, expand_ms, closing_at: None };
         let task = Task::perform(async { WeatherBackend::fetch().await.ok() }, Message::Loaded);
         (app, task)
     }
 
     fn namespace(&self) -> String { "mbs-wx-tip".into() }
-
     fn style(&self, _theme: &Self::Theme) -> iced_layershell::Appearance {
         iced_layershell::Appearance { background_color: Color::TRANSPARENT, text_color: Color::WHITE }
     }
 
     fn update(&mut self, m: Message) -> Task<Message> {
         match m {
-            Message::Tick => { if let Some(t) = self.closing_at {
-                    if t.elapsed().as_millis() > (self.drop_ms * 1.9) as u128 {
-                        std::process::exit(0);
-                    }
-                } else if self.opened.elapsed().as_millis() > AUTO_MS {
-                    std::process::exit(0);
-                } }
+            Message::Tick => {
+                if let Some(t) = self.closing_at {
+                    if t.elapsed().as_millis() > (self.drop_ms * 1.9) as u128 { std::process::exit(0); }
+                } else if self.opened.elapsed().as_millis() > AUTO_MS { std::process::exit(0); }
+            }
             Message::Loaded(w) => { self.weather = w; self.fetched = true; }
             Message::Dismiss => { self.closing_at = Some(Instant::now()); }
         }
@@ -93,50 +89,24 @@ impl Application for App {
         let theme = ShellTheme::from_settings(&settings);
         let anim = if let Some(t) = self.closing_at {
             crate::overlays::tooltip_engine::compute_close(
-                t.elapsed().as_millis() as f32,
-                self.w_start,
-                self.w as f32,
-                self.h as f32,
-                theme.slant_width,
-                settings.bar_height as f32,
-                self.drop_ms,
+                t.elapsed().as_millis() as f32, self.w_start, self.w as f32, self.h as f32,
+                theme.slant_width, settings.bar_height as f32, self.drop_ms,
             )
         } else {
             crate::overlays::tooltip_engine::compute(
-                self.opened.elapsed().as_millis() as f32,
-            self.w_start,
-            self.w as f32,
-            self.h as f32,
-            theme.slant_width,
-            settings.bar_height as f32,
-            self.drop_ms,
-            self.expand_ms,
-        
+                self.opened.elapsed().as_millis() as f32, self.w_start, self.w as f32, self.h as f32,
+                theme.slant_width, settings.bar_height as f32, self.drop_ms, self.expand_ms,
             )
         };
-        let _slant = (theme.slant_width * (anim.h / settings.bar_height as f32)).max(0.0);
-
-        let _border_color = match &self.weather {
-            Some(w) => match &w.alert {
-                WeatherAlert::Danger(_) => theme.danger,
-                WeatherAlert::Upcoming(_) => theme.warning,
-                WeatherAlert::None => theme.text,
-            },
-            None => theme.text,
-        };
-
-        let slant_h = theme.slant_width * (anim.h / settings.bar_height as f32);
+        
+        let slant_h = theme.slant_width * (anim.h / settings.bar_height.max(1) as f32);
         let bg = crate::overlays::tooltip_engine::ParallelogramBg {
-            w: anim.w,
-            h: anim.h,
-            slant: slant_h,
+            w: anim.w, h: anim.h, slant: slant_h,
             slant_right: self.slant_l == SlantSide::Right,
-            background: theme.background,
-            border_color: theme.text,
-            border_width: theme.control_border_width,
+            background: theme.background, border_color: theme.text, border_width: theme.control_border_width,
         };
 
-        let content: Element<'_, Message> = self.build_content(&theme);
+        let content: Element<'_, Message> = self.build_content(&theme, &settings, anim.opacity);
         let clipped = crate::overlays::tooltip_engine::clip_content(content, anim.w, anim.h, self.grow_right);
         let stacked: Element<'_, Message> = Stack::new().push(bg.view()).push(clipped).into();
         crate::overlays::tooltip_engine::align_to_side(stacked, self.grow_right)
@@ -145,93 +115,142 @@ impl Application for App {
     fn subscription(&self) -> iced::Subscription<Message> {
         iced::Subscription::batch([
             iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
-            iced::keyboard::on_key_press(|k, _| if k == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) { Some(Message::Dismiss) } else { None }),
+            iced::keyboard::on_key_press(|k, _| {
+                if k == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) { Some(Message::Dismiss) } else { None }
+            }),
         ])
     }
     fn theme(&self) -> Theme { Theme::Dark }
 }
 
 impl App {
-    fn build_content(&self, t: &ShellTheme) -> Element<'_, Message> {
-        let (fg, muted, warn, danger) = (t.text, t.muted, t.warning, t.danger);
-        // Ensure text never overlaps the slanted borders
-        let slant_pad = (t.slant_width * 2.5 + 16.0).max(32.0);
-        let (left_pad, right_pad) = if self.grow_right {
-            (slant_pad, 16.0)
-        } else {
-            (16.0, slant_pad)
-        };
-        let pad = Padding { top: 16.0, right: right_pad, bottom: 16.0, left: left_pad };
+    fn build_content<'a>(&'a self, t: &ShellTheme, settings: &ShellSettings, alpha: f32) -> Element<'a, Message> {
+        let a = move |c: Color| Color { a: c.a * alpha, ..c };
+        let text_col = a(t.text);
+        let muted = a(t.muted);
+        let danger = a(t.danger);
+        let warning = a(t.warning);
 
-        let close_btn: Element<'_, Message> = button(text("✕").size(11).color(muted))
-            .on_press(Message::Dismiss)
-            .padding([2, 6])
-            .into();
+        let fs = settings.tooltip_font_size;
+        let total_h = self.h as f32;
+        let bar_h = settings.bar_height.max(1) as f32;
+        let slant_h = t.slant_width * (total_h / bar_h);
+        let slant_right = self.slant_l == SlantSide::Right;
+        let half_tt = settings.control_border_width * 0.5;
+        let safe = 16.0;
+        let vpad = 14.0;
+        let gap = 8.0;
+        let w_f = self.w as f32;
+
+        let mut y = vpad;
+        let mut col = column![].spacing(gap).width(Length::Fill);
+
+        // Header
+        let header_h = fs as f32 + 16.0;
+        let title = match &self.weather.as_ref().map(|w| &w.alert) {
+            Some(WeatherAlert::Danger(_)) => "DANGER",
+            Some(WeatherAlert::Upcoming(_)) => "WARNING",
+            _ => "LOCAL WEATHER",
+        };
+        let header_el = row![
+            text(title).size(fs.max(12)).bold().color(if let Some(WeatherAlert::Danger(_)) = self.weather.as_ref().map(|w| &w.alert) { danger } else { text_col }),
+            iced::widget::horizontal_space(),
+        ].align_y(Alignment::Center).width(Length::Fill).into();
+        col = col.push(slanted_row(header_el, y + header_h * 0.5, total_h, slant_h, slant_right, safe, w_f, header_h));
+        y += header_h + gap;
 
         if let Some(wx) = &self.weather {
-            let alert: Element<'_, Message> = match &wx.alert {
-                WeatherAlert::Danger(s) => text(s.clone()).size(13).color(danger).into(),
-                WeatherAlert::Upcoming(s) => text(s.clone()).size(13).color(warn).into(),
-                WeatherAlert::None => text("").size(0).into(),
-            };
-            let mut hrs: iced::widget::Row<'_, Message> = iced::widget::Row::new().spacing(14).align_y(Alignment::Center);
-            for hh in wx.hourly.iter().take(6) {
-                hrs = hrs.push(column![
-                    text(&hh.time_label).size(11).color(muted),
-                    text(hh.icon).size(20),
-                    text(format!("{}°", hh.temp_f)).size(12).color(fg),
-                ].spacing(2).align_x(Alignment::Center));
+            let cell_h = fs as f32 + 12.0;
+            let mut list_col = column![].spacing(2).width(Length::Fill);
+
+            for (i, line) in wx.tooltip_lines.iter().take(12).enumerate() {
+                let color = if line.contains("Danger") || line.contains("Storm") { danger }
+                            else if line.contains("Alert") || line.contains("Rain") || line.contains("Snow") { warning }
+                            else { text_col };
+                
+                let txt = if i == 0 {
+                    text(line).size(fs).font(iced::Font::MONOSPACE).bold().color(color).wrapping(iced::widget::text::Wrapping::None)
+                } else {
+                    text(line).size(fs).font(iced::Font::MONOSPACE).color(color).wrapping(iced::widget::text::Wrapping::None)
+                };
+                let row_el = row![txt].align_y(Alignment::Center).width(Length::Fill).into();
+                
+                list_col = list_col.push(slanted_row(row_el, y + cell_h * 0.5, total_h, slant_h, slant_right, safe, w_f, cell_h));
+                y += cell_h + 2.0;
             }
-            column![
-                row![
-                    text(wx.icon).size(40),
-                    column![text(format!("{}°F", wx.temp_f)).size(28).color(fg), text(format!("{}°C", wx.temp_c)).size(14).color(muted)].spacing(0),
-                    text(wx.desc).size(16).color(fg).width(Length::Fill),
-                    close_btn,
-                ].spacing(16).align_y(Alignment::Center),
-                alert,
-                hrs,
-            ].spacing(14).padding(pad)
-             .width(Length::Fixed(self.w as f32))
-             .height(Length::Fixed(self.h as f32))
-             .into()
+
+            col = col.push(list_col);
         } else if self.fetched {
-            column![text("Weather unavailable").size(16).color(muted)].spacing(8).padding(pad).width(Length::Fixed(self.w as f32)).height(Length::Fixed(self.h as f32)).into()
+            col = col.push(slanted_row(text("Weather unavailable").into(), y + 20.0, total_h, slant_h, slant_right, safe, w_f, 40.0));
         } else {
-            column![text("Loading weather…").size(16).color(muted)].spacing(8).padding(pad).width(Length::Fixed(self.w as f32)).height(Length::Fixed(self.h as f32)).into()
+            col = col.push(slanted_row(text("Loading weather...").into(), y + 20.0, total_h, slant_h, slant_right, safe, w_f, 40.0));
         }
+
+        container(col)
+            .padding(Padding { top: vpad, right: 0.0, bottom: vpad, left: 0.0 })
+            .width(Length::Fixed(self.w as f32))
+            .height(Length::Fixed(self.h as f32))
+            .clip(true)
+            .into()
     }
+}
+
+fn slanted_row<'a, M: 'a>(
+    inner: Element<'a, M>,
+    y_mid: f32,
+    total_h: f32,
+    slant: f32,
+    slant_right: bool,
+    safe: f32,
+    total_w: f32,
+    row_h: f32,
+) -> Element<'a, M> {
+    let frac = (y_mid / total_h.max(1.0)).clamp(0.0, 1.0);
+    let (lp, rp) = if slant_right {
+        (slant * (1.0 - frac) + safe, slant * frac + safe)
+    } else {
+        (slant * frac + safe, slant * (1.0 - frac) + safe)
+    };
+    let inner_w = (total_w - lp - rp).max(10.0);
+
+    let inner_clipped = container(inner)
+        .width(Length::Fixed(inner_w))
+        .height(Length::Fixed(row_h))
+        .clip(true);
+
+    row![
+        Space::new(Length::Fixed(lp), Length::Shrink),
+        inner_clipped,
+        Space::new(Length::Fixed(rp), Length::Shrink),
+    ].height(Length::Fixed(row_h)).width(Length::Fixed(total_w)).into()
 }
 
 pub fn run() -> Result<(), iced_layershell::Error> {
     let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
-    eprintln!("[tip-output] raw={:?} parsed={:?}", std::env::var("MBS_OUTPUT"), output);
     let s = ShellSettings::load();
-    let h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
-    let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
+    let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(420);
+    let h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(520);
+
     let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
     let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1920);
+    let cap_w: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(100.0);
     let grow_right = cx < sw / 2;
-    let cap_w: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(W_START);
-    let half_start = (cap_w / 2.0) as i32;
+
     let bar_h = s.bar_height as i32;
-    let sl_str = std::env::var("MBS_SLANT_L").unwrap_or_else(|_| "L".into());
-    let sr_str = if grow_right { sl_str.clone() } else {
-        std::env::var("MBS_SLANT_R").unwrap_or_else(|_| "R".into())
-    };
-    let sw_cap = s.slant_width;
-    let _sw_tip = s.slant_width * (h as f32 / s.bar_height as f32);
     let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
+    let half_cap = (cap_w / 2.0) as i32;
+    let slant_px = s.slant_width as i32;
 
     let (anchor, margin) = if grow_right {
-        let sl_left = sl_str == "L";
-        let shift = if sl_left { sw_cap } else { 0.0 };
-        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, ((cx - half_start) as f32 + shift).max(0.0).min((sw - w as i32).max(0) as f32) as i32))
+        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, (cx - half_cap).max(0)))
     } else {
-        let sr_right = sr_str == "R";
-        let shift = if sr_right { sw_cap } else { 0.0 };
-        (Anchor::Top | Anchor::Right, (margin_top, ((sw - cx - half_start) as f32 + shift).max(0.0).min((sw - w as i32).max(0) as f32) as i32, 0, 0))
+        (Anchor::Top | Anchor::Right, (margin_top, (sw - cx - half_cap - slant_px).max(0), 0, 0))
     };
-        let layer = LayerShellSettings { size: Some((w, h)), exclusive_zone: -1, anchor, layer: Layer::Overlay, keyboard_interactivity: KeyboardInteractivity::OnDemand, binded_output_name: output, margin, ..Default::default() };
+
+    let layer = LayerShellSettings {
+        size: Some((w, h)), exclusive_zone: -1, anchor, layer: Layer::Overlay,
+        keyboard_interactivity: KeyboardInteractivity::OnDemand,
+        binded_output_name: output, margin, ..Default::default()
+    };
     App::run(Settings { layer_settings: layer, ..Default::default() })
 }

@@ -167,9 +167,79 @@ pub async fn fetch_tray_items() -> Vec<TrayItem> {
             }
             Err(_) => String::new(),
         };
+        eprintln!("[tray-fetch] item: {} path: {:?}", title, icon_path);
         out.push(TrayItem { bus, path, id, title, icon_path, tooltip });
     }
     out
+}
+
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TrayMenuItem {
+    pub id: i32,
+    pub label: String,
+    pub enabled: bool,
+    pub visible: bool,
+}
+
+pub async fn get_menu_tree(bus: &str, path: &str) -> Option<(String, Vec<TrayMenuItem>)> {
+    let conn = zbus::Connection::session().await.ok()?;
+    let proxy = zbus::Proxy::new(&conn, bus, path, "org.kde.StatusNotifierItem").await.ok()?;
+    
+    // Menu property is ObjectPath, not String.
+    let menu_obj: zbus::zvariant::OwnedObjectPath = proxy.get_property("Menu").await.ok()?;
+    let menu_path: String = menu_obj.as_str().to_string();
+    if menu_path.is_empty() { return None; }
+    
+    let menu_proxy = zbus::Proxy::new(&conn, bus, menu_path.as_str(), "com.canonical.dbusmenu").await.ok()?;
+    let reply = menu_proxy.call_method("GetLayout", &(0i32, -1i32, vec!["label", "enabled", "visible"])).await.ok()?;
+    
+    type RawItem = (i32, std::collections::HashMap<String, zbus::zvariant::OwnedValue>, Vec<zbus::zvariant::OwnedValue>);
+    let (_rev, layout): (u32, RawItem) = reply.body().deserialize().ok()?;
+    
+    fn parse_item(id: i32, props: std::collections::HashMap<String, zbus::zvariant::OwnedValue>, children: Vec<zbus::zvariant::OwnedValue>) -> Vec<TrayMenuItem> {
+        let mut items = Vec::new();
+        
+        let label = match props.get("label").map(|v| &**v) {
+            Some(zbus::zvariant::Value::Str(s)) => s.as_str().to_string(),
+            _ => String::new(),
+        };
+        let enabled = match props.get("enabled").map(|v| &**v) {
+            Some(zbus::zvariant::Value::Bool(b)) => *b,
+            _ => true,
+        };
+        let visible = match props.get("visible").map(|v| &**v) {
+            Some(zbus::zvariant::Value::Bool(b)) => *b,
+            _ => true,
+        };
+        let label_clean = label.replace('_', "");
+        
+        if label_clean == "-" {
+            items.push(TrayMenuItem { id: -1, label: "-".into(), enabled: false, visible: true });
+        } else if !label_clean.is_empty() {
+            items.push(TrayMenuItem { id, label: label_clean, enabled, visible });
+        }
+        
+        for c in children {
+            let val: zbus::zvariant::Value = c.into();
+            if let Ok((cid, cprops, ckids)) = val.downcast::<RawItem>() {
+                items.extend(parse_item(cid, cprops, ckids));
+            }
+        }
+        items
+    }
+    
+    let items = parse_item(layout.0, layout.1, layout.2);
+    eprintln!("[tray-menu] found {} items", items.len());
+    Some((menu_path, items))
+}
+
+
+pub async fn trigger_menu_item(bus: &str, menu_path: &str, id: i32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let conn = zbus::Connection::session().await?;
+    let proxy = zbus::Proxy::new(&conn, bus, menu_path, "com.canonical.dbusmenu").await?;
+    proxy.call_method("Event", &(id, "clicked", zbus::zvariant::Value::from(0i32), 0u32)).await?;
+    Ok(())
 }
 
 pub async fn activate_tray_item(bus: &str, path: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -179,12 +249,6 @@ pub async fn activate_tray_item(bus: &str, path: &str) -> Result<(), Box<dyn std
     Ok(())
 }
 
-pub async fn context_menu_tray_item(bus: &str, path: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let conn = zbus::Connection::session().await?;
-    let proxy = zbus::Proxy::new(&conn, bus, path, "org.kde.StatusNotifierItem").await?;
-    proxy.call_method("ContextMenu", &(0i32, 0i32)).await?;
-    Ok(())
-}
 
 fn parse_registered(s: &str) -> Option<(String, String)> {
     if let Some(idx) = s.find('/') {
