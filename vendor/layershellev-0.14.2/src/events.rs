@@ -4,15 +4,15 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
 };
 
 use wayland_client::{
+    QueueHandle, WEnum,
     globals::GlobalList,
     protocol::{
         wl_buffer::WlBuffer,
         wl_compositor::WlCompositor,
-        wl_output::WlOutput,
+        wl_output::{self, WlOutput},
         wl_pointer::{self, ButtonState, WlPointer},
         wl_shm::WlShm,
     },
-    QueueHandle, WEnum,
 };
 
 use crate::{id, xkb_keyboard::KeyEvent};
@@ -36,19 +36,19 @@ use std::{fmt::Debug, fs::File};
 ///
 /// RequestMessages store the DispatchMessage, you can know what happened during dispatch with this
 /// event.
-pub enum LayerEvent<'a, T, Message> {
+pub enum LayerShellEvent<'a, T, Message> {
     /// the first event when start a new gui, program. you can return [ReturnData::None] or
     /// [ReturnData::RequestBind], then it will continue to the next request.
     /// Here only the above two [ReturnData] are acceptable.
     InitRequest,
     /// if the info of the XdgOutput is changed, it will send the event
     XdgInfoChanged(XdgInfoChangedType),
-    /// After you return [ReturnData::RequestBind] in the [LayerEvent::InitRequest] stage, next
-    /// event is [LayerEvent::BindProvide], you can use the GlobalList and QueueHandle to create
+    /// After you return [ReturnData::RequestBind] in the [LayerShellEvent::InitRequest] stage, next
+    /// event is [LayerShellEvent::BindProvide], you can use the GlobalList and QueueHandle to create
     /// new wayland objects.
     BindProvide(&'a GlobalList, &'a QueueHandle<WindowState<T>>),
     /// After you return [ReturnData::RequestCompositor] in the init stage, next
-    /// event is [LayerEvent::CompositorProvide], you can use the WlCompositor and QueueHandle to
+    /// event is [LayerShellEvent::CompositorProvide], you can use the WlCompositor and QueueHandle to
     /// create new wayland objects.
     CompositorProvide(&'a WlCompositor, &'a QueueHandle<WindowState<T>>),
     /// create a new buffer after request. if you use display_handle, you do not need to care about
@@ -68,8 +68,21 @@ pub enum LayerEvent<'a, T, Message> {
     UserEvent(Message),
 }
 
+/// Define the output for new layershell
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum OutputOption {
+    LastOutput,
+
+    /// NOTE: The output should be in the same connection with the layershellev, that means if you
+    /// want to pass a [wl_output::WlOutput] to create a new layershell, you need to pass your
+    /// connection to layershellev first
+    Output(wl_output::WlOutput),
+    #[default]
+    None,
+}
+
 /// layershell settings to create a new layershell surface
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewLayerShellSettings {
     /// the size of the layershell, optional.
     pub size: Option<(u32, u32)>,
@@ -81,7 +94,9 @@ pub struct NewLayerShellSettings {
     /// follow the last output of the activated surface, used to create some thing like mako, who
     /// will show on the same window, only when the notifications is cleared, it will change the
     /// wl_output.
-    pub use_last_output: bool,
+    pub output_option: OutputOption,
+    pub events_transparent: bool,
+    pub namespace: Option<String>,
 }
 
 /// be used to create a new popup
@@ -94,6 +109,25 @@ pub struct NewPopUpSettings {
     /// It means where the popup is, on which surface. It is the id of that layershell
     pub id: id::Id,
 }
+/// be used to create a new popup
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub struct NewXdgWindowSettings {
+    /// the size of the popup
+    pub title: Option<String>,
+    pub size: Option<(u32, u32)>,
+}
+
+/// input panel settings to create a new input panel surface
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NewInputPanelSettings {
+    pub size: (u32, u32),
+    /// set the surface type as a keyboard
+    pub keyboard: bool,
+    /// follow the last output of the activated surface, used to create some thing like mako, who
+    /// will show on the same window, only when the notifications is cleared, it will change the
+    /// wl_output.
+    pub use_last_output: bool,
+}
 
 impl Default for NewLayerShellSettings {
     fn default() -> Self {
@@ -104,10 +138,13 @@ impl Default for NewLayerShellSettings {
             size: None,
             margin: Some((0, 0, 0, 0)),
             keyboard_interactivity: KeyboardInteractivity::OnDemand,
-            use_last_output: false,
+            output_option: OutputOption::None,
+            events_transparent: false,
+            namespace: None,
         }
     }
 }
+
 /// the return data
 /// Note: when event is RequestBuffer, you must return WlBuffer
 /// Note: when receive InitRequest, you can request to bind extra wayland-protocols. this time you
@@ -129,13 +166,15 @@ pub enum ReturnData<INFO> {
     RequestCompositor,
     RedrawAllRequest,
     RedrawIndexRequest(Id),
-    RequestSetCursorShape((String, WlPointer, u32)),
-    NewLayerShell((NewLayerShellSettings, Option<INFO>)),
-    NewPopUp((NewPopUpSettings, Option<INFO>)),
+    RequestSetCursorShape((String, WlPointer)),
+    NewLayerShell((NewLayerShellSettings, id::Id, Option<INFO>)),
+    NewPopUp((NewPopUpSettings, id::Id, Option<INFO>)),
+    NewXdgBase((NewXdgWindowSettings, id::Id, Option<INFO>)),
+    NewInputPanel((NewInputPanelSettings, id::Id, Option<INFO>)),
     None,
 }
 
-/// this tell the what kind of information passed by [LayerEvent::XdgInfoChanged]
+/// this tell the what kind of information passed by [LayerShellEvent::XdgInfoChanged]
 #[derive(Debug, Clone, Copy)]
 pub enum XdgInfoChangedType {
     Position,
@@ -162,6 +201,37 @@ pub struct AxisScroll {
     pub stop: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Ime {
+    /// Notifies when the IME was enabled.
+    ///
+    /// After getting this event you could receive [`Preedit`][Self::Preedit] and
+    /// [`Commit`][Self::Commit] events. You should also start performing IME related requests
+    Enabled,
+
+    /// Notifies when a new composing text should be set at the cursor position.
+    ///
+    /// The value represents a pair of the preedit string and the cursor begin position and end
+    /// position. When it's `None`, the cursor should be hidden. When `String` is an empty string
+    /// this indicates that preedit was cleared.
+    ///
+    /// The cursor position is byte-wise indexed.
+    Preedit(String, Option<(usize, usize)>),
+
+    /// Notifies when text should be inserted into the editor widget.
+    ///
+    /// Right before this event winit will send empty [`Self::Preedit`] event.
+    Commit(String),
+
+    /// Notifies when the IME was disabled.
+    ///
+    /// After receiving this event you won't get any more [`Preedit`][Self::Preedit] or
+    /// [`Commit`][Self::Commit] events until the next [`Enabled`][Self::Enabled] event. You should
+    /// also stop issuing IME related requests and clear
+    /// pending preedit text.
+    Disabled,
+}
+
 #[allow(unused)]
 #[derive(Debug, Clone)]
 pub(crate) enum DispatchMessageInner {
@@ -186,6 +256,7 @@ pub(crate) enum DispatchMessageInner {
     },
     Axis {
         time: u32,
+        scale: f64,
         horizontal: AxisScroll,
         vertical: AxisScroll,
         source: Option<wl_pointer::AxisSource>,
@@ -217,6 +288,8 @@ pub(crate) enum DispatchMessageInner {
     },
 
     ModifiersChanged(ModifiersState),
+    Focused(Id),
+    Unfocus,
     KeyboardInput {
         event: KeyEvent,
 
@@ -231,17 +304,12 @@ pub(crate) enum DispatchMessageInner {
         /// Otherwise, this value is always `false`.
         is_synthetic: bool,
     },
-    RefreshSurface {
-        width: u32,
-        height: u32,
+    PreferredScale {
+        scale_u32: u32,
+        scale_float: f64,
     },
-    RequestRefresh {
-        width: u32,
-        height: u32,
-        is_created: bool,
-    },
-    PrefredScale(u32),
     XdgInfoChanged(XdgInfoChangedType),
+    Ime(Ime),
 }
 
 /// This tell the DispatchMessage by dispatch
@@ -272,6 +340,7 @@ pub enum DispatchMessage {
     /// About the scroll
     Axis {
         time: u32,
+        scale: f64,
         horizontal: AxisScroll,
         vertical: AxisScroll,
         source: Option<wl_pointer::AxisSource>,
@@ -293,9 +362,20 @@ pub enum DispatchMessage {
         y: f64,
     },
     /// forward the event of wayland-touch
-    TouchMotion { time: u32, id: i32, x: f64, y: f64 },
+    TouchMotion {
+        time: u32,
+        id: i32,
+        x: f64,
+        y: f64,
+    },
     /// TouchEvent is cancelled
-    TouchCancel { id: i32, x: f64, y: f64 },
+    TouchCancel {
+        id: i32,
+        x: f64,
+        y: f64,
+    },
+    Focused(Id),
+    Unfocus,
     /// Keyboard ModifiersChanged.
     ModifiersChanged(ModifiersState),
     /// Keyboard Event about input.
@@ -318,10 +398,16 @@ pub enum DispatchMessage {
     RequestRefresh {
         width: u32,
         height: u32,
+        scale_float: f64,
         is_created: bool,
     },
     /// fractal scale handle
-    PrefredScale(u32),
+    PreferredScale {
+        scale_u32: u32,
+        scale_float: f64,
+    },
+    Ime(Ime),
+    Closed,
 }
 
 impl From<DispatchMessageInner> for DispatchMessage {
@@ -392,26 +478,21 @@ impl From<DispatchMessageInner> for DispatchMessage {
             DispatchMessageInner::TouchCancel { id, x, y } => {
                 DispatchMessage::TouchCancel { id, x, y }
             }
-            DispatchMessageInner::RequestRefresh {
-                width,
-                height,
-                is_created,
-            } => DispatchMessage::RequestRefresh {
-                width,
-                height,
-                is_created,
-            },
             DispatchMessageInner::Axis {
                 time,
+                scale,
                 horizontal,
                 vertical,
                 source,
             } => DispatchMessage::Axis {
                 time,
+                scale,
                 horizontal,
                 vertical,
                 source,
             },
+            DispatchMessageInner::Focused(id) => DispatchMessage::Focused(id),
+            DispatchMessageInner::Unfocus => DispatchMessage::Unfocus,
             DispatchMessageInner::ModifiersChanged(modifier) => {
                 DispatchMessage::ModifiersChanged(modifier)
             }
@@ -422,8 +503,14 @@ impl From<DispatchMessageInner> for DispatchMessage {
                 event,
                 is_synthetic,
             },
-            DispatchMessageInner::PrefredScale(scale) => DispatchMessage::PrefredScale(scale),
-            DispatchMessageInner::RefreshSurface { .. } => unimplemented!(),
+            DispatchMessageInner::PreferredScale {
+                scale_u32,
+                scale_float,
+            } => DispatchMessage::PreferredScale {
+                scale_u32,
+                scale_float,
+            },
+            DispatchMessageInner::Ime(ime) => DispatchMessage::Ime(ime),
             DispatchMessageInner::XdgInfoChanged(_) => unimplemented!(),
         }
     }

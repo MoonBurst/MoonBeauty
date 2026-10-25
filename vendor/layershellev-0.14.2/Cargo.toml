@@ -10,14 +10,15 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
+edition = "2024"
 name = "layershellev"
-version = "0.7.2"
+version = "0.14.2"
 authors = [
     "Decodertalkers <aakari@tutanota.com>",
     "Aakash Sen Sharma <aakashsensharma@gmail.com>",
 ]
 build = false
+autolib = false
 autobins = false
 autoexamples = false
 autotests = false
@@ -30,6 +31,7 @@ keywords = [
 ]
 license = "MIT"
 repository = "https://github.com/waycrate/exwlshelleventloop"
+resolver = "2"
 
 [lib]
 name = "layershellev"
@@ -40,7 +42,13 @@ name = "simplelayer"
 path = "examples/simplelayer.rs"
 
 [dependencies.bitflags]
-version = "2.6.0"
+version = "2.9.0"
+
+[dependencies.calloop]
+version = "0.14.1"
+
+[dependencies.calloop-wayland-source]
+version = "0.4.0"
 
 [dependencies.log]
 version = "0.4.22"
@@ -50,32 +58,27 @@ version = "0.6"
 features = ["std"]
 package = "raw-window-handle"
 
-[dependencies.sctk]
-version = "0.18.1"
-features = ["calloop"]
-package = "smithay-client-toolkit"
-
 [dependencies.tempfile]
-version = "3.12.0"
+version = "3.23.0"
 
 [dependencies.thiserror]
-version = "1.0.63"
+version = "2.0.12"
 
 [dependencies.waycrate_xkbkeycode]
-version = "0.7.2"
+version = "0.14.2"
 
 [dependencies.wayland-backend]
-version = "0.3.6"
+version = "0.3.7"
 features = ["client_system"]
 
 [dependencies.wayland-client]
-version = "0.31.5"
+version = "0.31.7"
 
 [dependencies.wayland-cursor]
-version = "0.31.5"
+version = "0.31.7"
 
 [dependencies.wayland-protocols]
-version = "0.32.3"
+version = "0.32.5"
 features = [
     "unstable",
     "staging",
@@ -84,10 +87,10 @@ features = [
 default-features = false
 
 [dependencies.wayland-protocols-misc]
-version = "0.3.3"
+version = "0.3.5"
 features = ["client"]
 
 [dependencies.wayland-protocols-wlr]
-version = "0.3.3"
+version = "0.3.5"
 features = ["client"]
 default-features = false

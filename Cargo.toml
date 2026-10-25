@@ -10,8 +10,8 @@ sha2 = "0.10"
 rand_chacha = "0.3"
 rand = "0.8"
 async-channel = "2"
-iced = { version = "0.14", features = ["advanced", "tokio", "canvas", "image", "svg"] }
-iced_layershell = "0.14.2"
+iced = { version = "0.14", features = ["advanced", "tokio", "canvas", "image", "svg", "unconditional-rendering"] }
+iced_layershell = { version = "0.14.2", default-features = false, features = ["tiny-skia", "fira-sans", "linux-theme-detection"] }
 tokio = { version = "1.38", features = ["full"] }
 bollard = "0.17"
 futures-util = "0.3"
@@ -44,5 +44,6 @@ panic = "abort"
 strip = true
 
 [patch.crates-io]
+layershellev = { path = "vendor/layershellev-0.14.2" }
 iced_layershell = { path = "vendor/iced_layershell" }
 layershellev = { path = "vendor/layershellev" }
