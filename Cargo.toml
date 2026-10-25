@@ -46,4 +46,3 @@ strip = true
 [patch.crates-io]
 layershellev = { path = "vendor/layershellev-0.14.2" }
 iced_layershell = { path = "vendor/iced_layershell" }
-layershellev = { path = "vendor/layershellev" }

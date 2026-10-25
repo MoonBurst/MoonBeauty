@@ -204,8 +204,6 @@ impl App {
             col = col.push(list_col);
         } else if self.fetched {
             col = col.push(slanted_row(text("Weather unavailable").into(), y + 20.0, total_h, slant_h, slant_right, safe, w_f, 40.0));
-        } else {
-            col = col.push(slanted_row(text("Loading weather...").into(), y + 20.0, total_h, slant_h, slant_right, safe, w_f, 40.0));
         }
 
         container(col)
