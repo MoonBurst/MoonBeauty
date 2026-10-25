@@ -1,6 +1,6 @@
 use chrono::Local;
 use iced::widget::{column, container, text};
-use iced::{Alignment, Color, Element, Length, Padding};
+use iced::{Alignment, Element, Length, Padding};
 use std::sync::mpsc;
 use crate::backend::lock_coordinator::LockIpc;
 

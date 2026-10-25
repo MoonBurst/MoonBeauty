@@ -37,6 +37,7 @@ impl NotifServer {
         _expire_timeout: i32,
     ) -> u32 {
         let id = next_id();
+        eprintln!("[notif-raw] app={:?} summary={:?} body={:?}", app_name, summary, body);
         let is_urgent = hints
             .get("urgency")
             .and_then(|v| u8::try_from(v).ok())

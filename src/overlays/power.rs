@@ -1,5 +1,5 @@
 use iced::widget::{button, column, container, row, text, Stack};
-use iced::{Alignment, Color, Element, Length};
+use iced::{Alignment, Element, Length};
 use tokio::process::Command;
 
 use crate::config::theme::ShellTheme;
@@ -159,16 +159,6 @@ impl PowerOverlay {
 
         let card = Stack::new().push(card_bg.view()).push(card_content);
 
-        let backdrop = button(container(column![]).width(Length::Fill).height(Length::Fill))
-            .on_press(PowerMessage::Dismiss)
-            .style(|_t, _s| button::Style {
-                background: Some(iced::Background::Color(Color::from_rgba8(0, 0, 0, 0.6))),
-                ..Default::default()
-            });
-
-        Stack::new()
-            .push(backdrop)
-            .push(container(card).center_x(Length::Fill).center_y(Length::Fill))
-            .into()
+        container(card).center_x(Length::Fill).center_y(Length::Fill).into()
     }
 }

@@ -1,11 +1,11 @@
 use iced::widget::{button, column, container, text, Stack};
-use iced::{Alignment, Color, Element, Length, Task, Theme};
+use iced::{Element, Length, Task};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use crate::backend::tray_watcher::TrayMenuItem;
 use crate::config::theme::ShellTheme;
 use crate::config::ShellSettings;
-use crate::style::shape_box::{ShapeBox, ShapeType, SlantSide};
+use crate::style::shape_box::{ShapeBox, ShapeType};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -24,15 +24,14 @@ pub struct App {
     items: Vec<TrayMenuItem>,
     bus: String,
     menu_path: String,
-    width: u32,
-    height: u32,
 }
 
+#[allow(dead_code)]
 impl App {
 
-    fn new_app(flags: (Vec<TrayMenuItem>, String, String, u32, u32)) -> (Self, Task<Message>) {
-        let (items, bus, menu_path, width, height) = flags;
-        (Self { items, bus, menu_path, width, height }, Task::none())
+    fn new_app(flags: (Vec<TrayMenuItem>, String, String)) -> (Self, Task<Message>) {
+        let (items, bus, menu_path) = flags;
+        (Self { items, bus, menu_path }, Task::none())
     }
 
     fn namespace(&self) -> String { "mbs-tray-context".into() }
@@ -58,7 +57,7 @@ impl App {
 
     fn subscription(&self) -> iced::Subscription<Message> {
         iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers: _, .. }) = event else { return None; };
                 {
             if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) { Some(Message::Dismiss) } else { None }
         }
@@ -146,14 +145,16 @@ pub fn run(items: Vec<TrayMenuItem>, bus: String, menu_path: String, width: u32,
             _items_for_boot.clone(),
             _bus_for_boot.clone(),
             _menu_for_boot.clone(),
-            width,
-            height,
         )),
         || "mbs-tray-context".to_string(),
         App::update,
         App::view,
     )
     .subscription(App::subscription)
+    .style(|_state, _theme| iced::theme::Style {
+        background_color: iced::Color::TRANSPARENT,
+        text_color: iced::Color::WHITE,
+    })
     .settings(Settings { layer_settings: layer, ..Default::default() })
     .run()
 }

@@ -666,47 +666,6 @@ impl LockCoordinator {
         false
     }
 
-    /// Fallback for systems where sudo requires a TTY (requiretty in sudoers).
-    /// Uses `script(1)` to allocate a pseudo-terminal around sudo.
-    async fn authenticate_via_script(password: &str) -> bool {
-        use tokio::io::AsyncWriteExt as _;
-        eprintln!("[lock-coord] fallback: sudo via script(1) PTY");
-
-        // script -q -e -c "sudo -k -v" /dev/null
-        // -q quiet, -e return child exit code, -c command to run
-        let mut child = match tokio::process::Command::new("script")
-            .args(["-q", "-e", "-c", "sudo -k -v", "/dev/null"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-        {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("[lock-coord] script spawn failed: {}", e);
-                return false;
-            }
-        };
-
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(format!("{}
-", password.trim()).as_bytes()).await;
-            drop(stdin);
-        }
-
-        match child.wait().await {
-            Ok(st) => {
-                let success = st.success();
-                eprintln!("[lock-coord] script+sudo exit={:?} success={}", st.code(), success);
-                success
-            }
-            Err(e) => {
-                eprintln!("[lock-coord] script wait failed: {}", e);
-                false
-            }
-        }
-    }
-
     fn list_outputs() -> Vec<String> {
         let sway_bin = find_bin("swaymsg").unwrap_or_else(|| std::path::PathBuf::from("swaymsg"));
         let out = Command::new(&sway_bin)

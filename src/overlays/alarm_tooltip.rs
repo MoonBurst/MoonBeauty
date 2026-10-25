@@ -1,6 +1,5 @@
-use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke};
-use iced::widget::{button, column, container, space::horizontal, row, scrollable, text, text_input, Space, Stack};
-use iced::{Alignment, Color, Element, Length, Padding, Point, Rectangle, Task, Theme};
+use iced::widget::{button, column, container, row, scrollable, text, Stack};
+use iced::{Alignment, Color, Element, Length, Padding, Task, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use std::time::Instant;
@@ -60,8 +59,10 @@ pub struct App {
     active_field: usize,
     closing_at: Option<Instant>,
     close_open_elapsed_ms: f32,
+    anim_frame: u64,
 }
 
+#[allow(dead_code)]
 impl App {
 
     fn new_app() -> (Self, Task<Message>) {
@@ -89,8 +90,8 @@ impl App {
             is_pm: true,
             active_field: 0,
             closing_at: None,
-            close_open_elapsed_ms: 0.0,
-        };
+            close_open_elapsed_ms: 0.0, anim_frame: 0,
+            };
         let focus_task = iced::Task::perform(
             async {
                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
@@ -107,6 +108,10 @@ impl App {
     fn update(&mut self, m: Message) -> Task<Message> {
         match m {
             Message::Tick => {
+                self.anim_frame = self.anim_frame.wrapping_add(1);
+                let elapsed_ms = self.opened.elapsed().as_millis() as u64;
+                eprintln!("[tick] frame={} elapsed={}ms", self.anim_frame, elapsed_ms);
+                
                 if let Some(t) = self.closing_at {
                     if t.elapsed().as_millis() > (self.drop_ms * 1.9) as u128 {
                         std::process::exit(0);
@@ -115,12 +120,17 @@ impl App {
                     std::process::exit(0);
                 }
                 
-                // Throttle disk loading to once per second, while keeping 60 FPS animation
-                static TICKS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-                let t = TICKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if t % 60 == 0 {
-                    self.entries = RemindersOverlay::load();
-                }
+                let next_ms: u64 = if elapsed_ms < 2000 || self.closing_at.is_some() {
+                    std::env::var("MBS_TICK_MS").ok()
+                        .and_then(|s| s.parse().ok())
+                        .filter(|n| *n >= 1 && *n <= 100)
+                        .unwrap_or(4)
+                } else { 500 };
+                
+                return Task::perform(
+                    async move { tokio::time::sleep(std::time::Duration::from_millis(next_ms)).await },
+                    |_| Message::Tick,
+                );
             }
             Message::AdjCountdownH(inc) => {
                 if inc { self.cd_h = (self.cd_h + 1) % 24; }
@@ -246,99 +256,14 @@ impl App {
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
-        // Adaptive tick: 60fps during entrance animation and while
-        // closing, drop to 2fps once settled (still catches AUTO_MS
-        // timeout within 500ms of the deadline). Without this, the
-        // 60fps view-tree rebuild burns ~10% CPU on an idle tooltip.
-        // Animation tick. Priority:
-        //   1. MBS_TICK_MS env override (for A/B tuning without rebuild)
-        //   2. Dynamic: 80% of detected monitor refresh interval
-        //   3. Fallback: 6ms (aligns with 165Hz)
-        //
-        // The dynamic path exists because hardcoding is fragile: on 60Hz
-        // a 4ms tick wastes CPU, on 240Hz a 16ms tick chops visibly. The
-        // 80% factor gives modest headroom over vsync (source runs 25%
-        // faster than display, so dropped frames don't cascade).
-        //
-        // MBS_TICK_DIAG=1 (env, on the parent bar) enables per-frame dt
-        // logging from TooltipBg::draw for jitter diagnosis.
-        let _anim_total_ms = self.drop_ms as u64
-            + self.expand_ms as u64
-            + (self.drop_ms * 0.6) as u64;
-        let _animating = self.opened.elapsed().as_millis()
-            < (_anim_total_ms as u128).saturating_add(100)
-            || self.closing_at.is_some();
-        let _tick_ms: u64 = if _animating {
-            std::env::var("MBS_TICK_MS")
-                .ok()
-                .and_then(|s| s.parse::<u64>().ok())
-                .filter(|n| *n >= 1 && *n <= 100)
-                .unwrap_or_else(|| {
-                    let hz = crate::overlays::tooltip_engine::detect_refresh_hz() as u64;
-                    // 80% of refresh period, floored at 3ms, capped at 16ms.
-                    // 60Hz  → 16ms (~62fps, plenty of vsync headroom)
-                    // 120Hz → 8ms  (125fps, 4% headroom)
-                    // 144Hz → 6ms  (167fps, 16% headroom)
-                    // 165Hz → 6ms  (167fps, 1% headroom — conservative)
-                    // 240Hz → 4ms  (250fps, 4% headroom)
-                    ((800 / hz.max(30)).max(3)).min(16)
-                })
-        } else {
-            500
-        };
-
-        let tick = iced::time::every(std::time::Duration::from_millis(_tick_ms)).map(|_| Message::Tick);
-        let keys = iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
-                {
-            let af = ACTIVE_FIELD.load(std::sync::atomic::Ordering::Relaxed);
-            let esc = iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape);
-            let up = iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp);
-            let down = iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown);
-            let left = iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft);
-            let right = iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight);
-            let enter = iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter);
-            let tab = iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab);
-
-            if key == esc { return Some(Message::Dismiss); }
-            
-            // Focus navigation
-            if key == left || key == tab { return Some(Message::FocusPrev); } // Tab backwards or left
-            if key == right { return Some(Message::FocusNext); }          // Right moves forward
-
-            // Value adjustment (Up/Down to match the buttons)
-            if key == up {
-                return match af {
-                    0 => Some(Message::AdjCountdownH(true)),
-                    1 => Some(Message::AdjCountdownM(true)),
-                    3 => Some(Message::AdjClockH(true)),
-                    4 => Some(Message::AdjClockM(true)),
-                    5 => Some(Message::ToggleAmPm),
-                    _ => None,
-                };
-            }
-            if key == down {
-                return match af {
-                    0 => Some(Message::AdjCountdownH(false)),
-                    1 => Some(Message::AdjCountdownM(false)),
-                    3 => Some(Message::AdjClockH(false)),
-                    4 => Some(Message::AdjClockM(false)),
-                    5 => Some(Message::ToggleAmPm),
-                    _ => None,
-                };
-            }
-
-            if key == enter {
-                return match af {
-                    0 | 1 => Some(Message::StartCountdown),
-                    3 | 4 | 5 => Some(Message::SetClock),
-                    _ => None,
-                };
-            }
-            None
-        }
-            });
-        iced::Subscription::batch([tick, keys])
+        // Animation is driven by Command::perform recursion in update(),
+        // not by a subscription timer. Subscriptions here only handle ESC.
+        iced::event::listen_with(|event, _status, _window| {
+            let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape), .. }) = event else {
+                return None;
+            };
+            Some(Message::Dismiss)
+        })
     }
     fn theme(&self) -> Theme { Theme::Dark }
 }
@@ -502,37 +427,6 @@ impl App {
     }
 }
 
-fn slanted_row<'a, M: 'a>(
-    inner: Element<'a, M>,
-    y_mid: f32,
-    total_h: f32,
-    slant: f32,
-    slant_right: bool,
-    safe: f32,
-    total_w: f32,
-    row_h: f32,
-) -> Element<'a, M> {
-    let frac = (y_mid / total_h.max(1.0)).clamp(0.0, 1.0);
-    let (lp, rp) = if slant_right {
-        (slant * (1.0 - frac) + safe, slant * frac + safe)
-    } else {
-        (slant * frac + safe, slant * (1.0 - frac) + safe)
-    };
-    let inner_w = (total_w - lp - rp).max(10.0);
-
-    let inner_clipped = container(inner)
-        .width(Length::Fixed(inner_w))
-        .height(Length::Fixed(row_h))
-        .clip(true);
-
-    row![
-        iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(lp)),
-        inner_clipped,
-        iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(rp)),
-    ].height(Length::Fixed(row_h)).width(Length::Fixed(total_w)).into()
-}
-
-
 pub fn run() -> Result<(), iced_layershell::Error> {
     let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
     let s = ShellSettings::load();
@@ -579,6 +473,10 @@ pub fn run() -> Result<(), iced_layershell::Error> {
         App::view,
     )
     .subscription(App::subscription)
+    .style(|_state, _theme| iced::theme::Style {
+        background_color: iced::Color::TRANSPARENT,
+        text_color: iced::Color::WHITE,
+    })
     .settings(Settings { layer_settings: layer, ..Default::default() })
     .run()
 }

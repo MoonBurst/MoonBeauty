@@ -795,25 +795,6 @@ impl SystemCollector {
     }
 }
 
-fn resolve_gpu_name_sync(pci_addr: &str, card_id: &str) -> String {
-    if !pci_addr.is_empty() {
-        if let Ok(out) = std::process::Command::new("lspci")
-            .args(["-vmm", "-s", pci_addr])
-            .output()
-        {
-            if out.status.success() {
-                let text = String::from_utf8_lossy(&out.stdout);
-                for line in text.lines() {
-                    if let Some(dev) = line.strip_prefix("Device:") {
-                        return clean_gpu_name(dev.trim());
-                    }
-                }
-            }
-        }
-    }
-    card_id.to_uppercase()
-}
-
 fn clean_gpu_name(raw: &str) -> String {
     // lspci -vmm can output "Navi 31 [Radeon RX 7900 XT/7900 XTX/7900 GRE/7900M]"
     // for cards that share a PCI ID. In that case there is no way to know which

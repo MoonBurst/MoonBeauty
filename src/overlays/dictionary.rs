@@ -1,5 +1,5 @@
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Stack};
-use iced::{Alignment, Color, Element, Length, Padding};
+use iced::{Alignment, Element, Length, Padding};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -301,16 +301,6 @@ impl DictionaryOverlay {
 
         let card = Stack::new().push(card_bg.view()).push(card_content);
 
-        let backdrop = button(container(column![]).width(Length::Fill).height(Length::Fill))
-            .on_press(DictMessage::Dismiss)
-            .style(|_t, _s| button::Style {
-                background: Some(iced::Background::Color(Color::from_rgba8(0, 0, 0, 0.65))),
-                ..Default::default()
-            });
-
-        Stack::new()
-            .push(backdrop)
-            .push(container(card).center_x(Length::Fill).center_y(Length::Fill))
-            .into()
+        container(card).center_x(Length::Fill).center_y(Length::Fill).into()
     }
 }

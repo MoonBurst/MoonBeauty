@@ -250,17 +250,14 @@ impl CapsuleRenderer {
                 (elem, CapsuleAction::OpenOverlay("net".into()), theme.border)
             }
             "cpu" => {
-                let border_col = if telemetry.cpu.temp_c >= 80 || telemetry.cpu.usage_pct >= 90 {
-                    theme.danger
-                } else if telemetry.cpu.temp_c >= 70 || telemetry.cpu.usage_pct >= 75 {
-                    theme.warning
-                } else {
-                    theme.border
-                };
+                let cpu_danger = telemetry.cpu.temp_c >= theme.cpu_temp_danger || u32::from(telemetry.cpu.usage_pct) >= theme.cpu_usage_danger;
+                let cpu_warn = telemetry.cpu.temp_c >= theme.cpu_temp_warn || u32::from(telemetry.cpu.usage_pct) >= theme.cpu_usage_warn;
+                let val_col = if cpu_danger { theme.danger } else if cpu_warn { theme.warning } else { theme.text };
+                let border_col = if val_col == theme.text { theme.border } else { val_col };
                 let elem = label::<Message>(&[
                     ("CPU:".to_string(), theme.success),
                     (" ".to_string(), theme.success),
-                    (format!("{}% {}°C", telemetry.cpu.usage_pct, telemetry.cpu.temp_c), theme.text),
+                    (format!("{}% {}°C", telemetry.cpu.usage_pct, telemetry.cpu.temp_c), val_col),
                 ], theme.font_size_normal);
                 (elem, CapsuleAction::OpenOverlay("cpu".into()), border_col)
             }
@@ -273,34 +270,47 @@ impl CapsuleRenderer {
                 let temp_col = if telemetry.gpu.temp_c >= td { theme.danger } else if telemetry.gpu.temp_c >= tw { theme.warning } else { theme.text };
                 let vram_col = if telemetry.gpu.vram_free_gib <= vd { theme.danger } else if telemetry.gpu.vram_free_gib <= vw { theme.warning } else { theme.text };
                 let name = if telemetry.gpu.name.is_empty() { "GPU".to_string() } else { telemetry.gpu.name.clone() };
+                let usage_danger = telemetry.gpu.usage_pct >= 90;
+                let usage_warn = telemetry.gpu.usage_pct >= 75;
+                let usage_col = if usage_danger { theme.danger } else if usage_warn { theme.warning } else { theme.text };
+
+                let val_col = if telemetry.gpu.temp_c >= td || telemetry.gpu.vram_free_gib <= vd || usage_danger {
+                    theme.danger
+                } else if telemetry.gpu.temp_c >= tw || telemetry.gpu.vram_free_gib <= vw || usage_warn {
+                    theme.warning
+                } else {
+                    theme.text
+                };
+
                 let elem = label::<Message>(&[
                     (format!("{}:", name), theme.success),
-                    (" ".to_string(), theme.text),
-                    (format!("{}%", telemetry.gpu.usage_pct), theme.text),
-                    (" ".to_string(), theme.text),
+                    (" ".to_string(), val_col),
+                    (format!("{}%", telemetry.gpu.usage_pct), usage_col),
+                    (" ".to_string(), val_col),
                     (format!("{}°C", telemetry.gpu.temp_c), temp_col),
-                    (" ".to_string(), theme.text),
-                    (format!("{}W", telemetry.gpu.power_w), theme.text),
-                    (" ".to_string(), theme.text),
+                    (" ".to_string(), val_col),
+                    (format!("{}W", telemetry.gpu.power_w), val_col),
+                    (" ".to_string(), val_col),
                     (format!("{}GiB", telemetry.gpu.vram_free_gib), vram_col),
                 ], theme.font_size_normal);
-                let border_col = if telemetry.gpu.temp_c >= td || telemetry.gpu.vram_free_gib <= vd { theme.danger } else if telemetry.gpu.temp_c >= tw || telemetry.gpu.vram_free_gib <= vw { theme.warning } else { theme.border };
+                let border_col = if val_col == theme.text { theme.border } else { val_col };
                 (elem, CapsuleAction::OpenOverlay("gpu".into()), border_col)
             }
             "ram" => {
-                let (display, total) = if telemetry.ram.effective_avail_gib > 0.0 {
+                let (display, _total) = if telemetry.ram.effective_avail_gib > 0.0 {
                     (telemetry.ram.effective_avail_gib, telemetry.ram.total_gib + telemetry.ram.zram_saved_gib)
                 } else {
                     (telemetry.ram.available_gib, telemetry.ram.total_gib)
                 };
-                let usage_ratio = if total > 0.0 { ((total - display).max(0.0)) / total } else { 0.0 };
-                let val_col = if usage_ratio >= 0.85 { theme.danger } else if usage_ratio >= 0.50 { theme.warning } else { theme.text };
+                let warn_gib = theme.ram_warn_gib as f32;
+                let danger_gib = theme.ram_danger_gib as f32;
+                let val_col = if display <= danger_gib { theme.danger } else if display <= warn_gib { theme.warning } else { theme.text };
                 let val_str = if display == 0.0 { " -- GiB".to_string() } else { format!(" {:.1} GiB", display) };
                 let elem = label::<Message>(&[
                     ("RAM:".to_string(), theme.success),
                     (val_str, val_col),
                 ], theme.font_size_normal);
-                let border_col = if usage_ratio >= 0.85 { theme.danger } else if usage_ratio >= 0.50 { theme.warning } else { theme.border };
+                let border_col = if display <= danger_gib { theme.danger } else if display <= warn_gib { theme.warning } else { theme.border };
                 (elem, CapsuleAction::OpenOverlay("ram".into()), border_col)
             }
             "battery" => {

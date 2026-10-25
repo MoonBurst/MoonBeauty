@@ -1,5 +1,5 @@
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Stack, Row};
-use iced::{Alignment, Color, Element, Length, Padding};
+use iced::{Alignment, Element, Length, Padding};
 use std::fs;
 use std::path::PathBuf;
 use tokio::process::Command;
@@ -61,7 +61,6 @@ impl AppLauncher {
             AppEntry { name: "Power & Session".into(), exec: "internal:power".into(), icon: "⚡".into(), icon_path: None },
             AppEntry { name: "Tasks & Todos".into(), exec: "internal:todo".into(), icon: "✅".into(), icon_path: None },
             AppEntry { name: "Reminders & Alarms".into(), exec: "internal:reminders".into(), icon: "⏰".into(), icon_path: None },
-            AppEntry { name: "Dictionary Lookup".into(), exec: "internal:dict".into(), icon: "📖".into(), icon_path: None },
             AppEntry { name: "Unicode Glyphs".into(), exec: "internal:unicode".into(), icon: "🔣".into(), icon_path: None },
             AppEntry { name: "Web Search".into(), exec: "internal:web".into(), icon: "🌐".into(), icon_path: None },
             AppEntry { name: "Screenshot (Quickshot)".into(), exec: "moon-beauty-shell --screenshot --annotate".into(), icon: "📷".into(), icon_path: None },
@@ -76,33 +75,6 @@ impl AppLauncher {
             selected_index: 0,
             dict_cache: DictionaryOverlay::load_cache(),
             dict_pending: None,
-        }
-    }
-
-    /// If `query` looks like a math expression or unit conversion, evaluate
-    /// it via the existing CalculatorOverlay. Returns None for non-math input
-    /// so the launcher doesn't show a bogus "= firefox" row.
-    fn compute_math_result(query: &str) -> Option<String> {
-        let q = query.trim();
-        if q.is_empty() {
-            return None;
-        }
-        // Require at least one operator or a unit-conversion phrase.
-        // Pure numbers ("123") are treated as search queries.
-        let has_operator = q.contains('+')
-            || q.contains('-')
-            || q.contains('*')
-            || q.contains('/')
-            || q.contains('(');
-        let has_unit = q.contains(" in ") || q.contains(" to ");
-        if !has_operator && !has_unit {
-            return None;
-        }
-        let result = CalculatorOverlay::evaluate(q);
-        if result.is_empty() || result == "Syntax Error" {
-            None
-        } else {
-            Some(result)
         }
     }
 
@@ -444,77 +416,177 @@ impl AppLauncher {
     pub fn scan_desktop_files() -> Vec<AppEntry> {
         let mut apps = Vec::new();
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-        let dirs = [
+        let user = std::env::var("USER").unwrap_or_else(|_| "user".into());
+
+        let mut dirs: Vec<PathBuf> = vec![
             PathBuf::from("/usr/share/applications"),
             PathBuf::from("/usr/local/share/applications"),
-            home.join(".local/share/applications"),
             PathBuf::from("/run/current-system/sw/share/applications"),
+            PathBuf::from("/etc/profiles/per-user").join(&user).join("share/applications"),
             home.join(".nix-profile/share/applications"),
+            PathBuf::from("/var/lib/flatpak/exports/share/applications"),
+            home.join(".local/share/flatpak/exports/share/applications"),
+            PathBuf::from("/run/flatpak/exports/share/applications"),
+            PathBuf::from("/var/lib/snapd/desktop/applications"),
+            home.join(".local/share/applications"),
         ];
+
+        if let Ok(xdg) = std::env::var("XDG_DATA_DIRS") {
+            for d in xdg.split(':') {
+                if !d.is_empty() {
+                    dirs.push(PathBuf::from(d).join("applications"));
+                }
+            }
+        }
+
+        let debug = std::env::var_os("MBS_LAUNCHER_DEBUG").is_some();
+        let current_de = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_lowercase();
 
         let mut seen = std::collections::HashSet::new();
         let mut total_files = 0usize;
         let mut hidden = 0usize;
+        let mut no_exec = 0usize;
+        let mut de_filtered = 0usize;
 
         for dir in &dirs {
-            if let Ok(entries) = fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().and_then(|s| s.to_str()) == Some("desktop") {
-                        total_files += 1;
-                        if let Ok(content) = fs::read_to_string(&path) {
-                            let mut name = None;
-                            let mut exec = None;
-                            let mut icon_name: Option<String> = None;
-                            let mut nodisplay = false;
+            if !dir.exists() {
+                continue;
+            }
+            let entries = match fs::read_dir(dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            let mut dir_count = 0usize;
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) != Some("desktop") {
+                    continue;
+                }
+                total_files += 1;
+                dir_count += 1;
 
-                            for line in content.lines() {
-                                if line.starts_with("Name=") && name.is_none() {
-                                    name = Some(line["Name=".len()..].trim().to_string());
-                                } else if line.starts_with("Exec=") && exec.is_none() {
-                                    let raw_exec = line["Exec=".len()..].trim();
-                                    let cleaned = raw_exec
-                                        .split('%')
-                                        .next()
-                                        .unwrap_or(raw_exec)
-                                        .trim()
-                                        .to_string();
-                                    exec = Some(cleaned);
-                                } else if line.starts_with("Icon=") && icon_name.is_none() {
-                                    icon_name = Some(line["Icon=".len()..].trim().to_string());
-                                } else if line.eq_ignore_ascii_case("NoDisplay=true") {
-                                    nodisplay = true;
-                                }
-                            }
+                let Ok(content) = fs::read_to_string(&path) else { continue };
 
-                            if nodisplay { hidden += 1; continue; }
-                            if let (Some(n), Some(e)) = (name, exec) {
-                                let key = format!("{}|{}", n.to_lowercase(), e.to_lowercase());
-                                if !seen.contains(&key) {
-                                    seen.insert(key);
-                                    let icon_path = icon_name
-                                        .as_deref()
-                                        .and_then(Self::resolve_icon);
-                                    apps.push(AppEntry {
-                                        name: n,
-                                        exec: e,
-                                        icon: "🚀".to_string(),
-                                        icon_path,
-                                    });
-                                }
-                            }
+                let mut name = None;
+                let mut exec = None;
+                let mut icon_name: Option<String> = None;
+                let mut nodisplay = false;
+                let mut hidden_flag = false;
+                let mut only_show_in = String::new();
+                let mut not_show_in = String::new();
+                let mut try_exec: Option<String> = None;
+                let mut in_main_section = false;
+
+                for line in content.lines() {
+                    let line = line.trim();
+                    if line.starts_with('[') {
+                        in_main_section = line.eq_ignore_ascii_case("[Desktop Entry]");
+                        continue;
+                    }
+                    if !in_main_section {
+                        continue;
+                    }
+                    if let Some(v) = line.strip_prefix("Name=") {
+                        if name.is_none() { name = Some(v.trim().to_string()); }
+                    } else if let Some(v) = line.strip_prefix("Exec=") {
+                        if exec.is_none() {
+                            let raw = v.trim();
+                            let cleaned = raw.split('%').next().unwrap_or(raw).trim().to_string();
+                            exec = Some(cleaned);
                         }
+                    } else if let Some(v) = line.strip_prefix("Icon=") {
+                        if icon_name.is_none() { icon_name = Some(v.trim().to_string()); }
+                    } else if let Some(v) = line.strip_prefix("OnlyShowIn=") {
+                        only_show_in = v.trim().to_lowercase();
+                    } else if let Some(v) = line.strip_prefix("NotShowIn=") {
+                        not_show_in = v.trim().to_lowercase();
+                    } else if let Some(v) = line.strip_prefix("TryExec=") {
+                        if try_exec.is_none() { try_exec = Some(v.trim().to_string()); }
+                    } else if line.eq_ignore_ascii_case("NoDisplay=true") {
+                        nodisplay = true;
+                    } else if line.eq_ignore_ascii_case("Hidden=true") {
+                        hidden_flag = true;
                     }
                 }
+
+                if nodisplay || hidden_flag {
+                    hidden += 1;
+                    if debug {
+                        eprintln!("[launcher-scan]   skip hidden: {:?}", path.file_name().unwrap_or_default());
+                    }
+                    continue;
+                }
+
+                if !only_show_in.is_empty() && !current_de.is_empty() {
+                    let allowed = only_show_in.split(';').any(|d| !d.trim().is_empty() && current_de.contains(d.trim()));
+                    if !allowed {
+                        de_filtered += 1;
+                        if debug {
+                            eprintln!("[launcher-scan]   skip OnlyShowIn: {:?}", path.file_name().unwrap_or_default());
+                        }
+                        continue;
+                    }
+                }
+                if !not_show_in.is_empty() && !current_de.is_empty() {
+                    let denied = not_show_in.split(';').any(|d| !d.trim().is_empty() && current_de.contains(d.trim()));
+                    if denied {
+                        de_filtered += 1;
+                        if debug {
+                            eprintln!("[launcher-scan]   skip NotShowIn: {:?}", path.file_name().unwrap_or_default());
+                        }
+                        continue;
+                    }
+                }
+
+                if let Some(te) = &try_exec {
+                    let te_path = std::path::Path::new(te);
+                    if te_path.is_absolute() && !te_path.exists() {
+                        no_exec += 1;
+                        if debug {
+                            eprintln!("[launcher-scan]   skip TryExec missing: {:?} -> {}", path.file_name().unwrap_or_default(), te);
+                        }
+                        continue;
+                    }
+                }
+
+                if let (Some(n), Some(e)) = (name.clone(), exec.clone()) {
+                    if e.is_empty() {
+                        no_exec += 1;
+                        continue;
+                    }
+                    let key = format!("{}|{}", n.to_lowercase(), e.to_lowercase());
+                    if !seen.contains(&key) {
+                        seen.insert(key);
+                        let icon_path = icon_name.as_deref().and_then(Self::resolve_icon);
+                        apps.push(AppEntry {
+                            name: n,
+                            exec: e,
+                            icon: "🚀".to_string(),
+                            icon_path,
+                        });
+                        if debug {
+                            eprintln!("[launcher-scan]   ✓ {:?}", path.file_name().unwrap_or_default());
+                        }
+                    }
+                } else {
+                    no_exec += 1;
+                }
+            }
+            if debug && dir_count > 0 {
+                eprintln!("[launcher-scan] {:?}: {} files", dir, dir_count);
             }
         }
 
         apps.sort_by_key(|a| a.name.to_lowercase());
         let with_icons = apps.iter().filter(|a| a.icon_path.is_some()).count();
-        eprintln!(
-            "[launcher] {} .desktop files scanned ({} hidden), {} apps loaded, {} with icons",
-            total_files, hidden, apps.len(), with_icons,
-        );
+
+        if debug || total_files != 63 {
+            eprintln!(
+                "[launcher] {} .desktop files across {} dirs, {} hidden, {} tryExec-missing, {} de-filtered, {} apps, {} with icons",
+                total_files, dirs.len(), hidden, no_exec, de_filtered, apps.len(), with_icons
+            );
+        }
+
         apps
     }
 
@@ -725,11 +797,6 @@ impl AppLauncher {
             "remind" | "reminder" | "reminders" | "alarm" | "alarms"
             | "reminders & alarms" | "timer" | "timers" => {
                 ("Reminders & Alarms", "internal:reminders")
-            }
-            // Dictionary
-            "dict" | "def" | "dictionary" | "dictionary lookup" | "word"
-            | "lookup" | "define" | "defn" => {
-                ("Dictionary", "internal:dict")
             }
             // Unicode
             "unicode" | "glyph" | "glyphs" | "symbol" | "symbols"
@@ -955,80 +1022,146 @@ impl AppLauncher {
         }
 
         // App rows (unchanged logic, but global index offset by math_count)
-        if !app_items.is_empty() {
-            let mut list_col = column![].spacing(6).width(Length::Fill);
-            for (rel_idx, app) in app_items.iter().enumerate() {
-                let idx = math_count + rel_idx;
+if !app_items.is_empty() {
+            // One app per row. Each row is an extended hexagon "bar"
+            // containing the icon (in its own small hexagon) on the
+            // left and the app name + exec path on the right.
+            let gap = 12.0;
+            let inner_pad_x = 20.0;
+            let inner_pad_y = 10.0;
+
+            // Icon size comes from Settings → Overlays & Windows.
+            // The hexagon must be big enough that its cut corners don't
+            // clip the icon's own corners.
+            //   interior_width = hex_size - 2*cut
+            //   need interior_width ≥ icon_size
+            //   cut = 10% of hex_size  →  interior = 0.80 * hex_size
+            //   so hex_size ≥ icon_size / 0.80 = 1.25 * icon_size.
+            // Use 1.40 to give visible margin + clamp cut to ≥ 8px so
+            // it stays visibly octagonal at the smallest slider values.
+            let icon_size = settings.launcher_icon_size as f32;
+            let icon_hex_size = icon_size * 1.40;
+            let icon_hex_cut: u16 = ((icon_hex_size * 0.10) as u16).max(8);
+            let row_h = icon_hex_size + inner_pad_y * 2.0;
+
+            let row_w = win_w - list_side_inset * 2.0;
+
+            let mut grid_col = column![].spacing(gap);
+
+            for (idx_offset, app) in app_items.iter().enumerate() {
+                let idx = math_count + idx_offset;
                 let exec_cmd = app.exec.clone();
-                let icon_str = if app.exec.starts_with("internal:") { ">" } else { ">" };
+                let is_selected = idx == self.selected_index;
+
+                // Row-level extended hexagon bar
+                let row_bg = ShapeBox::new()
+                    .shape(ShapeType::Hexagon { cut: 18 })
+                    .background(if is_selected { theme.surface_alt } else { theme.background })
+                    .border(
+                        if is_selected { theme.text } else { theme.border },
+                        theme.control_border_width,
+                    )
+                    .size(Length::Fixed(row_w), Length::Fixed(row_h));
+
+                // Icon rendering (SVG-aware)
                 let icon_elem: Element<'_, LauncherMessage> = if let Some(ref path) = app.icon_path {
-                    iced::widget::image(iced::widget::image::Handle::from_path(path.clone()))
-                        .width(Length::Fixed(24.0))
-                        .height(Length::Fixed(24.0))
-                        .into()
+                    if path.ends_with(".svg") {
+                        iced::widget::svg(iced::widget::svg::Handle::from_path(path.clone()))
+                            .width(Length::Fixed(icon_size))
+                            .height(Length::Fixed(icon_size))
+                            .into()
+                    } else {
+                        iced::widget::image(iced::widget::image::Handle::from_path(path.clone()))
+                            .width(Length::Fixed(icon_size))
+                            .height(Length::Fixed(icon_size))
+                            .content_fit(iced::ContentFit::Contain)
+                            .into()
+                    }
                 } else {
-                    text(icon_str).size(16).into()
+                    container(text(&app.icon).size(64))
+                        .width(Length::Fixed(icon_size))
+                        .height(Length::Fixed(icon_size))
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill)
+                        .into()
                 };
 
-                let is_selected = idx == self.selected_index;
-                let row_item = button(
-                    row![
-                        icon_elem,
-                        column![
-                            text(&app.name)
-                                .size((theme.font_size_overlay) as f32)
-                                .bold(),
-                            text(&app.exec)
-                                .size((theme.font_size_normal.saturating_sub(2)) as f32)
-                                .shell()
-                                .color(theme.muted),
-                        ]
-                        .spacing(2)
-                        .width(Length::Fill),
-                    ]
-                    .spacing(12)
-                    .align_y(Alignment::Center),
-                )
-                .on_press(LauncherMessage::ExecuteApp(exec_cmd))
-                .padding([8, 14])
-                .width(Length::Fill)
-                .style(move |_t, status| {
-                    let is_hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-                    let bg = if is_hovered || is_selected {
-                        Some(iced::Background::Color(theme.surface_alt))
-                    } else {
-                        None
-                    };
-                    let border_color = if is_hovered {
-                        theme.focus
-                    } else if is_selected {
-                        theme.text
-                    } else {
-                        Color::TRANSPARENT
-                    };
-                    button::Style {
-                        background: bg,
-                        border: iced::Border {
-                            color: border_color,
-                            width: if is_hovered || is_selected {
-                                theme.control_border_width
-                            } else {
-                                0.0
-                            },
-                            radius: 6.0.into(),
-                        },
-                        text_color: if is_selected || is_hovered {
-                            theme.text_strong
-                        } else {
-                            theme.text
-                        },
-                        ..Default::default()
-                    }
-                });
+                // Small hexagon wrapping the icon
+                let icon_bg = ShapeBox::new()
+                    .shape(ShapeType::Hexagon { cut: icon_hex_cut })
+                    .background(theme.background)
+                    .border(
+                        if is_selected { theme.text } else { theme.border },
+                        theme.control_border_width,
+                    )
+                    .size(Length::Fixed(icon_hex_size), Length::Fixed(icon_hex_size));
 
-                list_col = list_col.push(row_item);
+                let icon_stack = Stack::new()
+                    .push(icon_bg.view())
+                    .push(
+                        container(icon_elem)
+                            .width(Length::Fixed(icon_hex_size))
+                            .height(Length::Fixed(icon_hex_size))
+                            .center_x(Length::Fill)
+                            .center_y(Length::Fill),
+                    );
+
+                // Name + exec on the right
+                let name_txt = text(&app.name)
+                    .size(18.0)
+                    .bold()
+                    .color(if is_selected { theme.text_strong } else { theme.text });
+
+                let exec_txt = text(&app.exec)
+                    .size(12.0)
+                    .font(iced::Font::MONOSPACE)
+                    .color(theme.muted);
+
+                let info_col = column![name_txt, exec_txt]
+                    .spacing(4)
+                    .align_x(Alignment::Start)
+                    .width(Length::Fill);
+
+                let row_inner = row![
+                    icon_stack,
+                    container(info_col)
+                        .width(Length::Fill)
+                        .padding(iced::Padding {
+                            top: 0.0,
+                            right: 20.0,
+                            bottom: 0.0,
+                            left: 20.0,
+                        }),
+                ]
+                .spacing(0)
+                .align_y(iced::alignment::Vertical::Center)
+                .width(Length::Fill);
+
+                let row_content = container(row_inner)
+                    .width(Length::Fixed(row_w))
+                    .height(Length::Fixed(row_h))
+                    .padding(iced::Padding {
+                        top: inner_pad_y,
+                        right: inner_pad_x,
+                        bottom: inner_pad_y,
+                        left: inner_pad_x,
+                    });
+
+                let row_stack = Stack::new()
+                    .push(row_bg.view())
+                    .push(row_content);
+
+                let row_btn = button(row_stack)
+                    .on_press(LauncherMessage::ExecuteApp(exec_cmd))
+                    .padding(0)
+                    .width(Length::Fixed(row_w))
+                    .height(Length::Fixed(row_h))
+                    .style(|_t, _s| button::Style { background: None, ..Default::default() });
+
+                grid_col = grid_col.push(row_btn);
             }
-            content_col = content_col.push(list_col);
+
+            content_col = content_col.push(grid_col);
         }
 
         if math_items.is_empty() && app_items.is_empty() {
@@ -1092,16 +1225,6 @@ impl AppLauncher {
 
         let card = Stack::new().push(card_bg.view()).push(card_content);
 
-        let backdrop = button(container(column![]).width(Length::Fill).height(Length::Fill))
-            .on_press(LauncherMessage::Dismiss)
-            .style(|_t, _s| button::Style {
-                background: Some(iced::Background::Color(Color::from_rgba8(0, 0, 0, 0.65))),
-                ..Default::default()
-            });
-
-        Stack::new()
-            .push(backdrop)
-            .push(container(card).center_x(Length::Fill).center_y(Length::Fill))
-            .into()
+        container(card).center_x(Length::Fill).center_y(Length::Fill).into()
     }
 }

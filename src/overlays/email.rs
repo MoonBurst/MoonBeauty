@@ -1,244 +1,836 @@
-use iced::widget::{button, column, container, row, scrollable, text, Stack};
-use iced::{Alignment, Color, Element, Length};
-use serde::{Deserialize, Serialize};
-use tokio::process::Command;
+use iced::widget::{button, column, container, row, scrollable, text, text_input, Stack, checkbox};
+use iced::{Alignment, Element, Length};
 
+use crate::config::settings::ShellSettings;
 use crate::config::theme::ShellTheme;
 use crate::style::shape_box::{ShapeBox, ShapeType};
 use crate::style::TextExt;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EnvelopeItem {
-    pub id: String,
-    pub subject: Option<String>,
-    pub from: Option<SenderInfo>,
-    pub flags: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SenderInfo {
-    pub name: Option<String>,
-    pub addr: Option<String>,
-}
+pub const COMPOSE_TO_ID: &str = "compose_to";
+pub const COMPOSE_SUBJ_ID: &str = "compose_subj";
+pub const COMPOSE_BODY_ID: &str = "compose_body";
+pub const COMPOSE_MANUAL_ATTACH_ID: &str = "compose_manual_attach";
 
 #[derive(Debug, Clone)]
 pub enum EmailMessage {
     SelectFolder(String),
     SelectMail(String),
-    MailBodyLoaded(String),
+    EnvelopesLoaded(Vec<crate::backend::email_client::NativeEnvelope>),
+    NetworkEnvelopesLoaded(Vec<crate::backend::email_client::NativeEnvelope>),
+    SyncDone,
+    MessageLoaded(crate::backend::email_client::ParsedEmail),
+    Error(String),
+    SetLoading,
     OpenComposer,
     ToChanged(String),
     SubjectChanged(String),
-    BodyChanged(String),
+    BodyChanged(iced::widget::text_editor::Action),
+    AttachmentsPicked(Vec<std::path::PathBuf>),
     SendMail,
+    AddAttachment,
+    ManualAttachChanged(String),
+    SubmitManualAttach,
+    SelectContact(String),
+    SelectAutocompleteNext,
+    SelectAutocompletePrev,
+    ConfirmAutocomplete,
+    AttachmentPicked(std::path::PathBuf),
+    RemoveAttachment(usize),
+    CancelCompose,
+    OpenLogin,
+    DismissLogin,
+    LoginEmailChanged(String),
+    LoginPasswordChanged(String),
+    LoginImapChanged(String),
+    LoginSmtpChanged(String),
+    ToggleSops(bool),
+    LoginSopsKeyChanged(String),
+    SaveLogin,
     Dismiss,
+    GetAppPassword,
+    SelectMailNext,
+    SelectMailPrev,
+    SelectFolderNext,
+    SelectFolderPrev,
+    OpenSelected,
+    ToggleStar,
+    DeleteSelected,
+    SaveContact,
+    DraftSaved,
+    FocusNextPane,
+    FocusPrevPane,
+    OpenInBrowser,
+    ToggleAdvancedServers,
+    StartAddFolder,
+    AddFolderChanged(String),
+    SubmitAddFolder,
+    RemoveFolder(String),
+    SaveAttachment(String),
 }
 
 pub struct EmailOverlay {
-    pub folders: Vec<&'static str>,
+    pub folders: Vec<String>,
     pub active_folder: String,
-    pub envelopes: Vec<EnvelopeItem>,
+    pub active_folder_idx: usize,
+    pub envelopes: Vec<crate::backend::email_client::NativeEnvelope>,
     pub active_mail_id: Option<String>,
-    pub mail_body: String,
+    pub selected_index: usize,
+    pub focus_pane: usize,
+    pub parsed_email: Option<crate::backend::email_client::ParsedEmail>,
     pub is_composing: bool,
     pub compose_to: String,
     pub compose_subject: String,
-    pub compose_body: String,
+    pub compose_body: iced::widget::text_editor::Content,
+    pub active_compose_field: usize,
+    pub compose_attachments: Vec<std::path::PathBuf>,
+    pub compose_manual_attach: String,
+    pub contacts: Vec<String>,
+    pub selected_autocomplete_idx: Option<usize>,
+    pub is_loading: bool,
+    pub imap_error: Option<String>,
+    pub is_logging_in: bool,
+    pub show_advanced_servers: bool,
+    pub login_email: String,
+    pub login_password: String,
+    pub login_imap: String,
+    pub login_smtp: String,
+    pub use_sops: bool,
+    pub login_sops_key: String,
+    pub login_error: Option<String>,
+    pub is_adding_folder: bool,
+    pub new_folder_name: String,
 }
 
 impl Default for EmailOverlay {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 impl EmailOverlay {
     pub fn new() -> Self {
+        let is_logging_in = !crate::backend::email_client::config_exists();
         Self {
-            folders: vec!["INBOX", "Starred", "Sent", "Drafts", "Trash", "Spam"],
+            folders: vec!["INBOX".into(), "Unread".into(), "Starred".into(), "Sent".into(), "Drafts".into(), "Trash".into(), "Spam".into()],
             active_folder: "INBOX".into(),
+            active_folder_idx: 0,
             envelopes: Vec::new(),
             active_mail_id: None,
-            mail_body: String::new(),
+            selected_index: 0,
+            focus_pane: 0,
+            parsed_email: None,
             is_composing: false,
             compose_to: String::new(),
             compose_subject: String::new(),
-            compose_body: String::new(),
+            compose_body: iced::widget::text_editor::Content::new(),
+            active_compose_field: 0,
+            compose_attachments: Vec::new(),
+            compose_manual_attach: String::new(),
+            contacts: crate::backend::email_client::load_contacts(),
+            selected_autocomplete_idx: None,
+            is_loading: false,
+            imap_error: None,
+            is_logging_in,
+            show_advanced_servers: false,
+            login_email: String::new(),
+            login_password: String::new(),
+            login_imap: "imap.gmail.com".into(),
+            login_smtp: "smtp.gmail.com".into(),
+            use_sops: false,
+            login_sops_key: String::new(),
+            login_error: None,
+            is_adding_folder: false,
+            new_folder_name: String::new(),
         }
     }
 
-    pub async fn fetch_envelopes(folder: &str) -> Vec<EnvelopeItem> {
-        let Ok(out) = Command::new("himalaya")
-            .args(["envelope", "list", "--folder", folder, "--page-size", "40", "--output", "json"])
-            .output()
-            .await
-        else {
-            return Vec::new();
-        };
 
-        serde_json::from_slice(&out.stdout).unwrap_or_default()
-    }
-
-    pub async fn read_message(id: &str, folder: &str) -> String {
-        let Ok(out) = Command::new("himalaya")
-            .args(["message", "read", id, "--folder", folder])
-            .output()
-            .await
-        else {
-            return "Failed to load email message.".into();
-        };
-
-        String::from_utf8_lossy(&out.stdout).to_string()
-    }
-
-    pub async fn send_message(to: &str, subject: &str, body: &str) {
-        let raw = format!("To: {}\nSubject: {}\n\n{}", to, subject, body);
-        let child = Command::new("himalaya")
-            .args(["template", "send"])
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-            .ok();
-
-        if let Some(mut c) = child {
-            use tokio::io::AsyncWriteExt;
-            if let Some(mut stdin) = c.stdin.take() {
-                let _ = stdin.write_all(raw.as_bytes()).await;
-            }
-        }
+    pub fn get_autocomplete_matches(&self) -> Vec<String> {
+        if self.compose_to.is_empty() { return Vec::new(); }
+        let q = self.compose_to.to_lowercase();
+        self.contacts.iter()
+            .filter(|c| c.to_lowercase().contains(&q) && c.to_lowercase() != q)
+            .take(5)
+            .cloned()
+            .collect()
     }
 
     pub fn update(&mut self, message: EmailMessage) {
         match message {
             EmailMessage::SelectFolder(f) => {
+                if let Some(idx) = self.folders.iter().position(|x| x == &f) {
+                    self.active_folder_idx = idx;
+                }
                 self.active_folder = f;
+                self.selected_index = 0;
+                self.active_mail_id = None;
+                self.parsed_email = None;
             }
             EmailMessage::SelectMail(id) => {
                 self.active_mail_id = Some(id);
+                self.parsed_email = None; // Show loading state
             }
-            EmailMessage::MailBodyLoaded(b) => {
-                self.mail_body = b;
+            EmailMessage::EnvelopesLoaded(envs) | EmailMessage::NetworkEnvelopesLoaded(envs) => {
+                self.envelopes = envs;
+                self.is_loading = false;
+                self.imap_error = None;
+            }
+            EmailMessage::SyncDone => {}
+            EmailMessage::MessageLoaded(b) => {
+                self.parsed_email = Some(b);
+            }
+            EmailMessage::Error(e) => {
+                self.imap_error = Some(e);
+                self.is_loading = false;
+            }
+            EmailMessage::SetLoading => {
+                self.is_loading = true;
+                self.imap_error = None;
+                self.envelopes.clear();
+                self.parsed_email = None;
             }
             EmailMessage::OpenComposer => {
                 self.is_composing = true;
+                self.active_mail_id = None;
+                self.compose_attachments.clear();
             }
             EmailMessage::ToChanged(t) => {
                 self.compose_to = t;
+                self.selected_autocomplete_idx = Some(0);
             }
-            EmailMessage::SubjectChanged(s) => {
-                self.compose_subject = s;
+            EmailMessage::SubjectChanged(s) => self.compose_subject = s,
+            EmailMessage::BodyChanged(b) => { self.compose_body.perform(b); },
+            EmailMessage::AddAttachment => {}
+            EmailMessage::ManualAttachChanged(v) => self.compose_manual_attach = v,
+            EmailMessage::SubmitManualAttach => {
+                let path = std::path::PathBuf::from(self.compose_manual_attach.trim());
+                if path.exists() {
+                    self.compose_attachments.push(path);
+                    self.compose_manual_attach.clear();
+                }
             }
-            EmailMessage::BodyChanged(b) => {
-                self.compose_body = b;
+            EmailMessage::SelectContact(c) => {
+                self.compose_to = c;
+                self.selected_autocomplete_idx = None;
             }
-            EmailMessage::SendMail => {
-                let to = self.compose_to.clone();
-                let sub = self.compose_subject.clone();
-                let b = self.compose_body.clone();
+            EmailMessage::SelectAutocompleteNext => {
+                let matches = self.get_autocomplete_matches();
+                if !matches.is_empty() {
+                    let idx = self.selected_autocomplete_idx.unwrap_or(0);
+                    self.selected_autocomplete_idx = Some((idx + 1) % matches.len());
+                }
+            }
+            EmailMessage::SelectAutocompletePrev => {
+                let matches = self.get_autocomplete_matches();
+                if !matches.is_empty() {
+                    let idx = self.selected_autocomplete_idx.unwrap_or(0);
+                    self.selected_autocomplete_idx = Some(if idx == 0 { matches.len() - 1 } else { idx - 1 });
+                }
+            }
+            EmailMessage::ConfirmAutocomplete => {
+                let matches = self.get_autocomplete_matches();
+                if let Some(idx) = self.selected_autocomplete_idx {
+                    if let Some(contact) = matches.get(idx) {
+                        self.compose_to = contact.clone();
+                        self.selected_autocomplete_idx = None;
+                    }
+                }
+            }
+            EmailMessage::AttachmentsPicked(paths) => {
+                for p in paths {
+                    self.compose_attachments.push(p);
+                }
+            }
+            EmailMessage::AttachmentPicked(p) => self.compose_attachments.push(p),
+            EmailMessage::RemoveAttachment(i) => { self.compose_attachments.remove(i); }
+            EmailMessage::SendMail | EmailMessage::CancelCompose => {
                 self.is_composing = false;
+                self.compose_body = iced::widget::text_editor::Content::new();
+                self.active_compose_field = 0;
                 self.compose_to.clear();
                 self.compose_subject.clear();
-                self.compose_body.clear();
-                tokio::spawn(async move {
-                    Self::send_message(&to, &sub, &b).await;
-                });
+                self.compose_attachments.clear();
             }
-            EmailMessage::Dismiss => {
-                self.is_composing = false;
+            EmailMessage::OpenLogin => {
+                let cfg = crate::backend::email_client::load_config();
+                self.login_email = cfg.email;
+                self.login_password = cfg.password.unwrap_or_default();
+                self.login_imap = cfg.imap_host;
+                self.login_smtp = cfg.smtp_host;
+                self.login_sops_key = cfg.sops_key.unwrap_or_default();
+                self.is_logging_in = true;
+            }
+            EmailMessage::DismissLogin => { self.is_logging_in = false; }
+            EmailMessage::LoginEmailChanged(v) => {
+                self.login_email = v;
+                let domain = self.login_email.split('@').nth(1).unwrap_or("").to_lowercase();
+                if domain == "gmail.com" || domain == "googlemail.com" {
+                    self.login_imap = "imap.gmail.com".into();
+                    self.login_smtp = "smtp.gmail.com".into();
+                }
+            }
+            EmailMessage::LoginPasswordChanged(v) => self.login_password = v,
+            EmailMessage::LoginImapChanged(v) => self.login_imap = v,
+            EmailMessage::LoginSmtpChanged(v) => self.login_smtp = v,
+            EmailMessage::ToggleSops(v) => self.use_sops = v,
+            EmailMessage::LoginSopsKeyChanged(v) => self.login_sops_key = v,
+            EmailMessage::SaveLogin => {}
+            EmailMessage::Dismiss => { self.is_composing = false; }
+            EmailMessage::GetAppPassword => {}
+            EmailMessage::ToggleAdvancedServers => self.show_advanced_servers = !self.show_advanced_servers,
+            EmailMessage::StartAddFolder => { self.is_adding_folder = true; self.new_folder_name.clear(); },
+            EmailMessage::AddFolderChanged(v) => self.new_folder_name = v,
+            EmailMessage::SubmitAddFolder => {
+                let name = self.new_folder_name.trim().to_string();
+                if !name.is_empty() && !self.folders.contains(&name) {
+                    self.folders.push(name);
+                }
+                self.is_adding_folder = false;
+            }
+            EmailMessage::RemoveFolder(f) => {
+                if f != "INBOX" && f != "Unread" && f != "Starred" && f != "Sent" && f != "Drafts" && f != "Trash" && f != "Spam" {
+                    self.folders.retain(|x| x != &f);
+                    if self.active_folder == f {
+                        self.active_folder = "INBOX".into();
+                        self.active_folder_idx = 0;
+                        self.selected_index = 0;
+                    }
+                }
+            }
+            EmailMessage::FocusNextPane => { self.focus_pane = (self.focus_pane + 1).min(2); }
+            EmailMessage::FocusPrevPane => { self.focus_pane = self.focus_pane.saturating_sub(1); }
+            EmailMessage::OpenInBrowser => {
+                if let Some(id) = &self.active_mail_id {
+                    let cache_file = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp")).join("moon-beauty-shell/email_cache").join(&self.active_folder).join(format!("{}.eml", id));
+                    if cache_file.exists() {
+                        let _ = std::process::Command::new("xdg-open").arg(cache_file).spawn();
+                    }
+                }
+            }
+            EmailMessage::SaveAttachment(name) => {
+                if let Some(email) = &self.parsed_email {
+                    if let Some((_, data)) = email.attachments.iter().find(|(n, _)| n == &name) {
+                        let settings = crate::config::settings::ShellSettings::load();
+                        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+                        let download_dir = if !settings.attachment_download_dir.trim().is_empty() {
+                            std::path::PathBuf::from(settings.attachment_download_dir.trim())
+                        } else {
+                            // Prefer XDG download dir, then ~/Downloads, then ~
+                            let xdg = dirs::download_dir();
+                            let fallback_dl = home.join("Downloads");
+                            match xdg {
+                                Some(d) => d,
+                                None if fallback_dl.exists() => fallback_dl,
+                                None => {
+                                    // Create ~/Downloads if it doesn't exist
+                                    let _ = std::fs::create_dir_all(&fallback_dl);
+                                    fallback_dl
+                                }
+                            }
+                        };
+                        let _ = std::fs::create_dir_all(&download_dir);
+                        let out_path = download_dir.join(&name);
+                        eprintln!("[attach] saving to {:?}", out_path);
+                        if std::fs::write(&out_path, data).is_ok() {
+                            let _ = std::process::Command::new("notify-send")
+                                .args(["-a", "Email", "Attachment Saved", &format!("Saved to {}", out_path.display())])
+                                .spawn();
+                            let _ = std::process::Command::new("xdg-open").arg(&out_path).spawn();
+                        } else {
+                            let _ = std::process::Command::new("notify-send")
+                                .args(["-a", "Email", "Save Failed", &format!("Could not write to {}", out_path.display())])
+                                .spawn();
+                        }
+                    }
+                }
+            }
+            EmailMessage::SelectMailNext => {
+                if !self.envelopes.is_empty() {
+                    self.selected_index = (self.selected_index + 1).min(self.envelopes.len() - 1);
+                }
+            }
+            EmailMessage::SelectMailPrev => {
+                if !self.envelopes.is_empty() {
+                    self.selected_index = self.selected_index.saturating_sub(1);
+                }
+            }
+            EmailMessage::SelectFolderNext => {
+                self.active_folder_idx = (self.active_folder_idx + 1) % self.folders.len();
+                self.active_folder = self.folders[self.active_folder_idx].clone();
+                self.selected_index = 0;
+                self.active_mail_id = None;
+                self.parsed_email = None;
+            }
+            EmailMessage::SelectFolderPrev => {
+                self.active_folder_idx = self.active_folder_idx.saturating_sub(1);
+                self.active_folder = self.folders[self.active_folder_idx].clone();
+                self.selected_index = 0;
+                self.active_mail_id = None;
+                self.parsed_email = None;
+            }
+            EmailMessage::OpenSelected => {
+                if let Some(mail) = self.envelopes.get(self.selected_index) {
+                    self.active_mail_id = Some(mail.id.clone());
+                    self.parsed_email = None;
+                }
+            }
+            EmailMessage::ToggleStar => {
+                if let Some(mail) = self.envelopes.get_mut(self.selected_index) {
+                    mail.is_starred = !mail.is_starred;
+                }
+            }
+            EmailMessage::DeleteSelected | EmailMessage::SaveContact => {}
+            EmailMessage::DraftSaved => {
+                self.imap_error = Some("Draft saved to ~/.local/share/moon-beauty-shell/drafts.txt".into());
             }
         }
     }
 
-    pub fn view<'a>(&'a self, theme: &ShellTheme) -> Element<'a, EmailMessage> {
-        let mut folder_col = column![].spacing(6);
-        for f in &self.folders {
-            let is_sel = &self.active_folder == f;
-            let col = if is_sel { theme.success } else { theme.text };
-            let f_clone = f.to_string();
+    pub fn view<'a>(&'a self, theme: &'a ShellTheme, settings: &'a ShellSettings) -> Element<'a, EmailMessage> {
+        let (win_w, win_h) = settings.get_window_size("email", 1280, 800);
+        let fs_main = theme.font_size_overlay as f32;
+        let fs_sub = (theme.font_size_overlay as f32) - 2.0;
+        let fs_head = (theme.font_size_overlay as f32) + 4.0;
 
-            let f_btn = button(text(*f).size((theme.font_size_normal) as f32).bold().color(col))
-                .on_press(EmailMessage::SelectFolder(f_clone))
-                .padding([8, 12])
-                .style(|_t, _s| button::Style { background: None, ..Default::default() });
-
-            folder_col = folder_col.push(f_btn);
-        }
-
-        let mut mail_col = column![].spacing(6);
-        for mail in &self.envelopes {
-            let id = mail.id.clone();
-            let sender = mail.from.as_ref().and_then(|f| f.name.clone().or_else(|| f.addr.clone())).unwrap_or_else(|| "Unknown".into());
-            let subject = mail.subject.clone().unwrap_or_else(|| "(no subject)".into());
-
-            let row_item = button(
-                column![
-                    text(sender).size((theme.font_size_normal) as f32).bold().color(theme.text),
-                    text(subject).size((theme.font_size_normal - 2) as f32).color(theme.muted),
-                ]
-                .spacing(2),
-            )
-            .on_press(EmailMessage::SelectMail(id))
-            .padding(10)
-            .width(Length::Fill)
-            .style(|_t, _s| button::Style { background: None, ..Default::default() });
-
-            mail_col = mail_col.push(row_item);
-        }
-
-        let preview_content = scrollable(
-            text(&self.mail_body)
-                .size((theme.font_size_normal) as f32)
-                .color(theme.text),
-        )
-        .height(Length::Fill);
-
-        let main_row = row![
-            container(folder_col).width(Length::Fixed(180.0)).padding(10),
-            container(scrollable(mail_col)).width(Length::Fixed(360.0)).padding(10),
-            container(preview_content).width(Length::Fill).padding(14),
-        ]
-        .spacing(12);
+        let cut_f = theme.overlay_cut;
+        let angle_deg = theme.overlay_angle;
+        let rad = angle_deg.to_radians();
+        let sqrt2 = std::f32::consts::SQRT_2;
+        let dx = (cut_f * rad.cos() * sqrt2).min(win_w * 0.45).max(0.0);
+        let dy = (cut_f * rad.sin() * sqrt2).min(win_h * 0.45).max(0.0);
+        let pad_top = 20.0_f32;
+        let pad_bottom = 20.0_f32;
+        let header_inset = if dy > pad_top { (dx * (1.0 - (pad_top / dy))).max(0.0) + 16.0 } else { 16.0 };
+        let footer_inset = if dy > pad_bottom { (dx * (1.0 - (pad_bottom / dy))).max(0.0) + 16.0 } else { 16.0 };
+        let body_inset = header_inset.min(footer_inset) + 4.0;
 
         let card_bg = ShapeBox::new()
-            .shape(ShapeType::Rounded(12))
+            .shape(ShapeType::AngledHexagon { cut: cut_f, angle_deg })
             .background(theme.background)
             .border(theme.border, theme.border_width);
 
-        let card_content = container(
-            column![
+        if self.is_logging_in {
+            let email_input = text_input("you@gmail.com", &self.login_email).on_input(EmailMessage::LoginEmailChanged).padding(10);
+            let pass_input = text_input("App Password", &self.login_password).on_input(EmailMessage::LoginPasswordChanged).secure(true).padding(10);
+            let imap_input = text_input("imap.gmail.com", &self.login_imap).on_input(EmailMessage::LoginImapChanged).padding(10);
+            let smtp_input = text_input("smtp.gmail.com", &self.login_smtp).on_input(EmailMessage::LoginSmtpChanged).padding(10);
+                
+            let sops_check = checkbox(self.use_sops)
+                .label("Encrypt with SOPS")
+                .on_toggle(EmailMessage::ToggleSops)
+                .size(16)
+                .text_size(fs_main);
+
+            let sops_key_input = if self.use_sops {
+                Some(column![
+                    text_input("Age Key (age1... or path/to/keys.txt)", &self.login_sops_key).on_input(EmailMessage::LoginSopsKeyChanged).padding(10),
+                    text("Manual CLI equivalent: sops --encrypt --age <key> (or --pgp <fingerprint>) email.json").size(11).color(theme.muted)
+                ].spacing(4))
+            } else {
+                None
+            };
+
+            let mut form_col = column![
+                text("Connect Email Account").size(fs_head).bold().color(theme.text),
+                text("Enter your email and app password.").color(theme.muted),
+                email_input,
+                pass_input,
+                button(
+                    container(text("Get Google App Password ↗").size(12).color(theme.background)).width(Length::Fill).align_x(iced::alignment::Horizontal::Center)
+                )
+                .on_press(EmailMessage::GetAppPassword)
+                .width(Length::Fill)
+                .style(move |_t, _s| button::Style {
+                    background: Some(iced::Background::Color(theme.success)),
+                    border: iced::Border { color: theme.success, width: 1.0, radius: 4.0.into() },
+                    ..Default::default()
+                })
+                .padding(8),
+            ].spacing(12);
+
+            if self.show_advanced_servers {
+                form_col = form_col.push(imap_input).push(smtp_input);
+            }
+
+            form_col = form_col.push(
+                button(text(if self.show_advanced_servers { "Hide Manual Setup" } else { "Manual Server Setup" }).size(12).color(theme.muted))
+                    .on_press(EmailMessage::ToggleAdvancedServers)
+                    .style(|_t, _s| button::Style { background: None, ..Default::default() })
+                    .padding(0)
+            );
+
+            form_col = form_col.push(sops_check);
+            if let Some(k) = sops_key_input {
+                form_col = form_col.push(k);
+            }
+
+            form_col = form_col.push(
+                if let Some(err) = &self.login_error { text(err).color(theme.danger) } else { text("").color(theme.danger) }
+            );
+
+            form_col = form_col.push(
                 row![
-                    text("✉ EMAIL CLIENT (HIMALAYA)")
-                        .size((theme.font_size_overlay) as f32)
-                        .color(theme.text),
-                    row![].width(Length::Fill),
-                    button(text("✏ Compose").size(12).bold().color(theme.success))
-                        .on_press(EmailMessage::OpenComposer)
-                        .style(|_t, _s| button::Style { background: None, ..Default::default() }),
-                ]
-                .align_y(Alignment::Center),
-                main_row,
-                text("ESC to dismiss  •  Ctrl+Enter to send in composer")
-                    .size(11)
-                    .color(theme.muted)
-                    .align_x(Alignment::Center),
-            ]
-            .spacing(14)
-            .padding(20),
-        )
-        .width(Length::Fixed(1280.0))
-        .height(Length::Fixed(800.0));
+                    button(text("Save & Login").color(theme.background)).on_press(EmailMessage::SaveLogin).style(move |_t, _s| button::Style { background: Some(iced::Background::Color(theme.success)), ..Default::default() }).padding(10),
+                    button(text("Cancel").color(theme.text)).on_press(EmailMessage::DismissLogin).style(move |_t, _s| button::Style { background: Some(iced::Background::Color(theme.surface_alt)), ..Default::default() }).padding(10),
+                ].spacing(10)
+            );
+
+            let login_form = form_col.spacing(16).padding(40).width(Length::Fixed(500.0));
+            let card_content = container(login_form).width(Length::Fixed(win_w)).height(Length::Fixed(win_h)).center_x(Length::Fill).center_y(Length::Fill);
+            return container(Stack::new().push(card_bg.view()).push(card_content)).center_x(Length::Fill).center_y(Length::Fill).into();
+        }
+
+        // Main Mail UI
+        let mut folder_col = column![].spacing(4);
+        for f in &self.folders {
+            let is_sel = &self.active_folder == f;
+            let col = if is_sel { theme.background } else { theme.text };
+            let bg = if is_sel { Some(iced::Background::Color(theme.success)) } else { None };
+            let f_clone = f.clone();
+
+            let f_btn = button(text(f).size(fs_main).bold().color(col))
+                .on_press(EmailMessage::SelectFolder(f_clone))
+                .padding([8, 12])
+                .width(Length::Fill)
+                .style(move |_t, _s| button::Style {
+                    background: bg,
+                    border: iced::Border { color: theme.border, width: 1.0, radius: 4.0.into() },
+                    ..Default::default()
+                });
+            folder_col = folder_col.push(f_btn);
+        }
+
+        if self.is_adding_folder {
+            let input = text_input("Folder name...", &self.new_folder_name)
+                .on_input(EmailMessage::AddFolderChanged)
+                .on_submit(EmailMessage::SubmitAddFolder)
+                .padding(8);
+            folder_col = folder_col.push(input);
+        } else {
+            let add_btn = button(text("+").size(fs_main).bold().color(theme.background))
+                .on_press(EmailMessage::StartAddFolder)
+                .style(move |_t, _s| button::Style { background: Some(iced::Background::Color(theme.success)), ..Default::default() })
+                .padding(8).width(Length::FillPortion(1));
+
+            let rem_btn = button(text("-").size(fs_main).bold().color(theme.background))
+                .on_press(EmailMessage::RemoveFolder(self.active_folder.clone()))
+                .style(move |_t, _s| button::Style { background: Some(iced::Background::Color(theme.danger)), ..Default::default() })
+                .padding(8).width(Length::FillPortion(1));
+
+            folder_col = folder_col.push(row![add_btn, rem_btn].spacing(4));
+        }
+        
+        let folder_border = if self.focus_pane == 0 { theme.success } else { theme.border };
+        let folder_bg = ShapeBox::new()
+            .shape(ShapeType::Hexagon { cut: 16 })
+            .background(theme.surface_alt)
+            .border(folder_border, theme.control_border_width)
+            .size(Length::Fixed(180.0), Length::Fill);
+
+        let folder_pane = Stack::new()
+            .push(folder_bg.view())
+            .push(
+                container(folder_col)
+                    .width(Length::Fixed(180.0))
+                    .padding(20)
+            );
+
+        let mut mail_col = column![].spacing(6);
+        if self.is_loading {
+            mail_col = mail_col.push(container(text("Loading emails...").color(theme.muted)).padding(10));
+        } else if let Some(err) = &self.imap_error {
+            mail_col = mail_col.push(container(
+                column![
+                    text("IMAP Error").color(theme.danger),
+                    text(err).color(theme.text),
+                    button(text("Reconfigure").size(12).color(theme.background))
+                        .on_press(EmailMessage::OpenLogin)
+                        .style(move |_t, _s| button::Style {
+                            background: Some(iced::Background::Color(theme.danger)),
+                            border: iced::Border { color: theme.danger, width: 1.0, radius: 4.0.into() },
+                            ..Default::default()
+                        })
+                        .padding(8)
+                ].spacing(10)
+            ).padding(10));
+        } else if self.envelopes.is_empty() {
+            mail_col = mail_col.push(container(text("No messages found.").color(theme.muted)).padding(10));
+        } else {
+            for (i, mail) in self.envelopes.iter().enumerate() {
+                let id = mail.id.clone();
+                let is_sel = self.active_mail_id.as_deref() == Some(&id) || i == self.selected_index;
+                let text_color = if is_sel { theme.text_strong } else { theme.text };
+                let bg_color = if is_sel { Some(iced::Background::Color(theme.surface_alt)) } else { None };
+
+                let star_icon = if mail.is_starred { "★" } else { "☆" };
+                let star_col = if mail.is_starred { theme.success } else { theme.muted };
+
+                let row_item = button(
+                    row![
+                        text(star_icon).size(fs_main).color(star_col),
+                        column![
+                            text(&mail.sender).size(fs_main).bold().color(text_color).wrapping(iced::widget::text::Wrapping::None),
+                            text(&mail.subject).size(fs_sub).color(theme.muted).wrapping(iced::widget::text::Wrapping::None),
+                        ].spacing(2).width(Length::Fill)
+                    ]
+                    .spacing(8)
+                    .align_y(iced::alignment::Vertical::Center)
+                    .width(Length::Fill)
+                )
+                .on_press(EmailMessage::SelectMail(id))
+                .padding(10)
+                .width(Length::Fill)
+                .style(move |_t, _s| button::Style {
+                    background: bg_color,
+                    border: iced::Border { color: theme.border, width: 1.0, radius: 4.0.into() },
+                    ..Default::default()
+                });
+                mail_col = mail_col.push(row_item);
+            }
+        }
+
+        let mail_border = if self.focus_pane == 1 { theme.success } else { theme.border };
+        let mail_bg = ShapeBox::new()
+            .shape(ShapeType::Hexagon { cut: 16 })
+            .background(theme.surface_alt)
+            .border(mail_border, theme.control_border_width)
+            .size(Length::Fixed(320.0), Length::Fill);
+
+        let mail_pane = Stack::new()
+            .push(mail_bg.view())
+            .push(
+                container(scrollable(mail_col).width(Length::Fill).height(Length::Fill))
+                    .width(Length::Fixed(320.0))
+                    .height(Length::Fill)
+                    .padding(iced::Padding { top: 20.0, right: 36.0, bottom: 20.0, left: 20.0 })
+                    .clip(true)
+            );
+
+        let preview_content: Element<'a, EmailMessage> = if self.is_composing {
+            let to_input = text_input("To:", &self.compose_to)
+                .id(COMPOSE_TO_ID)
+                .on_input(EmailMessage::ToChanged)
+                .padding(8);
+                
+            let subj_input = text_input("Subject:", &self.compose_subject)
+                .id(COMPOSE_SUBJ_ID)
+                .on_input(EmailMessage::SubjectChanged)
+                .padding(8);
+                
+            let body_input = iced::widget::text_editor(&self.compose_body)
+                .id(COMPOSE_BODY_ID)
+                .on_action(EmailMessage::BodyChanged)
+                .padding(8)
+                .height(Length::Fill);
+
+            let suggestions = if !self.compose_to.is_empty() {
+                let q = self.compose_to.to_lowercase();
+                let matches: Vec<String> = self.contacts.iter()
+                    .filter(|c| c.to_lowercase().contains(&q) && c.to_lowercase() != q)
+                    .take(5)
+                    .cloned()
+                    .collect();
+                
+                if !matches.is_empty() {
+                    let mut col = column![].spacing(2).width(Length::Fill);
+                    for (i, m) in matches.into_iter().enumerate() {
+                        let is_sel = self.selected_autocomplete_idx == Some(i);
+                        let bg = if is_sel { theme.success } else { theme.surface_alt };
+                        let fg = if is_sel { theme.background } else { theme.text };
+                        col = col.push(
+                            button(text(m.clone()).size(fs_main).color(fg))
+                                .on_press(EmailMessage::SelectContact(m.clone()))
+                                .style(move |_t, _s| button::Style {
+                                    background: Some(iced::Background::Color(bg)),
+                                    border: iced::Border { color: theme.border, width: 1.0, radius: 4.0.into() },
+                                    ..Default::default()
+                                })
+                                .padding(4)
+                                .width(Length::Fill)
+                        );
+                    }
+                    Some(col)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let mut attach_row = row![].spacing(6);
+            for (i, p) in self.compose_attachments.iter().enumerate() {
+                if let Some(name) = p.file_name() {
+                    attach_row = attach_row.push(
+                        button(text(format!("📎 {} ✕", name.to_string_lossy())).size(11).color(theme.background))
+                            .on_press(EmailMessage::RemoveAttachment(i))
+                            .style(move |_t, _s| button::Style { background: Some(iced::Background::Color(theme.warning)), ..Default::default() })
+                            .padding(4)
+                    );
+                }
+            }
+            
+            // Fallback: manual file path input for drag-and-drop users
+            let manual_attach = row![
+                text_input("Or paste file path here...", &self.compose_manual_attach)
+                    .on_input(EmailMessage::ManualAttachChanged)
+                    .on_submit(EmailMessage::SubmitManualAttach)
+                    .padding(6)
+                    .size(12)
+                    .width(Length::Fill),
+                button(text("Add").size(12).color(theme.background))
+                    .on_press(EmailMessage::SubmitManualAttach)
+                    .style(move |_t, _s| button::Style { background: Some(iced::Background::Color(theme.warning)), ..Default::default() })
+                    .padding(6)
+            ].spacing(4).width(Length::Fill);
+
+            let mut compose_col = column![
+                text("✉ NEW MESSAGE").size(fs_main).color(theme.success),
+                to_input,
+            ].spacing(10);
+
+            if let Some(s) = suggestions {
+                compose_col = compose_col.push(container(s).padding(4).style(move |_t| container::Style {
+                    background: Some(iced::Background::Color(theme.background)),
+                    border: iced::Border { color: theme.border, width: 1.0, radius: 4.0.into() },
+                    ..Default::default()
+                }));
+            }
+
+            compose_col = compose_col.push(subj_input);
+            compose_col = compose_col.push(body_input);
+            compose_col = compose_col.push(attach_row);
+            compose_col = compose_col.push(manual_attach);
+            compose_col = compose_col.push(
+                row![
+                    button(text("Send").color(theme.background)).on_press(EmailMessage::SendMail).style(move |_t, _s| button::Style { background: Some(iced::Background::Color(theme.success)), ..Default::default() }).padding(8),
+                    button(text("📎 Attach").color(theme.background)).on_press(EmailMessage::AddAttachment).style(move |_t, _s| button::Style { background: Some(iced::Background::Color(theme.warning)), ..Default::default() }).padding(8),
+                    button(text("Cancel").color(theme.text)).on_press(EmailMessage::CancelCompose).style(move |_t, _s| button::Style { background: Some(iced::Background::Color(theme.surface_alt)), ..Default::default() }).padding(8),
+                    text("Ctrl+S / Ctrl+Enter to send").size(11).color(theme.muted),
+                ].spacing(10).align_y(iced::alignment::Vertical::Center)
+            );
+            
+            compose_col.padding(20).width(Length::Fill).height(Length::Fill).into()
+        } else if let Some(email) = &self.parsed_email {
+            let mut body_col = column![].spacing(16);
+            
+            // Render Images
+            for img_path in &email.images {
+                body_col = body_col.push(
+                    iced::widget::image(iced::widget::image::Handle::from_path(img_path))
+                        .width(Length::Fill)
+                        .content_fit(iced::ContentFit::Contain)
+                );
+            }
+
+            // Render Text
+            body_col = body_col.push(
+                text(&email.text).size(fs_main).color(theme.text)
+            );
+
+            // Render Attachments
+            if !email.attachments.is_empty() {
+                body_col = body_col.push(text("Attachments (Click to Preview/Open):").size(fs_main).bold().color(theme.success));
+                let mut att_row = row![].spacing(6);
+                for (name, _data) in &email.attachments {
+                    att_row = att_row.push(
+                        button(text(format!("📎 Save {}", name)).color(theme.background))
+                            .on_press(EmailMessage::SaveAttachment(name.clone()))
+                            .style(move |_t, _s| button::Style { background: Some(iced::Background::Color(theme.warning)), ..Default::default() })
+                            .padding(6)
+                    );
+                }
+                body_col = body_col.push(att_row);
+            }
+
+            scrollable(container(body_col).padding(20).width(Length::Fill))
+                .height(Length::Fill).width(Length::Fill).into()
+        } else {
+            let display_text = if self.active_mail_id.is_some() {
+                "Loading..."
+            } else {
+                "No message loaded. Select an email with ↑/↓."
+            };
+            scrollable(container(text(display_text).size(fs_main).color(theme.muted)).padding(20).width(Length::Fill))
+                .height(Length::Fill).width(Length::Fill).into()
+        };
+        
+        let preview_border = if self.focus_pane == 2 { theme.success } else { theme.border };
+        let preview_bg = ShapeBox::new()
+            .shape(ShapeType::Hexagon { cut: 16 })
+            .background(theme.surface_alt)
+            .border(preview_border, theme.control_border_width)
+            .size(Length::Fill, Length::Fill);
+
+        let preview_pane = Stack::new()
+            .push(preview_bg.view())
+            .push(
+                container(preview_content)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .padding(20)
+            );
+
+        let main_row = row![folder_pane, mail_pane, preview_pane].spacing(16).height(Length::Fill);
+
+        let contact_btn = if !self.is_composing && self.active_mail_id.is_some() {
+            button(text("Save Contact").size(fs_sub).color(theme.text))
+                .on_press(EmailMessage::SaveContact)
+                .padding([4, 8])
+                .style(move |_t, _s| button::Style { background: Some(iced::Background::Color(theme.surface_alt)), border: iced::Border { color: theme.border, width: 1.0, radius: 4.0.into() }, ..Default::default() })
+        } else {
+            button(text("")).padding(0).style(|_t, _s| button::Style { background: None, ..Default::default() })
+        };
+
+        let browser_btn = if !self.is_composing && self.active_mail_id.is_some() {
+            button(text("🌐 View in Browser").size(fs_sub).color(theme.background))
+                .on_press(EmailMessage::OpenInBrowser)
+                .padding([4, 8])
+                .style(move |_t, _s| button::Style { background: Some(iced::Background::Color(theme.warning)), border: iced::Border { color: theme.warning, width: 1.0, radius: 4.0.into() }, ..Default::default() })
+        } else {
+            button(text("")).padding(0).style(|_t, _s| button::Style { background: None, ..Default::default() })
+        };
+
+        let header_row = row![
+            text("✉ EMAIL CLIENT").size(fs_head).bold().color(theme.text),
+            iced::widget::space::horizontal(),
+            browser_btn,
+            contact_btn,
+            button(text("⚙ Settings").size(fs_main).bold().color(theme.text))
+                .on_press(EmailMessage::OpenLogin)
+                .padding([6, 12])
+                .style(move |_t, _s| button::Style { background: Some(iced::Background::Color(theme.surface_alt)), border: iced::Border { color: theme.text, width: 1.0, radius: 4.0.into() }, ..Default::default() }),
+            button(text("✏ Compose").size(fs_main).bold().color(theme.success))
+                .on_press(EmailMessage::OpenComposer)
+                .padding([6, 12])
+                .style(move |_t, _s| button::Style { background: Some(iced::Background::Color(theme.surface_alt)), border: iced::Border { color: theme.success, width: 1.0, radius: 4.0.into() }, ..Default::default() }),
+        ].align_y(iced::alignment::Vertical::Center).spacing(10);
+
+        let footer = container(
+            text("Ctrl+↑/↓: Folders  •  ↑/↓: Navigate  •  Enter: Open  •  n: New  •  s: Star  •  d: Delete  •  c: Save Contact")
+                .size(11)
+                .color(theme.muted)
+        ).width(Length::Fill).align_x(iced::alignment::Horizontal::Center);
+
+        let header_container = container(header_row)
+            .width(Length::Fill)
+            .padding(iced::Padding { top: 0.0, right: header_inset, bottom: 0.0, left: header_inset });
+
+        let main_row_container = container(main_row)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(iced::Padding { top: 0.0, right: body_inset, bottom: 0.0, left: body_inset });
+
+        let footer_container = container(footer)
+            .width(Length::Fill)
+            .padding(iced::Padding { top: 0.0, right: footer_inset, bottom: 0.0, left: footer_inset });
+
+        let card_content = container(
+            column![header_container, main_row_container, footer_container]
+            .spacing(16)
+            .padding(iced::Padding { top: pad_top, right: 0.0, bottom: pad_bottom, left: 0.0 })
+            .width(Length::Fixed(win_w))
+            .height(Length::Fixed(win_h))
+        );
 
         let card = Stack::new().push(card_bg.view()).push(card_content);
-
-        let backdrop = button(container(column![]).width(Length::Fill).height(Length::Fill))
-            .on_press(EmailMessage::Dismiss)
-            .style(|_t, _s| button::Style {
-                background: Some(iced::Background::Color(Color::from_rgba8(0, 0, 0, 0.6))),
-                ..Default::default()
-            });
-
-        Stack::new()
-            .push(backdrop)
-            .push(container(card).center_x(Length::Fill).center_y(Length::Fill))
-            .into()
+        container(card).center_x(Length::Fill).center_y(Length::Fill).into()
     }
 }

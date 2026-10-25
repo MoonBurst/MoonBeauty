@@ -80,10 +80,7 @@ impl ShapeBox {
     pub fn view<Message: 'static>(self) -> Element<'static, Message> {
         let w = self.width;
         let h = self.height;
-        Canvas::new(self)
-            .width(w)
-            .height(h)
-            .into()
+        Canvas::new(self).width(w).height(h).into()
     }
 }
 

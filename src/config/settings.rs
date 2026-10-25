@@ -255,12 +255,26 @@ pub struct ShellSettings {
     pub global_padding: u16,
     #[serde(default = "default_capsule_spacing", alias = "capsuleSpacing")]
     pub capsule_spacing: i32,
+    #[serde(default = "default_cpu_temp_warn", alias = "cpuTempWarn")]
+    pub cpu_temp_warn: u32,
+    #[serde(default = "default_cpu_temp_danger", alias = "cpuTempDanger")]
+    pub cpu_temp_danger: u32,
+    #[serde(default = "default_cpu_usage_warn", alias = "cpuUsageWarn")]
+    pub cpu_usage_warn: u32,
+    #[serde(default = "default_cpu_usage_danger", alias = "cpuUsageDanger")]
+    pub cpu_usage_danger: u32,
+    #[serde(default = "default_ram_warn_gib", alias = "ramWarnGib")]
+    pub ram_warn_gib: u32,
+    #[serde(default = "default_ram_danger_gib", alias = "ramDangerGib")]
+    pub ram_danger_gib: u32,
     #[serde(default = "default_tray_width", alias = "trayWidth")]
     pub tray_width: u32,
     #[serde(default = "default_tray_timeout", alias = "trayTimeout")]
     pub tray_timeout_sec: u32,
     #[serde(default = "default_tray_icon_size", alias = "trayIconSize")]
     pub tray_icon_size: u32,
+    #[serde(default = "default_launcher_icon_size", alias = "launcherIconSize")]
+    pub launcher_icon_size: u32,
     #[serde(default = "default_poll_interval", alias = "hardwarePollInterval", alias = "hardware_poll_interval_ms")]
     pub hardware_poll_interval_ms: u64,
 
@@ -328,6 +342,10 @@ pub struct ShellSettings {
     pub capsule_bar_widths: HashMap<String, u32>,
     #[serde(default, alias = "standaloneWindows")]
     pub standalone_windows: HashMap<String, WindowDim>,
+    #[serde(default = "default_overlay_width", alias = "overlayWidth")]
+    pub overlay_width: u32,
+    #[serde(default = "default_overlay_height", alias = "overlayHeight")]
+    pub overlay_height: u32,
     #[serde(default, alias = "gpu0")]
     pub gpu0: GpuThresholds,
     #[serde(default, alias = "gpu1")]
@@ -342,6 +360,8 @@ pub struct ShellSettings {
     pub overlay_cut: u32,
     #[serde(default = "default_overlay_angle", alias = "overlayAngle", alias = "overlay_angle", alias = "launcherAngle", alias = "launcher_angle")]
     pub overlay_angle: u32,
+    #[serde(default)]
+    pub attachment_download_dir: String,
 }
 
 fn default_bar_height() -> u32 { 42 }
@@ -360,9 +380,16 @@ fn default_global_border_width() -> f32 { 3.0 }
 fn default_control_border_width() -> f32 { 2.0 }
 fn default_global_padding() -> u16 { 12 }
 fn default_capsule_spacing() -> i32 { 2 }
+fn default_cpu_temp_warn() -> u32 { 70 }
+fn default_cpu_temp_danger() -> u32 { 80 }
+fn default_cpu_usage_warn() -> u32 { 75 }
+fn default_cpu_usage_danger() -> u32 { 90 }
+fn default_ram_warn_gib() -> u32 { 8 }
+fn default_ram_danger_gib() -> u32 { 2 }
 fn default_tray_width() -> u32 { 60 }
 fn default_tray_timeout() -> u32 { 3 }
 fn default_tray_icon_size() -> u32 { 20 }
+fn default_launcher_icon_size() -> u32 { 100 }
 fn default_poll_interval() -> u64 { 2000 }
 fn default_true() -> bool { true }
 
@@ -386,6 +413,8 @@ fn default_excluded() -> String { "greenclip, copyq".to_string() }
 fn default_alarm_sound_duration() -> u32 { 5 }
 fn default_alarm_sound_volume() -> u32 { 100 }
 fn default_gpu_selected_id() -> String { "card0".to_string() }
+fn default_overlay_width() -> u32 { 1200 }
+fn default_overlay_height() -> u32 { 800 }
 fn default_overlay_cut() -> u32 { 24 }
 fn default_overlay_angle() -> u32 { 45 }
 
@@ -428,9 +457,16 @@ impl Default for ShellSettings {
             control_border_width: default_control_border_width(),
             global_padding: default_global_padding(),
             capsule_spacing: default_capsule_spacing(),
+            cpu_temp_warn: default_cpu_temp_warn(),
+            cpu_temp_danger: default_cpu_temp_danger(),
+            cpu_usage_warn: default_cpu_usage_warn(),
+            cpu_usage_danger: default_cpu_usage_danger(),
+            ram_warn_gib: default_ram_warn_gib(),
+            ram_danger_gib: default_ram_danger_gib(),
             tray_width: default_tray_width(),
             tray_timeout_sec: default_tray_timeout(),
             tray_icon_size: default_tray_icon_size(),
+            launcher_icon_size: default_launcher_icon_size(),
             hardware_poll_interval_ms: default_poll_interval(),
             notifications_enabled: true,
             notif_hold_duration_sec: default_notif_hold(),
@@ -463,6 +499,8 @@ impl Default for ShellSettings {
             capsule_shapes: HashMap::new(),
             capsule_bar_widths: HashMap::new(),
             standalone_windows: HashMap::new(),
+            overlay_width: default_overlay_width(),
+            overlay_height: default_overlay_height(),
             gpu0: GpuThresholds::default(),
             gpu1: GpuThresholds {
                 temp_warn: 65,
@@ -473,6 +511,7 @@ impl Default for ShellSettings {
             gpu_selected_id: default_gpu_selected_id(),
             palette: Base16Palette::default(),
             tts_command: None,
+            attachment_download_dir: String::new(),
             overlay_cut: default_overlay_cut(),
             overlay_angle: default_overlay_angle(),
         }
@@ -490,11 +529,12 @@ impl ShellSettings {
             .unwrap_or((self.tooltip_width_px, self.tooltip_height_px))
     }
 
-    pub fn get_window_size(&self, id: &str, def_w: u32, def_h: u32) -> (f32, f32) {
+    pub fn get_window_size(&self, id: &str, _def_w: u32, _def_h: u32) -> (f32, f32) {
         if let Some(win) = self.standalone_windows.get(id) {
             (win.width as f32, win.height as f32)
         } else {
-            (def_w as f32, def_h as f32)
+            // Global fallback (the merged slider)
+            (self.overlay_width as f32, self.overlay_height as f32)
         }
     }
 
@@ -503,8 +543,16 @@ impl ShellSettings {
         if path.exists() {
             if let Ok(content) = fs::read_to_string(&path) {
                 if let Ok(mut settings) = serde_json::from_str::<ShellSettings>(&content) {
-                    let disk_profiles = load_friend_profiles();
+                    let mut disk_profiles = load_friend_profiles();
                     if !disk_profiles.is_empty() {
+                        // Migrate broken templates that inject "a new" or {summary}
+                        for p in &mut disk_profiles {
+                            if let Some(ref mut readout) = p.default_readout {
+                                if readout.contains("a new") || readout.contains("voice message") || readout.contains("{summary}") {
+                                    *readout = "Message from {name}".to_string();
+                                }
+                            }
+                        }
                         settings.friend_profiles = disk_profiles;
                     }
                     return settings;

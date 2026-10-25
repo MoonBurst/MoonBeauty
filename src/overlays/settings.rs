@@ -23,7 +23,7 @@ pub enum SettingsTab {
     Notifications,
     StylixSliders,
     ColorsStyles,
-    GpuHardware,
+    Hardware,
     BarLayout,
     OverlaysWindows,
 }
@@ -48,6 +48,7 @@ pub enum SettingsMessage {
     CapsuleSpacing(i32),
     TrayWidth(u32),
     TrayIconSize(u32),
+    LauncherIconSize(u32),
     TrayTimeout(u32),
     HardwarePollInterval(u64),
 
@@ -74,10 +75,18 @@ pub enum SettingsMessage {
     NotifSummarySize(u16),
     NotifBodySize(u16),
     NotifExcludedChanged(String),
+    CpuTempWarn(u32),
+    CpuTempDanger(u32),
+    CpuUsageWarn(u32),
+    CpuUsageDanger(u32),
+    RamWarnGib(u32),
+    RamDangerGib(u32),
 
     // Custom Pings
     SelectProfile(usize),
     ToggleProfileSound(usize),
+    TestProfileSound(usize),
+    TestProfileTts(usize),
     ToggleProfileTts(usize),
     ProfileSummaryChanged(usize, String),
     ProfileColorChanged(usize, String),
@@ -108,8 +117,11 @@ pub enum SettingsMessage {
     MoveCapsuleDown(String),
 
     // Window Sizing & Geometry
+    OverlayWidth(u32),
+    OverlayHeight(u32),
     WindowWidth(String, u32),
     WindowHeight(String, u32),
+    AttachmentDownloadDirChanged(String),
     OverlayCut(u32),
     OverlayAngle(u32),
     TooltipSizeWidth(String, u32),
@@ -192,9 +204,11 @@ impl SettingsOverlay {
                 | SettingsMessage::ColorChanged(_, _)
                 | SettingsMessage::SelectGpuId(_)
                 | SettingsMessage::TrayIconSize(_)
+                | SettingsMessage::LauncherIconSize(_)
         );
         match message {
             SettingsMessage::TrayIconSize(v) => settings.tray_icon_size = v.clamp(12, 48),
+            SettingsMessage::LauncherIconSize(v) => settings.launcher_icon_size = v.clamp(48, 160),
             SettingsMessage::SelectGpuId(id) => {
                 settings.gpu_selected_id = id;
             }
@@ -241,7 +255,7 @@ impl SettingsOverlay {
             SettingsMessage::SelectTab(t) => {
                 self.kill_preview();
                 self.active_tab = t;
-                if t == SettingsTab::GpuHardware {
+                if t == SettingsTab::Hardware {
                     self.detected_gpus = SystemCollector::list_gpus_sync();
                 }
             }
@@ -287,8 +301,15 @@ impl SettingsOverlay {
             SettingsMessage::NotifSummarySize(v) => settings.notif_summary_size = v.clamp(10, 36),
             SettingsMessage::NotifBodySize(v) => settings.notif_body_size = v.clamp(8, 32),
             SettingsMessage::NotifExcludedChanged(v) => settings.notif_excluded = v,
+            SettingsMessage::CpuTempWarn(v) => settings.cpu_temp_warn = v,
+            SettingsMessage::CpuTempDanger(v) => settings.cpu_temp_danger = v,
+            SettingsMessage::CpuUsageWarn(v) => settings.cpu_usage_warn = v,
+            SettingsMessage::CpuUsageDanger(v) => settings.cpu_usage_danger = v,
+            SettingsMessage::RamWarnGib(v) => settings.ram_warn_gib = v,
+            SettingsMessage::RamDangerGib(v) => settings.ram_danger_gib = v,
 
             SettingsMessage::SelectProfile(idx) => self.selected_profile = idx,
+            SettingsMessage::TestProfileSound(_) | SettingsMessage::TestProfileTts(_) => {}
             SettingsMessage::ToggleProfileSound(idx) => {
                 if let Some(p) = settings.friend_profiles.get_mut(idx) {
                     p.sound = !p.sound;
@@ -343,7 +364,7 @@ impl SettingsOverlay {
                     sound: true,
                     sound_path: None,
                     tts: true,
-                    default_readout: Some("Message from {name}".into()),
+                    default_readout: Some("Message from {name}: {body}".into()),
                     content_rules: Vec::new(),
                 });
                 self.selected_profile = settings.friend_profiles.len().saturating_sub(1);
@@ -440,6 +461,8 @@ impl SettingsOverlay {
                 }
             }
 
+            SettingsMessage::OverlayWidth(v) => settings.overlay_width = v.clamp(400, 3000),
+            SettingsMessage::OverlayHeight(v) => settings.overlay_height = v.clamp(250, 2000),
             SettingsMessage::WindowWidth(id, w) => {
                 let entry = settings.standalone_windows.entry(id).or_insert(crate::config::settings::WindowDim {
                     width: w,
@@ -460,6 +483,7 @@ impl SettingsOverlay {
                 });
                 entry.height = h;
             }
+            SettingsMessage::AttachmentDownloadDirChanged(v) => settings.attachment_download_dir = v,
             SettingsMessage::OverlayCut(v) => {
                 settings.overlay_cut = v.clamp(0, 200);
             }
@@ -655,7 +679,7 @@ SettingsMessage::SaveSettings => {}
             (SettingsTab::Notifications, "Notifications"),
             (SettingsTab::StylixSliders, "Stylix & Sliders"),
             (SettingsTab::ColorsStyles, "Colors & Styles"),
-            (SettingsTab::GpuHardware, "GPU & Hardware"),
+            (SettingsTab::Hardware, "Hardware"),
             (SettingsTab::BarLayout, "Bar Layout & Slants"),
             (SettingsTab::OverlaysWindows, "Overlays & Windows"),
         ];
@@ -988,6 +1012,14 @@ SettingsMessage::SaveSettings => {}
                                 .on_input(move |v| SettingsMessage::ProfileSoundPathChanged(sel_idx, v))
                                 .padding(5)
                                 .size((scale_sz(0.72)) as f32),
+                            button(text("▶").size((scale_sz(0.7)) as f32).color(theme.success))
+                                .on_press(SettingsMessage::TestProfileSound(sel_idx))
+                                .padding([4, 8])
+                                .style(move |_t, _s| button::Style {
+                                    background: Some(iced::Background::Color(Color::from_rgb8(15, 20, 15))),
+                                    border: iced::Border { color: theme.success, width: 1.0, radius: 4.0.into() },
+                                    ..Default::default()
+                                }),
                             button(text("✕").size(10).color(theme.danger))
                                 .on_press(SettingsMessage::ProfileSoundPathChanged(sel_idx, "".into()))
                                 .padding([4, 8])
@@ -1000,6 +1032,14 @@ SettingsMessage::SaveSettings => {}
                                 .on_input(move |v| SettingsMessage::ProfileTtsTemplateChanged(sel_idx, v))
                                 .padding(5)
                                 .size((scale_sz(0.72)) as f32),
+                            button(text("▶").size((scale_sz(0.7)) as f32).color(theme.success))
+                                .on_press(SettingsMessage::TestProfileTts(sel_idx))
+                                .padding([4, 8])
+                                .style(move |_t, _s| button::Style {
+                                    background: Some(iced::Background::Color(Color::from_rgb8(15, 20, 15))),
+                                    border: iced::Border { color: theme.success, width: 1.0, radius: 4.0.into() },
+                                    ..Default::default()
+                                }),
                         ].align_y(Alignment::Center).spacing(8),
 
                         swatch_row,
@@ -1170,13 +1210,78 @@ SettingsMessage::SaveSettings => {}
                 col.into()
             }
 
-            SettingsTab::GpuHardware => {
+            SettingsTab::Hardware => {
                 let mut gpu_col = column![
                     text("🎮 GPU ALERT THRESHOLDS & MONITORING")
                         .size((scale_sz(0.95)) as f32)
                         .bold()
                         .color(theme.success),
                 ].spacing(12).width(Length::Fill);
+
+
+                gpu_col = gpu_col.push(
+                    text("CPU & RAM WARNINGS")
+                        .size((scale_sz(0.85)) as f32)
+                        .bold()
+                        .color(theme.success)
+                );
+
+                gpu_col = gpu_col.push(row![
+                    column![
+                        row![
+                            text("CPU Temp Warning (°C)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
+                            row![].width(Length::Fill),
+                            text(format!("{}°C", settings.cpu_temp_warn)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
+                        ],
+                        slider(40..=95, settings.cpu_temp_warn, SettingsMessage::CpuTempWarn).width(Length::Fill),
+                    ].spacing(2).width(Length::FillPortion(1)),
+                    column![
+                        row![
+                            text("CPU Temp Danger (°C)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
+                            row![].width(Length::Fill),
+                            text(format!("{}°C", settings.cpu_temp_danger)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
+                        ],
+                        slider(50..=105, settings.cpu_temp_danger, SettingsMessage::CpuTempDanger).width(Length::Fill),
+                    ].spacing(2).width(Length::FillPortion(1)),
+                ].spacing(16));
+
+                gpu_col = gpu_col.push(row![
+                    column![
+                        row![
+                            text("CPU Usage Warning (%)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
+                            row![].width(Length::Fill),
+                            text(format!("{}%", settings.cpu_usage_warn)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
+                        ],
+                        slider(10..=99, settings.cpu_usage_warn, SettingsMessage::CpuUsageWarn).width(Length::Fill),
+                    ].spacing(2).width(Length::FillPortion(1)),
+                    column![
+                        row![
+                            text("CPU Usage Danger (%)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
+                            row![].width(Length::Fill),
+                            text(format!("{}%", settings.cpu_usage_danger)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
+                        ],
+                        slider(20..=100, settings.cpu_usage_danger, SettingsMessage::CpuUsageDanger).width(Length::Fill),
+                    ].spacing(2).width(Length::FillPortion(1)),
+                ].spacing(16));
+
+                gpu_col = gpu_col.push(row![
+                    column![
+                        row![
+                            text("RAM Remaining Warning (GiB)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
+                            row![].width(Length::Fill),
+                            text(format!("{} GiB", settings.ram_warn_gib)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
+                        ],
+                        slider(1..=32, settings.ram_warn_gib, SettingsMessage::RamWarnGib).width(Length::Fill),
+                    ].spacing(2).width(Length::FillPortion(1)),
+                    column![
+                        row![
+                            text("RAM Remaining Danger (GiB)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
+                            row![].width(Length::Fill),
+                            text(format!("{} GiB", settings.ram_danger_gib)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
+                        ],
+                        slider(1..=32, settings.ram_danger_gib, SettingsMessage::RamDangerGib).width(Length::Fill),
+                    ].spacing(2).width(Length::FillPortion(1)),
+                ].spacing(16));
 
                 gpu_col = gpu_col.push(
                     text("Active GPU (shown in top bar)")
@@ -1259,41 +1364,43 @@ SettingsMessage::SaveSettings => {}
                         SettingsMessage::Gpu1VramDanger
                     };
 
-                    gpu_col = gpu_col.push(column![
-                        row![
-                            text("Temp Warning (°C)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
-                            row![].width(Length::Fill),
-                            text(format!("{}°C", th.temp_warn)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
-                        ],
-                        slider(40..=95, th.temp_warn, tw_fn).width(Length::Fill),
-                    ].spacing(2));
+                    gpu_col = gpu_col.push(row![
+                        column![
+                            row![
+                                text("Temp Warning (°C)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
+                                row![].width(Length::Fill),
+                                text(format!("{}°C", th.temp_warn)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
+                            ],
+                            slider(40..=95, th.temp_warn, tw_fn).width(Length::Fill),
+                        ].spacing(2).width(Length::FillPortion(1)),
+                        column![
+                            row![
+                                text("Temp Danger (°C)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
+                                row![].width(Length::Fill),
+                                text(format!("{}°C", th.temp_danger)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
+                            ],
+                            slider(50..=105, th.temp_danger, td_fn).width(Length::Fill),
+                        ].spacing(2).width(Length::FillPortion(1)),
+                    ].spacing(16));
 
-                    gpu_col = gpu_col.push(column![
-                        row![
-                            text("Temp Danger (°C)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
-                            row![].width(Length::Fill),
-                            text(format!("{}°C", th.temp_danger)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
-                        ],
-                        slider(50..=105, th.temp_danger, td_fn).width(Length::Fill),
-                    ].spacing(2));
-
-                    gpu_col = gpu_col.push(column![
-                        row![
-                            text("Free VRAM Warning (GiB)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
-                            row![].width(Length::Fill),
-                            text(format!("{} GiB", th.vram_warn)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
-                        ],
-                        slider(1..=16, th.vram_warn, vw_fn).width(Length::Fill),
-                    ].spacing(2));
-
-                    gpu_col = gpu_col.push(column![
-                        row![
-                            text("Free VRAM Danger (GiB)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
-                            row![].width(Length::Fill),
-                            text(format!("{} GiB", th.vram_danger)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
-                        ],
-                        slider(0..=8, th.vram_danger, vd_fn).width(Length::Fill),
-                    ].spacing(2));
+                    gpu_col = gpu_col.push(row![
+                        column![
+                            row![
+                                text("Free VRAM Warning (GiB)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
+                                row![].width(Length::Fill),
+                                text(format!("{} GiB", th.vram_warn)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
+                            ],
+                            slider(1..=16, th.vram_warn, vw_fn).width(Length::Fill),
+                        ].spacing(2).width(Length::FillPortion(1)),
+                        column![
+                            row![
+                                text("Free VRAM Danger (GiB)").size((scale_sz(0.72)) as f32).bold().color(theme.text),
+                                row![].width(Length::Fill),
+                                text(format!("{} GiB", th.vram_danger)).size((scale_sz(0.72)) as f32).bold().color(theme.text)
+                            ],
+                            slider(0..=8, th.vram_danger, vd_fn).width(Length::Fill),
+                        ].spacing(2).width(Length::FillPortion(1)),
+                    ].spacing(16));
                 }
 
                 gpu_col = gpu_col.push(column![
@@ -1305,10 +1412,24 @@ SettingsMessage::SaveSettings => {}
                     slider(500..=5000, settings.hardware_poll_interval_ms as u32, |v| SettingsMessage::HardwarePollInterval(v as u64)).width(Length::Fill),
                 ].spacing(2));
 
-                let body: Element<'a, SettingsMessage> = scrollable(gpu_col)
-                    .height(Length::Fill)
-                    .into();
-                body
+                let body: Element<'a, SettingsMessage> = container(
+                scrollable(
+                    container(gpu_col).padding(iced::Padding { top: 0.0, right: 24.0, bottom: 0.0, left: 0.0 })
+                )
+                .height(Length::Fill)
+                .width(Length::Fill)
+            )
+            .padding(iced::Padding {
+                top: 0.0,
+                right: (settings.overlay_cut as f32) + 16.0,
+                bottom: (settings.overlay_cut as f32) + 16.0,
+                left: (settings.overlay_cut as f32) + 16.0,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .clip(true)
+            .into();
+            body
             }
 
 
@@ -1632,9 +1753,10 @@ SettingsMessage::SaveSettings => {}
                     .width(Length::Fill)
                 )
                 .padding(iced::Padding {
-                    top: 0.0, right: 0.0,
+                    top: 0.0,
+                    right: (settings.overlay_cut as f32) + 16.0,
                     bottom: (settings.overlay_cut as f32) + 16.0,
-                    left: 0.0,
+                    left: (settings.overlay_cut as f32) + 16.0,
                 })
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -1643,37 +1765,20 @@ SettingsMessage::SaveSettings => {}
             }
 
             SettingsTab::OverlaysWindows => {
-                let windows = [
-                    ("launcher", "🚀 App Launcher", 840, 650),
-                    ("calc", "🧮 Calculator & Units", 820, 580),
-                    ("clipboard", "📋 Clipboard Manager", 1080, 700),
-                    ("dictionary", "📖 Dictionary", 820, 600),
-                    ("unicode", "🔣 Unicode Search", 780, 600),
-                    ("notes", "📝 Quick Notes", 840, 650),
-                    ("pass", "🔑 Password Store", 820, 600),
-                    ("power", "⚡ Power & Session", 720, 560),
-                    ("todo", "✅ Todo Task Board", 860, 740),
-                    ("settings", "⚙ Settings Menu", 1260, 840),
-                    ("email", "✉ Email Client", 1500, 900),
-                    ("reminders", "⏰ Reminders", 780, 580),
-                    ("rng", "🎲 Dice / RNG", 620, 840),
-                    ("amogus", "ඞ Among Us Tracker", 780, 560),
-                ];
-
                 let mut col = column![
                     text("🪟 OVERLAY WINDOW SIZING & GEOMETRY")
-                        .size((base_sz) as f32)
+                        .size(base_sz as f32)
                         .bold()
                         .color(theme.success),
-                    text("Adjust global hexagon corner cuts, angles, and window dimensions:")
-                        .size((scale_sz(0.72)) as f32)
+                    text("Global dimensions apply to all overlays (unless individually overridden).")
+                        .size(scale_sz(0.72) as f32)
                         .color(theme.muted),
                 ].spacing(8);
 
                 col = col.push(
                     container(
                         column![
-                            text("⬡ Global Overlay Hexagon Geometry").size((scale_sz(0.8)) as f32).bold().color(theme.success),
+                            text("⬡ Global Overlay Hexagon Geometry").size(scale_sz(0.8) as f32).bold().color(theme.success),
                             row![
                                 text("Cut:").size(11).bold().color(theme.text),
                                 slider(0..=200, settings.overlay_cut, SettingsMessage::OverlayCut).width(Length::Fixed(180.0)),
@@ -1734,29 +1839,78 @@ SettingsMessage::SaveSettings => {}
                     })
                 );
 
-                for (id, name, def_w, def_h) in windows {
-                    let (w_val, h_val) = settings.get_window_size(id, def_w, def_h);
-                    let w_u32 = w_val as u32;
-                    let h_u32 = h_val as u32;
-                    let id_w = id.to_string();
-                    let id_h = id.to_string();
+                col = col.push(
+                    container(
+                        column![
+                            text("📁 Attachment Download Directory").size(scale_sz(0.8) as f32).bold().color(theme.success),
+                            text("Leave blank for default (~/Downloads).").size(11).color(theme.muted),
+                            text_input("Default (~/Downloads)", &settings.attachment_download_dir)
+                                .on_input(SettingsMessage::AttachmentDownloadDirChanged)
+                                .padding(8)
+                                .size(11)
+                                .width(Length::Fill),
+                        ].spacing(8)
+                    )
+                    .padding([10, 14])
+                    .style(move |_t| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb8(18, 20, 26))),
+                        border: iced::Border { color: theme.border, width: 1.5, radius: 6.0.into() },
+                        ..Default::default()
+                    })
+                );
 
-                    col = col.push(
-                        row![
-                            text(name).size((scale_sz(0.7)) as f32).bold().color(theme.text).width(Length::Fixed(200.0)),
-                            text("W:").size(10).color(theme.muted),
-                            slider(400..=1600, w_u32, move |v| SettingsMessage::WindowWidth(id_w.clone(), v)).width(Length::Fixed(180.0)),
-                            text(format!("{}px", w_u32)).size(10).color(theme.text).width(Length::Fixed(50.0)),
-                            text("H:").size(10).color(theme.muted),
-                            slider(250..=1000, h_u32, move |v| SettingsMessage::WindowHeight(id_h.clone(), v)).width(Length::Fixed(180.0)),
-                            text(format!("{}px", h_u32)).size(10).color(theme.text).width(Length::Fixed(50.0)),
-                        ]
-                        .spacing(8)
-                        .align_y(Alignment::Center),
-                    );
-                }
+                col = col.push(
+                    container(
+                        column![
+                            text("⬜ Global Overlay Dimensions").size(scale_sz(0.8) as f32).bold().color(theme.success),
+                            row![
+                                text("Width:").size(11).bold().color(theme.text),
+                                slider(400..=2000, settings.overlay_width, SettingsMessage::OverlayWidth).width(Length::Fixed(240.0)),
+                                text(format!("{}px", settings.overlay_width)).size(11).color(theme.text).width(Length::Fixed(50.0)),
+                            ]
+                            .spacing(8)
+                            .align_y(Alignment::Center),
+                            row![
+                                text("Height:").size(11).bold().color(theme.text),
+                                slider(250..=1500, settings.overlay_height, SettingsMessage::OverlayHeight).width(Length::Fixed(240.0)),
+                                text(format!("{}px", settings.overlay_height)).size(11).color(theme.text).width(Length::Fixed(50.0)),
+                            ]
+                            .spacing(8)
+                            .align_y(Alignment::Center),
+                            row![
+                                text("Icon Size:").size(11).bold().color(theme.text),
+                                slider(48..=160, settings.launcher_icon_size, SettingsMessage::LauncherIconSize).width(Length::Fixed(240.0)),
+                                text(format!("{}px", settings.launcher_icon_size)).size(11).color(theme.text).width(Length::Fixed(50.0)),
+                            ]
+                            .spacing(8)
+                            .align_y(Alignment::Center),
+                        ].spacing(8)
+                    )
+                    .padding([10, 14])
+                    .style(move |_t| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb8(18, 20, 26))),
+                        border: iced::Border {
+                            color: theme.border,
+                            width: 1.5,
+                            radius: 6.0.into(),
+                        },
+                        ..Default::default()
+                    })
+                );
 
-                scrollable(col).height(Length::Fixed(card_h - 180.0)).into()
+                container(
+                    scrollable(col).height(Length::Fill)
+                )
+                .padding(iced::Padding {
+                    top: 0.0,
+                    right: (settings.overlay_cut as f32) + 16.0,
+                    bottom: (settings.overlay_cut as f32) + 16.0,
+                    left: (settings.overlay_cut as f32) + 16.0,
+                })
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .clip(true)
+                .into()
             }
         };
 
@@ -1829,15 +1983,6 @@ SettingsMessage::SaveSettings => {}
 
         let card = Stack::new().push(card_bg.view()).push(card_content);
 
-        let backdrop = container(column![]).width(Length::Fill).height(Length::Fill)
-            .style(|_t| container::Style {
-                background: Some(iced::Background::Color(Color::from_rgba8(0, 0, 0, 0.65))),
-                ..Default::default()
-            });
-
-        Stack::new()
-            .push(backdrop)
-            .push(container(card).center_x(Length::Fill).center_y(Length::Fill))
-            .into()
+        container(card).center_x(Length::Fill).center_y(Length::Fill).into()
     }
 }

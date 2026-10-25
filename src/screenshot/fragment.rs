@@ -51,7 +51,6 @@ pub fn write_state_file(path: &std::path::Path, state: &str, sx: i32, sy: i32, c
 }
 
 pub struct FragmentApp {
-    monitor: String,
     gx: i32,
     gy: i32,
     handle: iced::widget::image::Handle,
@@ -63,7 +62,6 @@ pub struct FragmentApp {
 impl Default for FragmentApp {
     fn default() -> Self {
         Self {
-            monitor: String::new(),
             gx: 0,
             gy: 0,
             handle: iced::widget::image::Handle::from_bytes(Vec::<u8>::new()),
@@ -77,10 +75,6 @@ impl Default for FragmentApp {
 impl FragmentApp {
 
     
-
-    fn namespace(&self) -> String {
-        format!("mbs-freeze-frag-{}", self.monitor)
-    }
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
@@ -175,7 +169,7 @@ impl FragmentApp {
         iced::Subscription::batch([
             iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
             iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers: _, .. }) = event else { return None; };
                 match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
                     Some(Message::Escape)
@@ -202,7 +196,7 @@ impl Program<Message> for FragmentCanvas {
         cursor: iced::mouse::Cursor,
     ) -> Option<iced::widget::Action<Message>> {
         use iced::mouse;
-        use iced::event::Status;
+        
 
         // Use unclamped cursor position so we get motion events even when the
         // cursor leaves this surface (which happens during a Wayland implicit
@@ -313,7 +307,6 @@ pub fn run(
     let bytes = std::fs::read(&local_png).map_err(|e| format!("read: {e}"))?;
     let handle = iced::widget::image::Handle::from_bytes(bytes);
     let app = FragmentApp {
-        monitor: monitor.clone(),
         gx,
         gy,
         handle,
@@ -352,6 +345,10 @@ pub fn run(
         FragmentApp::view,
     )
     .subscription(FragmentApp::subscription)
+    .style(|_state, _theme| iced::theme::Style {
+        background_color: iced::Color::TRANSPARENT,
+        text_color: iced::Color::WHITE,
+    })
     .settings(Settings {
         layer_settings: layer,
         ..Default::default()

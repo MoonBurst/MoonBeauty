@@ -1,5 +1,5 @@
 use iced::widget::{container, Stack};
-use iced::{Color, Element, Length, Padding, Task as Command, Theme};
+use iced::{Element, Length, Padding, Task as Command};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use moon_beauty_shell::backend::*;
@@ -160,6 +160,31 @@ fn resolve_exe() -> std::path::PathBuf {
             }
         })
         .unwrap_or_else(|| std::path::PathBuf::from("moon-beauty-shell"))
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+fn app_theme(_state: &MoonBeautyShellApp) -> iced::Theme {
+    iced::Theme::Dark
+}
+
+fn app_style(_state: &MoonBeautyShellApp, _theme: &iced::Theme) -> iced::theme::Style {
+    iced::theme::Style {
+        background_color: iced::Color::TRANSPARENT,
+        text_color: iced::Color::WHITE,
+    }
 }
 
 pub fn main() -> Result<(), iced_layershell::Error> {
@@ -657,6 +682,8 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         MoonBeautyShellApp::view,
     )
     .subscription(MoonBeautyShellApp::subscription)
+    .theme(app_theme)
+    .style(app_style)
     .settings(Settings {
         layer_settings,
         ..Default::default()
@@ -664,10 +691,76 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     .run()
 }
 
+fn handle_email_keypress(event: iced::Event, status: iced::event::Status, _window: iced::window::Id) -> Option<Message> {
+    let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+    use iced::keyboard::{Key, key::Named};
+    
+    // ---- SEND: three shortcuts to maximize compatibility ----
+    if key == Key::Named(Named::Enter) && (modifiers.control() || modifiers.alt()) {
+        eprintln!("[key] Send triggered via Enter+mod");
+        return Some(Message::Email(EmailMessage::SendMail));
+    }
+    if let Key::Character(c) = &key {
+        if modifiers.control() && c.to_lowercase() == "s" {
+            eprintln!("[key] Send triggered via Ctrl+S");
+            return Some(Message::Email(EmailMessage::SendMail));
+        }
+        if modifiers.control() && c.to_lowercase() == "o" {
+            eprintln!("[key] Attach triggered via Ctrl+O");
+            return Some(Message::Email(EmailMessage::AddAttachment));
+        }
+    }
+
+    if key == Key::Named(Named::Tab) {
+        return Some(Message::ComposeTabPressed(modifiers.shift()));
+    }
+
+    if modifiers.alt() {
+        match key {
+            Key::Named(Named::ArrowUp) => return Some(Message::Email(EmailMessage::SelectFolderPrev)),
+            Key::Named(Named::ArrowDown) => return Some(Message::Email(EmailMessage::SelectFolderNext)),
+            _ => {}
+        }
+    }
+
+    if modifiers.control() {
+        if let Key::Character(c) = &key {
+            match c.to_lowercase().as_str() {
+                "n" | "j" => return Some(Message::Email(EmailMessage::SelectMailNext)),
+                "p" | "k" => return Some(Message::Email(EmailMessage::SelectMailPrev)),
+                _ => {}
+            }
+        }
+    }
+
+    if matches!(key, Key::Character(_)) && status == iced::event::Status::Captured && !modifiers.control() {
+        return None;
+    }
+
+    match key {
+        Key::Named(Named::ArrowUp) => Some(Message::Email(EmailMessage::SelectMailPrev)),
+        Key::Named(Named::ArrowDown) => Some(Message::Email(EmailMessage::SelectMailNext)),
+        Key::Named(Named::Enter) => Some(Message::Email(EmailMessage::OpenSelected)),
+        Key::Named(Named::Delete) => Some(Message::Email(EmailMessage::DeleteSelected)),
+        Key::Character(c) if c == "n" && !modifiers.control() => Some(Message::Email(EmailMessage::OpenComposer)),
+        Key::Character(c) if c == "s" && !modifiers.control() => Some(Message::Email(EmailMessage::ToggleStar)),
+        Key::Character(c) if c == "d" && !modifiers.control() => Some(Message::Email(EmailMessage::DeleteSelected)),
+        Key::Character(c) if c == "c" && !modifiers.control() => Some(Message::Email(EmailMessage::SaveContact)),
+        _ => None,
+    }
+}
+
+
+
 #[derive(Debug, Clone)]
 pub enum Message {
     TickHardware,
     TickWeather,
+    TickEmailSync,
+    EmailSynced,
+    EmailSyncedWithDiff(Vec<moon_beauty_shell::backend::email_client::NativeEnvelope>, Vec<moon_beauty_shell::backend::email_client::NativeEnvelope>),
+    FocusComposeField,
+    ComposeTabPressed(bool),
     WeatherLoaded(Option<moon_beauty_shell::backend::WeatherData>),
     TickClock,
     TickToasts,
@@ -833,10 +926,6 @@ impl MoonBeautyShellApp {
 
 impl MoonBeautyShellApp {
 
-    fn namespace(&self) -> String {
-        "moon-beauty-shell".into()
-    }
-
     fn new_app() -> (Self, Command<Message>) {
         let args: Vec<String> = std::env::args().collect();
         let standalone_target = detect_standalone_overlay(&args);
@@ -912,7 +1001,7 @@ impl MoonBeautyShellApp {
         };
 
         let notif_screen_at_startup = settings.notif_screen_name.clone();
-        let mut app = Self {
+        let app = Self {
             settings_ui: SettingsOverlay::new(&settings),
             settings,
             theme,
@@ -994,6 +1083,7 @@ impl MoonBeautyShellApp {
         };
 
         let mut init_tasks = vec![
+            Command::done(Message::TickEmailSync),
             Command::perform(async {
                 moon_beauty_shell::backend::WeatherBackend::fetch().await.ok()
             }, Message::WeatherLoaded)
@@ -1049,8 +1139,93 @@ impl MoonBeautyShellApp {
                 ClipboardOverlay::reload(),
                 |entries| Message::Clipboard(ClipboardMessage::Reloaded(entries)),
             ));
+        } else if matches!(app.active_overlay, Some(OverlayTarget::Notes)) {
+            init_tasks.push(
+                iced::widget::operation::focus(moon_beauty_shell::overlays::notes::NOTES_INPUT_ID)
+                    .map(Message::Notes),
+            );
+            init_tasks.push(Command::perform(
+                async {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                },
+                |_| Message::Notes(NotesMessage::Refocus),
+            ));
         }
+
         
+        // Todo autofocus: same pattern as launcher/calc/pass — schedule
+        // the input focus, then retry after 100ms in case the compositor
+        // delivers window focus late (standalone layer surfaces sometimes
+        // need this nudge).
+        if matches!(app.active_overlay, Some(OverlayTarget::Todo)) {
+            init_tasks.push(
+                iced::widget::operation::focus(
+                    moon_beauty_shell::overlays::todo::TODO_INPUT_ID,
+                ).map(Message::Todo),
+            );
+            init_tasks.push(Command::perform(
+                async {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                },
+                |_| Message::Todo(TodoMessage::Refocus),
+            ));
+        }
+
+        if matches!(app.active_overlay, Some(OverlayTarget::Unicode)) {
+            init_tasks.push(
+                iced::widget::operation::focus(moon_beauty_shell::overlays::unicode::UNICODE_INPUT_ID)
+                    .map(Message::Unicode),
+            );
+            init_tasks.push(Command::perform(
+                async {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                },
+                |_| Message::Unicode(UnicodeMessage::Refocus),
+            ));
+        }
+
+        if matches!(app.active_overlay, Some(OverlayTarget::Email)) {
+            init_tasks.push(Command::done(Message::Email(EmailMessage::SetLoading)));
+            init_tasks.push(Command::perform(
+                async { moon_beauty_shell::backend::email_client::fetch_envelopes("INBOX").await },
+                |res| match res {
+                        Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(envs)),
+                        Err(e) => Message::Email(EmailMessage::Error(e)),
+                    },
+            ));
+        }
+
+        if matches!(app.active_overlay, Some(OverlayTarget::Reminders)) {
+            init_tasks.push(
+                iced::widget::operation::focus(moon_beauty_shell::overlays::reminders::REMINDER_TASK_ID)
+                    .map(Message::Reminders),
+            );
+            init_tasks.push(Command::perform(
+                async { tokio::time::sleep(std::time::Duration::from_millis(100)).await; },
+                |_| Message::Reminders(ReminderMessage::InitialFocus),
+            ));
+        }
+
+        // History: on open, scroll to the auto-selected newest (bottom) row.
+        // Immediate pass is usually enough; the delayed retry catches the
+        // case where the scrollable hasn't been laid out yet when the
+        // first scroll_to fires.
+        if matches!(app.active_overlay, Some(OverlayTarget::NotificationsHistory)) {
+            if let Some(y) = app.notifs.scroll_offset_for_selected(&app.theme, &app.settings) {
+                init_tasks.push(iced::widget::operation::scroll_to(
+                    iced::widget::Id::new("history_list"),
+                    iced::widget::operation::AbsoluteOffset { x: 0.0, y },
+                ));
+                init_tasks.push(Command::perform(
+                    async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        y
+                    },
+                    |y| Message::Notif(NotifMessage::HistoryScrollTo(y)),
+                ));
+            }
+        }
+
         (app, Command::batch(init_tasks))
     }
 
@@ -1205,8 +1380,93 @@ impl MoonBeautyShellApp {
                 }
             }
             Message::TickToasts => {
-                self.notifs.tick_toasts(self.settings.notif_hold_duration_sec);
+                self.notifs.tick_toasts(self.settings.notif_hold_duration_sec, self.settings.notif_volume);
             }
+            Message::ComposeTabPressed(shift) => {
+                if self.email.is_composing {
+                    if !self.email.get_autocomplete_matches().is_empty() {
+                        self.email.update(EmailMessage::ConfirmAutocomplete);
+                        return Command::none();
+                    }
+                    // Iced 0.14 only has focus_next, so Shift+Tab will just go forward.
+                    let _ = shift;
+                    return iced::widget::operation::focus_next();
+                }
+            }
+            Message::FocusComposeField => {
+                self.email.active_compose_field = (self.email.active_compose_field + 1) % 3;
+                let id = match self.email.active_compose_field {
+                    0 => moon_beauty_shell::overlays::email::COMPOSE_TO_ID,
+                    1 => moon_beauty_shell::overlays::email::COMPOSE_SUBJ_ID,
+                    _ => moon_beauty_shell::overlays::email::COMPOSE_BODY_ID,
+                };
+                return iced::widget::operation::focus(id).map(Message::Email);
+            }
+            Message::TickEmailSync => {
+                if moon_beauty_shell::backend::email_client::config_exists() {
+                    eprintln!("[sync] Boot/Timer triggered email sync");
+                    let folder = "INBOX".to_string();
+                    return Command::perform(
+                        async move {
+                            let old_envs = moon_beauty_shell::backend::email_client::load_index(&folder);
+                            if let Ok(new_envs) = moon_beauty_shell::backend::email_client::fetch_from_network(&folder).await {
+                                moon_beauty_shell::backend::email_client::save_index(&folder, &new_envs);
+                                moon_beauty_shell::backend::email_client::sync_bodies_background(folder).await;
+                                Ok::<_, String>((old_envs, new_envs))
+                            } else {
+                                Err("fetch failed".into())
+                            }
+                        },
+                        |res| match res {
+                            Ok((old, new)) => Message::EmailSyncedWithDiff(old, new),
+                            Err(_) => Message::EmailSynced,
+                        }
+                    );
+                }
+            }
+            Message::EmailSyncedWithDiff(old, new) => {
+                eprintln!("[sync] EmailSyncedWithDiff: old={} new={}", old.len(), new.len());
+                
+                // Cross-process dedup file: prevent two processes from notifying the same email
+                let dedup_path = dirs::runtime_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+                    .join("mbs-email-notified.txt");
+                let mut notified: std::collections::HashSet<String> = std::fs::read_to_string(&dedup_path)
+                    .ok()
+                    .map(|s| s.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+                    .unwrap_or_default();
+                
+                let old_ids: std::collections::HashSet<String> = old.iter().map(|e| e.id.clone()).collect();
+                for env in new {
+                    if !old_ids.contains(&env.id) && !notified.contains(&env.id) {
+                        eprintln!("[sync] New email from {}: {}", env.sender, env.subject);
+                        
+                        // Visual notification
+                        let _ = std::process::Command::new("notify-send")
+                            .args(["-a", "Email", &env.sender, &env.subject])
+                            .spawn();
+                        
+                        // Spoken announcement
+                        moon_beauty_shell::overlays::notifications::NotificationOverlay::speak_tts(
+                            "Email",
+                            &env.sender,
+                            &env.subject,
+                            Some("New email from {sender}: {body}"),
+                            self.settings.tts_command.clone(),
+                            self.settings.notif_volume,
+                        );
+                        
+                        notified.insert(env.id.clone());
+                    }
+                }
+                
+                // Persist dedup list (cap at 200 most recent)
+                let mut sorted: Vec<_> = notified.into_iter().collect();
+                sorted.sort();
+                sorted.truncate(200);
+                let _ = std::fs::write(&dedup_path, sorted.join("\n"));
+            }
+            Message::EmailSynced => {}
             Message::TickWeather => {
                 return Command::perform(async {
                     moon_beauty_shell::backend::WeatherBackend::fetch().await.ok()
@@ -1256,7 +1516,7 @@ impl MoonBeautyShellApp {
                     self.toggle_standalone(target);
                 }
                 IpcCommand::Open(target, arg) => {
-                    if matches!(target, OverlayTarget::Launcher | OverlayTarget::Clipboard | OverlayTarget::NotificationsHistory | OverlayTarget::Settings) {
+                    if matches!(target, OverlayTarget::Launcher | OverlayTarget::Clipboard | OverlayTarget::NotificationsHistory | OverlayTarget::Settings | OverlayTarget::Todo | OverlayTarget::Notes | OverlayTarget::Unicode) {
                         self.spawn_standalone(target);
                     } else if matches!(target, OverlayTarget::Annotator) {
                         // Annotator needs fullscreen + exclusive keyboard, which only
@@ -1893,6 +2153,11 @@ impl MoonBeautyShellApp {
                     if self.is_standalone { std::process::exit(0); }
                     self.active_overlay = None;
                 }
+                NotesMessage::Refocus => {
+                    return iced::widget::operation::focus(
+                        moon_beauty_shell::overlays::notes::NOTES_INPUT_ID,
+                    ).map(Message::Notes);
+                }
                 _ => self.notes.update(msg),
             },
             Message::Pass(msg) => match msg {
@@ -1936,12 +2201,88 @@ impl MoonBeautyShellApp {
                     if self.is_standalone { std::process::exit(0); }
                     self.active_overlay = None;
                 }
+                TodoMessage::Refocus => {
+                    return iced::widget::operation::focus(
+                        moon_beauty_shell::overlays::todo::TODO_INPUT_ID,
+                    ).map(Message::Todo);
+                }
+                TodoMessage::EditSelected | TodoMessage::EditTask(_) => {
+                    self.todo.update(msg);
+                    // Refocus the input so the user can type immediately
+                    // after clicking ✎ or pressing F2.
+                    return iced::widget::operation::focus(
+                        moon_beauty_shell::overlays::todo::TODO_INPUT_ID,
+                    ).map(Message::Todo);
+                }
+                TodoMessage::TaskSelectPrev | TodoMessage::TaskSelectNext => {
+                    self.todo.update(msg);
+                    if let Some(sel_id) = self.todo.selected_task_id {
+                        // Scroll to selected task using row height of ~40px.
+                        let visible: Vec<u64> = self.todo.db.todos.iter()
+                            .filter(|t| t.category == self.todo.active_category)
+                            .filter(|t| match self.todo.filter {
+                                moon_beauty_shell::overlays::todo::TodoFilter::All => true,
+                                moon_beauty_shell::overlays::todo::TodoFilter::Active => !t.completed,
+                                moon_beauty_shell::overlays::todo::TodoFilter::Completed => t.completed,
+                            })
+                            .map(|t| t.id)
+                            .collect();
+                        let idx = visible.iter().position(|v| *v == sel_id).unwrap_or(0);
+                        return iced::widget::operation::scroll_to(
+                            iced::widget::Id::new("todo_list"),
+                            iced::widget::operation::AbsoluteOffset {
+                                x: 0.0,
+                                y: (idx as f32 * 40.0 - 100.0).max(0.0),
+                            },
+                        );
+                    }
+                }
                 _ => self.todo.update(msg),
             },
             Message::Reminders(msg) => match msg {
                 ReminderMessage::Dismiss => {
                     if self.is_standalone { std::process::exit(0); }
                     self.active_overlay = None;
+                }
+                ReminderMessage::InitialFocus => {
+                    // 100ms delayed retry — start on the task input
+                    return iced::widget::operation::focus(
+                        moon_beauty_shell::overlays::reminders::REMINDER_TASK_ID,
+                    ).map(Message::Reminders);
+                }
+                ReminderMessage::Refocus => {
+                    // Enter in task input → jump to when input
+                    return iced::widget::operation::focus(
+                        moon_beauty_shell::overlays::reminders::REMINDER_WHEN_ID,
+                    ).map(Message::Reminders);
+                }
+                ReminderMessage::FocusNextField => {
+                    // Tab: cycle Task → When → Task based on current field
+                    self.reminders.cycle_focus_forward();
+                    let target = if self.reminders.active_field == 0 {
+                        moon_beauty_shell::overlays::reminders::REMINDER_TASK_ID
+                    } else {
+                        moon_beauty_shell::overlays::reminders::REMINDER_WHEN_ID
+                    };
+                    return iced::widget::operation::focus(target).map(Message::Reminders);
+                }
+                ReminderMessage::FocusPrevField => {
+                    self.reminders.cycle_focus_backward();
+                    let target = if self.reminders.active_field == 0 {
+                        moon_beauty_shell::overlays::reminders::REMINDER_TASK_ID
+                    } else {
+                        moon_beauty_shell::overlays::reminders::REMINDER_WHEN_ID
+                    };
+                    return iced::widget::operation::focus(target).map(Message::Reminders);
+                }
+                ReminderMessage::ScrollUp
+                | ReminderMessage::ScrollDown
+                | ReminderMessage::DeleteSelected => {
+                    self.reminders.update(msg);
+                    return iced::widget::operation::scroll_to(
+                        iced::widget::Id::new("reminders_list"),
+                        iced::widget::operation::AbsoluteOffset { x: 0.0, y: self.reminders.scroll_y },
+                    );
                 }
                 _ => self.reminders.update(msg),
             },
@@ -1986,13 +2327,43 @@ impl MoonBeautyShellApp {
                     if self.is_standalone { std::process::exit(0); }
                     self.active_overlay = None;
                 }
-                UnicodeMessage::CopySymbol(s) => {
+                UnicodeMessage::Refocus => {
+                    return iced::widget::operation::focus(
+                        moon_beauty_shell::overlays::unicode::UNICODE_INPUT_ID,
+                    ).map(Message::Unicode);
+                }
+                UnicodeMessage::CopySymbol(sym) => {
                     if self.is_standalone {
-                        tokio::spawn(async move { UnicodeOverlay::copy(s).await; });
+                        tokio::spawn(async move { UnicodeOverlay::copy(sym).await; });
                         std::process::exit(0);
                     }
                     self.active_overlay = None;
-                    return Command::perform(async move { UnicodeOverlay::copy(s).await; }, |_| Message::DismissActiveOverlay);
+                    return Command::perform(
+                        async move { UnicodeOverlay::copy(sym).await; },
+                        |_| Message::DismissActiveOverlay,
+                    );
+                }
+                UnicodeMessage::SelectNext
+                | UnicodeMessage::SelectPrev
+                | UnicodeMessage::SelectNextRow
+                | UnicodeMessage::SelectPrevRow => {
+                    self.unicode.update(msg);
+                    // Auto-scroll to selected item. Grid is 5 columns,
+                    // item height = 66 + 8 gap = 74. Scroll so selected
+                    // is roughly centered vertically.
+                    if let Some(idx) = self.unicode.selected_idx {
+                        let row = idx / 5;
+                        let y = (row as f32) * 74.0 - 200.0;
+                        return iced::widget::operation::scroll_to(
+                            iced::widget::Id::new("unicode_grid"),
+                            iced::widget::operation::AbsoluteOffset { x: 0.0, y: y.max(0.0) },
+                        );
+                    }
+                }
+                UnicodeMessage::CopySelected => {
+                    self.unicode.update(msg);
+                    if self.is_standalone { std::process::exit(0); }
+                    self.active_overlay = None;
                 }
                 _ => self.unicode.update(msg),
             },
@@ -2141,7 +2512,7 @@ impl MoonBeautyShellApp {
                 other => self.annotator.update(other),
                 }
                 if is_text_press {
-                    return iced::Task::none();
+                    return Command::none();
                 }
             }
             Message::Amogus(msg) => match msg {
@@ -2164,8 +2535,271 @@ impl MoonBeautyShellApp {
             },
             Message::Email(msg) => match msg {
                 EmailMessage::Dismiss => {
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
+                    if self.email.is_composing {
+                        let to = self.email.compose_to.clone();
+                        let sub = self.email.compose_subject.clone();
+                        let body = self.email.compose_body.text();
+                        self.email.update(EmailMessage::CancelCompose);
+                        return Command::perform(
+                            async move { moon_beauty_shell::backend::email_client::save_draft(&to, &sub, &body).await },
+                            |_| Message::Email(EmailMessage::DraftSaved)
+                        );
+                    } else {
+                        if self.is_standalone { std::process::exit(0); }
+                        self.active_overlay = None;
+                    }
+                }
+                EmailMessage::SelectFolder(f) => {
+                    self.email.update(EmailMessage::SelectFolder(f.clone()));
+                    return Command::batch(vec![
+                        Command::done(Message::Email(EmailMessage::SetLoading)),
+                        Command::perform(
+                            async move { moon_beauty_shell::backend::email_client::fetch_envelopes(&f).await },
+                            |res| match res {
+                                Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(envs)),
+                                Err(e) => Message::Email(EmailMessage::Error(e)),
+                            }
+                        )
+                    ]);
+                }
+                EmailMessage::SelectMail(id) => {
+                    let folder = self.email.active_folder.clone();
+                    self.email.update(EmailMessage::SelectMail(id.clone()));
+                    return Command::perform(
+                        async move { moon_beauty_shell::backend::email_client::read_message(&id, &folder).await },
+                        |body| Message::Email(EmailMessage::MessageLoaded(body)),
+                    );
+                }
+                EmailMessage::SendMail => {
+                    let to = self.email.compose_to.clone();
+                    let sub = self.email.compose_subject.clone();
+                    let body = self.email.compose_body.text().to_string();
+                    
+                    let mut attachments = Vec::new();
+                    for path in &self.email.compose_attachments {
+                        eprintln!("[attach] reading {:?}", path);
+                        if let (Some(name), Ok(data)) = (path.file_name(), std::fs::read(path)) {
+                            eprintln!("[attach] attached {} ({} bytes)", name.to_string_lossy(), data.len());
+                            attachments.push((name.to_string_lossy().to_string(), data));
+                        } else {
+                            eprintln!("[attach] FAILED to read {:?}", path);
+                        }
+                    }
+                    
+                    eprintln!("[send] sending to={:?} subject={:?} attachments={}", to, sub, attachments.len());
+                    self.email.update(EmailMessage::SendMail);
+                    return Command::perform(
+                        async move { moon_beauty_shell::backend::email_client::send_message(&to, &sub, &body, attachments).await },
+                        |res| match res {
+                            Ok(_) => Message::Email(EmailMessage::MessageLoaded(
+                                moon_beauty_shell::backend::email_client::ParsedEmail {
+                                    text: "✓ Message sent.".into(),
+                                    images: Vec::new(),
+                                    attachments: Vec::new(),
+                                }
+                            )),
+                            Err(e) => Message::Email(EmailMessage::MessageLoaded(
+                                moon_beauty_shell::backend::email_client::ParsedEmail {
+                                    text: format!("✗ Send failed: {}", e),
+                                    images: Vec::new(),
+                                    attachments: Vec::new(),
+                                }
+                            )),
+                        }
+                    );
+                }
+                EmailMessage::EnvelopesLoaded(envs) => {
+                    self.email.update(EmailMessage::EnvelopesLoaded(envs));
+                    let folder = self.email.active_folder.clone();
+                    return Command::perform(
+                        async move { moon_beauty_shell::backend::email_client::fetch_from_network(&folder).await },
+                        |res| match res {
+                            Ok(envs) => Message::Email(EmailMessage::NetworkEnvelopesLoaded(envs)),
+                            Err(_) => Message::Email(EmailMessage::SyncDone),
+                        }
+                    );
+                }
+                EmailMessage::NetworkEnvelopesLoaded(envs) => {
+                    self.email.update(EmailMessage::EnvelopesLoaded(envs.clone()));
+                    moon_beauty_shell::backend::email_client::save_index(&self.email.active_folder, &envs);
+                    let folder = self.email.active_folder.clone();
+                    return Command::perform(
+                        async move { moon_beauty_shell::backend::email_client::sync_bodies_background(folder).await },
+                        |_| Message::Email(EmailMessage::SyncDone)
+                    );
+                }
+                EmailMessage::SyncDone => {}
+                EmailMessage::SelectMailNext | EmailMessage::SelectMailPrev => {
+                    if self.email.is_composing && !self.email.get_autocomplete_matches().is_empty() {
+                        let target = match msg {
+                            EmailMessage::SelectMailNext => EmailMessage::SelectAutocompleteNext,
+                            _ => EmailMessage::SelectAutocompletePrev,
+                        };
+                        self.email.update(target);
+                    } else if !self.email.is_composing && !self.email.is_logging_in {
+                        self.email.update(msg);
+                        return self.update(Message::Email(EmailMessage::OpenSelected));
+                    }
+                }
+                EmailMessage::SelectFolderNext | EmailMessage::SelectFolderPrev => {
+                    if !self.email.is_composing && !self.email.is_logging_in {
+                        let old_folder = self.email.active_folder.clone();
+                        self.email.update(msg);
+                        if self.email.active_folder != old_folder {
+                            let f = self.email.active_folder.clone();
+                            return Command::batch(vec![
+                                Command::done(Message::Email(EmailMessage::SetLoading)),
+                                Command::perform(
+                                    async move { moon_beauty_shell::backend::email_client::fetch_envelopes(&f).await },
+                                    |res| match res {
+                                        Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(envs)),
+                                        Err(e) => Message::Email(EmailMessage::Error(e)),
+                                    }
+                                )
+                            ]);
+                        }
+                    }
+                }
+                EmailMessage::OpenSelected => {
+                    if !self.email.is_composing {
+                        if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
+                            let id = mail.id.clone();
+                            let folder = self.email.active_folder.clone();
+                            self.email.update(EmailMessage::SelectMail(id.clone()));
+                            return Command::perform(
+                                async move { moon_beauty_shell::backend::email_client::read_message(&id, &folder).await },
+                                |body| Message::Email(EmailMessage::MessageLoaded(body)),
+                            );
+                        }
+                    }
+                }
+                EmailMessage::ToggleStar => {
+                    if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
+                        let id = mail.id.clone();
+                        let folder = self.email.active_folder.clone();
+                        let star = !mail.is_starred;
+                        self.email.update(EmailMessage::ToggleStar);
+                        return Command::perform(
+                            async move { moon_beauty_shell::backend::email_client::toggle_star(&id, &folder, star).await },
+                            |res| match res {
+                                Ok(_) => Message::Email(EmailMessage::SyncDone),
+                                Err(e) => Message::Email(EmailMessage::Error(e)),
+                            }
+                        );
+                    }
+                }
+                EmailMessage::DeleteSelected => {
+                    if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
+                        if mail.is_starred {
+                            self.email.imap_error = Some("Cannot delete a starred email. Unstar it first.".into());
+                        } else {
+                            let id = mail.id.clone();
+                            let mail_clone = mail.clone();
+                            let folder = self.email.active_folder.clone();
+                            
+                            self.email.envelopes.remove(self.email.selected_index);
+                            if self.email.selected_index >= self.email.envelopes.len() && !self.email.envelopes.is_empty() {
+                                self.email.selected_index = self.email.envelopes.len() - 1;
+                            }
+                            self.email.parsed_email = None;
+                            self.email.active_mail_id = None;
+
+                            moon_beauty_shell::backend::email_client::save_index(&folder, &self.email.envelopes);
+
+                            let is_trash = folder == "Trash";
+
+                            if !is_trash {
+                                let mut trash_envs = moon_beauty_shell::backend::email_client::load_index("Trash");
+                                trash_envs.insert(0, mail_clone);
+                                moon_beauty_shell::backend::email_client::save_index("Trash", &trash_envs);
+                            }
+
+                            return Command::perform(
+                                async move { 
+                                    if is_trash {
+                                        moon_beauty_shell::backend::email_client::delete_message(&id, &folder).await 
+                                    } else {
+                                        moon_beauty_shell::backend::email_client::move_to_trash(&id, &folder).await 
+                                    }
+                                },
+                                |res| match res {
+                                    Ok(_) => Message::Email(EmailMessage::SyncDone),
+                                    Err(e) => Message::Email(EmailMessage::Error(e)),
+                                }
+                            );
+                        }
+                    }
+                }
+                EmailMessage::SaveContact => {
+                    if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
+                        let email = mail.sender_email.clone();
+                        if !email.is_empty() {
+                            return Command::perform(
+                                async move { moon_beauty_shell::backend::email_client::save_contact(&email).await },
+                                |res| match res {
+                                    Ok(_) => Message::Email(EmailMessage::DraftSaved),
+                                    Err(e) => Message::Email(EmailMessage::Error(e)),
+                                }
+                            );
+                        }
+                    }
+                }
+                EmailMessage::OpenInBrowser | EmailMessage::GetAppPassword | EmailMessage::SelectContact(_) | EmailMessage::SelectAutocompleteNext | EmailMessage::SelectAutocompletePrev | EmailMessage::ConfirmAutocomplete | EmailMessage::StartAddFolder | EmailMessage::AddFolderChanged(_) | EmailMessage::SubmitAddFolder | EmailMessage::RemoveFolder(_) | EmailMessage::AttachmentsPicked(_) | EmailMessage::RemoveAttachment(_) | EmailMessage::ManualAttachChanged(_) | EmailMessage::SubmitManualAttach => {
+                    self.email.update(msg);
+                }
+                EmailMessage::AddAttachment => {
+                    return Command::perform(
+                        async {
+                            let files = rfd::AsyncFileDialog::new()
+                                .add_filter("All Files", &["*"])
+                                .pick_files()
+                                .await;
+                            let paths = files.map(|f| {
+                                f.into_iter().map(|file| file.path().to_path_buf()).collect::<Vec<_>>()
+                            }).unwrap_or_default();
+                            eprintln!("[attach] rfd picked: {:?}", paths);
+                            paths
+                        },
+                        |paths| Message::Email(EmailMessage::AttachmentsPicked(paths))
+                    );
+                }
+                EmailMessage::OpenComposer => {
+                    self.email.update(msg);
+                    return iced::widget::operation::focus(
+                        moon_beauty_shell::overlays::email::COMPOSE_TO_ID,
+                    ).map(Message::Email);
+                }
+                EmailMessage::SaveLogin => {
+                    let cfg = moon_beauty_shell::backend::email_client::EmailConfig {
+                        email: self.email.login_email.clone(),
+                        password: Some(self.email.login_password.clone()),
+                        password_cmd: None,
+                        imap_host: self.email.login_imap.clone(),
+                        imap_port: 993,
+                        smtp_host: self.email.login_smtp.clone(),
+                        smtp_port: 465,
+                        sops_key: if self.email.login_sops_key.trim().is_empty() { None } else { Some(self.email.login_sops_key.clone()) },
+                    };
+                    let use_sops = self.email.use_sops;
+                    match moon_beauty_shell::backend::email_client::save_config(&cfg, use_sops) {
+                        Ok(_) => {
+                            self.email.is_logging_in = false;
+                            self.email.login_error = None;
+                            return Command::batch(vec![
+                                Command::done(Message::Email(EmailMessage::SetLoading)),
+                                Command::perform(
+                                    async move { moon_beauty_shell::backend::email_client::fetch_envelopes("INBOX").await },
+                                    |res| match res {
+                                        Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(envs)),
+                                        Err(e) => Message::Email(EmailMessage::Error(e)),
+                                    }
+                                )
+                            ]);
+                        }
+                        Err(e) => {
+                            self.email.login_error = Some(e);
+                        }
+                    }
                 }
                 _ => self.email.update(msg),
             },
@@ -2173,6 +2807,34 @@ impl MoonBeautyShellApp {
                 NotifMessage::DismissDrawer => {
                     if self.is_standalone { std::process::exit(0); }
                     self.active_overlay = None;
+                }
+                NotifMessage::HistoryScrollTo(y) => {
+                    return iced::widget::operation::scroll_to(
+                        iced::widget::Id::new("history_list"),
+                        iced::widget::operation::AbsoluteOffset { x: 0.0, y },
+                    );
+                }
+                NotifMessage::HistorySelectNext
+                | NotifMessage::HistorySelectPrev => {
+                    self.notifs.update(msg);
+                    // Use the accurate scroll offset (computed from actual
+                    // row heights via history_row_height) rather than a
+                    // fixed-pixel guess.
+                    if let Some(y) = self.notifs.scroll_offset_for_selected(&self.theme, &self.settings) {
+                        return iced::widget::operation::scroll_to(
+                            iced::widget::Id::new("history_list"),
+                            iced::widget::operation::AbsoluteOffset { x: 0.0, y },
+                        );
+                    }
+                }
+                NotifMessage::HistoryDeleteSelected => {
+                    self.notifs.update(msg);
+                    if let Some(y) = self.notifs.scroll_offset_for_selected(&self.theme, &self.settings) {
+                        return iced::widget::operation::scroll_to(
+                            iced::widget::Id::new("history_list"),
+                            iced::widget::operation::AbsoluteOffset { x: 0.0, y },
+                        );
+                    }
                 }
                 NotifMessage::ActivateToast(id) => {
                     if let Some(t) = self.notifs.active_toasts.iter().find(|t| t.id == id).cloned() {
@@ -2198,10 +2860,37 @@ impl MoonBeautyShellApp {
             Message::Settings(msg) => {
                 {
                     let s = format!("{:?}", msg);
-                    let truncated = if s.len() > 120 { format!("{}…", &s[..120]) } else { s };
-                    let ts = self.settings.tooltip_sizes.len();
-                    let bm = &self.settings.bar_monitor;
+                    let _truncated = if s.len() > 120 { format!("{}…", &s[..120]) } else { s };
+                    let _ts = self.settings.tooltip_sizes.len();
+                    let _bm = &self.settings.bar_monitor;
                 }
+
+                if let SettingsMessage::TestProfileSound(idx) = msg {
+                    if let Some(p) = self.settings.friend_profiles.get(idx) {
+                        if let Some(path) = &p.sound_path {
+                            moon_beauty_shell::overlays::notifications::NotificationOverlay::play_sound(
+                                path.clone(),
+                                self.settings.notif_volume,
+                            );
+                        }
+                    }
+                    return Command::none();
+                }
+
+                if let SettingsMessage::TestProfileTts(idx) = msg {
+                    if let Some(p) = self.settings.friend_profiles.get(idx) {
+                        moon_beauty_shell::overlays::notifications::NotificationOverlay::speak_tts(
+                            "Diagnostics",
+                            "Test",
+                            &p.summary,
+                            p.default_readout.as_deref(),
+                            self.settings.tts_command.clone(),
+                            self.settings.notif_volume,
+                        );
+                    }
+                    return Command::none();
+                }
+
                 let is_test = matches!(msg, SettingsMessage::TestNotification);
 
                 if is_test {
@@ -2292,6 +2981,14 @@ impl MoonBeautyShellApp {
                 }
             }
             Message::DismissActiveOverlay => {
+                // Todo edit mode: Escape cancels the edit rather than
+                // closing the overlay.
+                if matches!(self.active_overlay, Some(OverlayTarget::Todo))
+                    && self.todo.editing_task_id.is_some()
+                {
+                    self.todo.update(moon_beauty_shell::overlays::todo::TodoMessage::CancelEdit);
+                    return Command::none();
+                }
                 // Persist if we're closing the Settings overlay via Esc.
                 if matches!(self.active_overlay, Some(OverlayTarget::Settings)) {
                     let _ = self.settings.save();
@@ -2319,12 +3016,25 @@ impl MoonBeautyShellApp {
         } else {
             iced::Subscription::none()
         };
+
+        let email_sync_sub = if moon_beauty_shell::backend::email_client::config_exists() {
+            iced::time::every(std::time::Duration::from_secs(60)).map(|_| Message::TickEmailSync)
+        } else {
+            iced::Subscription::none()
+        };
+                
+        let email_sub = if matches!(self.active_overlay, Some(OverlayTarget::Email)) {
+            iced::event::listen_with(handle_email_keypress)
+        } else {
+            iced::Subscription::none()
+        };
+        
         let hw_sub = iced::time::every(std::time::Duration::from_millis(self.settings.hardware_poll_interval_ms)).map(|_| Message::TickHardware);
         let weather_sub = iced::time::every(std::time::Duration::from_secs(900)).map(|_| Message::TickWeather);
 
         let clip_sub = if matches!(self.active_overlay, Some(OverlayTarget::Clipboard)) {
             iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers: _, .. }) = event else { return None; };
                 match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => Some(Message::Clipboard(ClipboardMessage::SelectPrev)),
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => Some(Message::Clipboard(ClipboardMessage::SelectNext)),
@@ -2339,39 +3049,185 @@ impl MoonBeautyShellApp {
         };
 
         let text_typing_sub = if self.annotator.text_editing.is_some() {
+            iced::event::listen_with(handle_email_keypress)
+        } else {
+            iced::Subscription::none()
+        };
+
+        let _todo_sub = if matches!(self.active_overlay, Some(OverlayTarget::Todo)) {
             iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
-                {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers: _, .. }) = event else {
+                    return None;
+                };
+                // Cycle categories with L/R, cycle filter with U/D.
+                // (text_input also sees these but only cursor-moves on
+                // non-empty input; empty input leaves them free.)
                 match key {
-                iced::keyboard::Key::Character(c) => {
-                    match c.as_str() {
-                        "[" => Some(Message::Annotator(AnnotatorMessage::FontSizeDown)),
-                        "]" => Some(Message::Annotator(AnnotatorMessage::FontSizeUp)),
-                        _ => Some(Message::Annotator(AnnotatorMessage::CharacterInput(c.to_string()))),
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft) => {
+                        Some(Message::Todo(TodoMessage::CategoryPrev))
                     }
-                }
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Space) => {
-                    Some(Message::Annotator(AnnotatorMessage::CharacterInput(" ".into())))
-                }
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => {
-                    Some(Message::Annotator(AnnotatorMessage::BackspacePressed))
-                }
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
-                    if modifiers.control() {
-                        Some(Message::Annotator(AnnotatorMessage::NewLinePressed))
-                    } else {
-                        Some(Message::Annotator(AnnotatorMessage::ConfirmText))
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight) => {
+                        Some(Message::Todo(TodoMessage::CategoryNext))
                     }
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
+                        Some(Message::Todo(TodoMessage::FilterPrev))
+                    }
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => {
+                        Some(Message::Todo(TodoMessage::FilterNext))
+                    }
+                    _ => None,
                 }
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::F2) => {
-                    Some(Message::Annotator(AnnotatorMessage::ConfirmText))
+            })
+        } else {
+            iced::Subscription::none()
+        };
+
+        let todo_sub = if matches!(self.active_overlay, Some(OverlayTarget::Todo)) {
+            iced::event::listen_with(|event, status, _window| {
+                // NOTE: no status gate. text_input returns Captured for
+                // Delete/arrows even when empty (it "handles" a no-op).
+                // If we gated on status, Delete would never reach us.
+                // Instead, each message handler checks new_task_text.is_empty()
+                // to decide whether it should act, so text editing still
+                // works normally when there's text in the field.
+                if let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key: ref dbg_key, .. }) = event {
+                    eprintln!("[todo-sub] key={:?} status={:?}", dbg_key, status);
                 }
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
-                    Some(Message::Annotator(AnnotatorMessage::CancelText))
+                let iced::Event::Keyboard(
+                    iced::keyboard::Event::KeyPressed { key, .. }
+                ) = event else {
+                    return None;
+                };
+                use iced::keyboard::{Key, key::Named};
+                match key {
+                    Key::Named(Named::ArrowLeft)  => Some(Message::Todo(TodoMessage::CategoryPrev)),
+                    Key::Named(Named::ArrowRight) => Some(Message::Todo(TodoMessage::CategoryNext)),
+                    Key::Named(Named::ArrowUp)    => Some(Message::Todo(TodoMessage::TaskSelectPrev)),
+                    Key::Named(Named::ArrowDown)  => Some(Message::Todo(TodoMessage::TaskSelectNext)),
+                    Key::Named(Named::Delete)     => Some(Message::Todo(TodoMessage::DeleteSelected)),
+                    // NOTE: Enter is intentionally absent here. text_input
+                    // captures Enter and fires AddTask (via on_submit).
+                    // AddTask dispatches 3-way: save-edit / add-new / toggle.
+                    _ => None,
                 }
-                _ => None,
+            })
+        } else {
+            iced::Subscription::none()
+        };
+
+        let reminders_tick_sub = if matches!(self.active_overlay, Some(OverlayTarget::Reminders)) {
+            iced::time::every(std::time::Duration::from_millis(1000))
+                .map(|_| Message::Reminders(ReminderMessage::Tick))
+        } else {
+            iced::Subscription::none()
+        };
+
+        let reminders_sub = if matches!(self.active_overlay, Some(OverlayTarget::Reminders)) {
+            iced::event::listen_with(|event, _status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
+                    return None;
+                };
+                use iced::keyboard::{Key, key::Named};
+                match key {
+                    // Tab / Shift+Tab cycle between the two input fields
+                    Key::Named(Named::Tab) if modifiers.shift() => {
+                        Some(Message::Reminders(ReminderMessage::FocusPrevField))
+                    }
+                    Key::Named(Named::Tab) => {
+                        Some(Message::Reminders(ReminderMessage::FocusNextField))
+                    }
+                    // ArrowUp/Down scroll the list regardless of input focus
+                    Key::Named(Named::ArrowUp) => {
+                        Some(Message::Reminders(ReminderMessage::ScrollUp))
+                    }
+                    Key::Named(Named::ArrowDown) => {
+                        Some(Message::Reminders(ReminderMessage::ScrollDown))
+                    }
+                    Key::Named(Named::Delete) => {
+                            Some(Message::Reminders(ReminderMessage::DeleteSelected))
+                        }
+                        _ => None,
                 }
-            }
+            })
+        } else {
+            iced::Subscription::none()
+        };
+
+        
+
+        let rng_sub = if matches!(self.active_overlay, Some(OverlayTarget::Rng)) {
+            iced::event::listen_with(|event, _status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event else {
+                    return None;
+                };
+                use iced::keyboard::{Key, key::Named};
+                match key {
+                    Key::Named(Named::Enter) => Some(Message::Rng(RngMessage::ExecuteRoll)),
+                    Key::Named(Named::ArrowLeft) | Key::Named(Named::Tab) if !iced::keyboard::Modifiers::default().shift() => Some(Message::Rng(RngMessage::CycleFieldPrev)),
+                    Key::Named(Named::ArrowRight) | Key::Named(Named::Tab) => Some(Message::Rng(RngMessage::CycleFieldNext)),
+                    Key::Named(Named::ArrowUp) => Some(Message::Rng(RngMessage::AdjustField(true))),
+                    Key::Named(Named::ArrowDown) => Some(Message::Rng(RngMessage::AdjustField(false))),
+                    _ => None,
+                }
+            })
+        } else {
+            iced::Subscription::none()
+        };
+
+        let notes_sub = if matches!(self.active_overlay, Some(OverlayTarget::Notes)) {
+            iced::event::listen_with(|event, _status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event else {
+                    return None;
+                };
+                eprintln!("[notes-sub] key={:?}", key);
+                match key {
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => {
+                        Some(Message::Notes(NotesMessage::SelectNext))
+                    }
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
+                        Some(Message::Notes(NotesMessage::SelectPrev))
+                    }
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Delete) => {
+                        Some(Message::Notes(NotesMessage::DeleteSelected))
+                    }
+                    _ => None,
+                }
+            })
+        } else {
+            iced::Subscription::none()
+        };
+
+        let unicode_sub = if matches!(self.active_overlay, Some(OverlayTarget::Unicode)) {
+            iced::event::listen_with(|event, _status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event else {
+                    return None;
+                };
+                use iced::keyboard::{Key, key::Named};
+                match key {
+                    Key::Named(Named::ArrowLeft)  => Some(Message::Unicode(UnicodeMessage::SelectPrev)),
+                    Key::Named(Named::ArrowRight) => Some(Message::Unicode(UnicodeMessage::SelectNext)),
+                    Key::Named(Named::ArrowUp)    => Some(Message::Unicode(UnicodeMessage::SelectPrevRow)),
+                    Key::Named(Named::ArrowDown)  => Some(Message::Unicode(UnicodeMessage::SelectNextRow)),
+                    Key::Named(Named::Enter)      => Some(Message::Unicode(UnicodeMessage::CopySelected)),
+                    _ => None,
+                }
+            })
+        } else {
+            iced::Subscription::none()
+        };
+
+        let history_sub = if matches!(self.active_overlay, Some(OverlayTarget::NotificationsHistory)) {
+            iced::event::listen_with(|event, _status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event else {
+                    return None;
+                };
+                use iced::keyboard::{Key, key::Named};
+                match key {
+                    Key::Named(Named::ArrowUp) => Some(Message::Notif(NotifMessage::HistorySelectPrev)),
+                    Key::Named(Named::ArrowDown) => Some(Message::Notif(NotifMessage::HistorySelectNext)),
+                    Key::Named(Named::Delete) => Some(Message::Notif(NotifMessage::HistoryDeleteSelected)),
+                    _ => None,
+                }
             })
         } else {
             iced::Subscription::none()
@@ -2422,57 +3278,7 @@ impl MoonBeautyShellApp {
         };
 
         let lock_key_sub = if matches!(self.active_overlay, Some(OverlayTarget::Lockscreen)) {
-            iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
-                {
-                let mods_str = format!(
-                    "shift={} ctrl={} alt={} logo={}",
-                    modifiers.shift(), modifiers.control(), modifiers.alt(), modifiers.logo()
-                );
-                // Log EVERY key press that reaches the lockscreen. If a key
-                // you typed doesn't show up here, the loss is upstream of our
-                // code (compositor, surface focus, subscription registration).
-                eprintln!("[lock-key-raw] {:?} modifiers({})", key, mods_str);
-
-                match &key {
-                    iced::keyboard::Key::Character(c) => {
-                        // Normalize shift+lowercase-ASCII → uppercase. Iced on
-                        // layer-shell surfaces sometimes reports the unshifted
-                        // character even though modifiers.shift() is true (known
-                        // bug in the winit→iced KeyboardEvent path). This is
-                        // idempotent if iced already applied shift:
-                        // `"P".to_uppercase() == "P"`.
-                        let normalized: String = if modifiers.shift()
-                            && !c.is_empty()
-                            && c.chars().all(|ch| ch.is_ascii_lowercase())
-                        {
-                            c.to_uppercase()
-                        } else {
-                            c.to_string()
-                        };
-                        eprintln!(
-                            "[lock-key] Character({:?}) shift={} → sending {:?}",
-                            c, modifiers.shift(), normalized
-                        );
-                        Some(Message::Lock(LockMessage::KeyPress(
-                            iced::keyboard::Key::Character(normalized.into()),
-                        )))
-                    }
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => {
-                        eprintln!("[lock-key] Backspace → send");
-                        Some(Message::Lock(LockMessage::KeyPress(key.clone())))
-                    }
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
-                        eprintln!("[lock-key] Enter → SUBMIT");
-                        Some(Message::Lock(LockMessage::KeyPress(key.clone())))
-                    }
-                    other => {
-                        eprintln!("[lock-key] ignoring {:?}", other);
-                        None
-                    }
-                }
-            }
-            })
+            iced::event::listen_with(handle_email_keypress)
         } else {
             iced::Subscription::none()
         };
@@ -2484,9 +3290,16 @@ impl MoonBeautyShellApp {
             iced::Subscription::none()
         };
 
-        let esc_sub = if self.annotator.text_editing.is_some() {
+        let esc_sub = if matches!(self.active_overlay, Some(OverlayTarget::Email)) {
             iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event else { return None; };
+                if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
+                    Some(Message::Email(EmailMessage::Dismiss))
+                } else { None }
+            })
+        } else if self.annotator.text_editing.is_some() {
+            iced::event::listen_with(|event, _status, _window| {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers: _, .. }) = event else { return None; };
                 match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
                     Some(Message::Annotator(AnnotatorMessage::CancelText))
@@ -2499,7 +3312,7 @@ impl MoonBeautyShellApp {
             iced::Subscription::none()
         } else {
             iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers: _, .. }) = event else { return None; };
                 {
                 if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
                     Some(Message::DismissActiveOverlay)
@@ -2513,7 +3326,7 @@ impl MoonBeautyShellApp {
         // Enter → save when annotator overlay is active.
         let annotator_sub = if matches!(self.active_overlay, Some(OverlayTarget::Annotator)) && self.annotator.text_editing.is_none() {
             iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers: _, .. }) = event else { return None; };
                 match key {
                 iced::keyboard::Key::Character(c) => match c.as_str() {
                     "r" | "R" => Some(Message::Annotator(AnnotatorMessage::SetTool(Tool::Rect))),
@@ -2533,7 +3346,7 @@ impl MoonBeautyShellApp {
 
         let enter_sub = if matches!(self.active_overlay, Some(OverlayTarget::Annotator)) && self.annotator.text_editing.is_none() {
             iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers: _, .. }) = event else { return None; };
                 match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
                     Some(Message::Annotator(AnnotatorMessage::Save))
@@ -2545,7 +3358,8 @@ impl MoonBeautyShellApp {
             iced::Subscription::none()
         };
 
-        let ipc_sub = if self.is_standalone || self.is_notif_surface {
+
+                                let ipc_sub = if self.is_standalone || self.is_notif_surface {
             iced::Subscription::none()
         } else {
             iced::time::every(std::time::Duration::from_millis(50))
@@ -2571,9 +3385,9 @@ impl MoonBeautyShellApp {
         } else {
             iced::Subscription::none()
         };
-        iced::Subscription::batch(vec![clock_sub, toast_sub, hw_sub, weather_sub, anim_sub, esc_sub,
-            enter_sub, ipc_sub, notif_sub, resize_sub, clip_sub, annotator_sub, text_typing_sub,
-            launcher_sub, lock_key_sub, lock_ipc_sub])
+        iced::Subscription::batch(vec![clock_sub, toast_sub, hw_sub, email_sync_sub, weather_sub, anim_sub, esc_sub,
+            enter_sub, ipc_sub, notif_sub, resize_sub, clip_sub, annotator_sub, text_typing_sub, email_sub,
+            launcher_sub, history_sub, todo_sub, notes_sub, rng_sub, reminders_sub, reminders_tick_sub, unicode_sub, lock_key_sub, lock_ipc_sub])
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -2623,24 +3437,28 @@ impl MoonBeautyShellApp {
                 right: pad_right,
                 bottom: pad_bottom,
                 left: pad_left,
+            })
+            .style(|_t| iced::widget::container::Style {
+                background: None,
+                ..Default::default()
             });
 
         let overlay_element: Option<Element<'_, Message>> = match &self.active_overlay {
             Some(OverlayTarget::Launcher) => Some(self.launcher.view(&self.theme, &self.settings).map(Message::Launcher)),
             Some(OverlayTarget::Calc) => Some(self.calc.view(&self.theme, &self.settings).map(Message::Calc)),
             Some(OverlayTarget::Clipboard) => Some(self.clipboard.view(&self.theme, &self.settings).map(Message::Clipboard)),
-            Some(OverlayTarget::Notes) => Some(self.notes.view(&self.theme).map(Message::Notes)),
+            Some(OverlayTarget::Notes) => Some(self.notes.view(&self.theme, &self.settings).map(Message::Notes)),
             Some(OverlayTarget::Pass) => Some(self.pass.view(&self.theme, &self.settings).map(Message::Pass)),
             Some(OverlayTarget::Power) => Some(self.power.view(&self.theme).map(Message::Power)),
-            Some(OverlayTarget::Todo) => Some(self.todo.view(&self.theme).map(Message::Todo)),
-            Some(OverlayTarget::Reminders) => Some(self.reminders.view(&self.theme).map(Message::Reminders)),
+            Some(OverlayTarget::Todo) => Some(self.todo.view(&self.theme, &self.settings).map(Message::Todo)),
+            Some(OverlayTarget::Reminders) => Some(self.reminders.view(&self.theme, &self.settings).map(Message::Reminders)),
             Some(OverlayTarget::Dictionary) => Some(self.dict.view(&self.theme, &self.settings).map(Message::Dict)),
-            Some(OverlayTarget::Unicode) => Some(self.unicode.view(&self.theme).map(Message::Unicode)),
+            Some(OverlayTarget::Unicode) => Some(self.unicode.view(&self.theme, &self.settings).map(Message::Unicode)),
             Some(OverlayTarget::Web) => Some(self.web.view(&self.theme).map(Message::Web)),
-            Some(OverlayTarget::Amogus) => Some(self.amogus.view(&self.theme).map(Message::Amogus)),
-            Some(OverlayTarget::Rng) => Some(self.rng.view(&self.theme).map(Message::Rng)),
-            Some(OverlayTarget::Email) => Some(self.email.view(&self.theme).map(Message::Email)),
-            Some(OverlayTarget::NotificationsHistory) => Some(self.notifs.view_history(&self.theme).map(Message::Notif)),
+            Some(OverlayTarget::Amogus) => Some(self.amogus.view(&self.theme, &self.settings).map(Message::Amogus)),
+            Some(OverlayTarget::Rng) => Some(self.rng.view(&self.theme, &self.settings).map(Message::Rng)),
+            Some(OverlayTarget::Email) => Some(self.email.view(&self.theme, &self.settings).map(Message::Email)),
+            Some(OverlayTarget::NotificationsHistory) => Some(self.notifs.view_history(&self.theme, &self.settings).map(Message::Notif)),
             Some(OverlayTarget::Settings) => Some(self.settings_ui.view(&self.settings, &self.theme).map(Message::Settings)),
             Some(OverlayTarget::Lockscreen) => Some(self.lockscreen.view(&self.theme).map(Message::Lock)),
             Some(OverlayTarget::Annotator) => Some(self.annotator.view().map(Message::Annotator)),
@@ -2666,10 +3484,6 @@ impl MoonBeautyShellApp {
         } else {
             base_content.into()
         }
-    }
-
-    fn theme(&self) -> iced::Theme {
-        Theme::Dark
     }
 }
 

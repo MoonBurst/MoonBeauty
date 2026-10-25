@@ -1,5 +1,5 @@
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke};
-use iced::widget::{button, column, container, space::horizontal, row, scrollable, text, text_input, Space, Stack};
+use iced::widget::{button, column, container, row, text, text_input, Stack};
 use iced::{Alignment, Color, Element, Length, Padding, Point, Rectangle, Task, Theme};
 use crate::style::TextExt;
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
@@ -9,11 +9,10 @@ use std::time::Instant;
 use crate::backend::system::{GpuInfo, ProcessItem, SystemCollector};
 use crate::config::theme::ShellTheme;
 use crate::config::ShellSettings;
-use crate::style::shape_box::{ShapeBox, ShapeType, SlantSide};
+use crate::style::shape_box::SlantSide;
 
 const W_START: f32 = 130.0;
 const AUTO_MS: u128 = 10_000;
-const HEX_H: f32 = 52.0;
 
 #[derive(Debug, Clone)]
 pub enum Data {
@@ -38,8 +37,10 @@ pub struct App {
     search_query: String,
     gpu_list: Vec<GpuInfo>,
     selected_gpu: usize,
+    anim_frame: u64,
 }
 
+#[allow(dead_code)]
 impl App {
 
     fn new_app() -> (Self, Task<Message>) {
@@ -85,20 +86,31 @@ impl App {
             w, h, drop_ms, expand_ms, w_start, slant_l, slant_r, closing_at: None,
             search_query: String::new(),
             gpu_list,
-            selected_gpu,
-        };
+            selected_gpu, anim_frame: 0,
+            };
         let task = if target == "cpu" {
             Task::perform(SystemCollector::collect_cpu(), |d| Message::Loaded(Data::Cpu(d)))
         } else if target == "gpu" {
             let info = app.gpu_list.first().cloned().unwrap_or_default();
             Task::perform(
-                async move { SystemCollector::collect_gpu_by_info(&info).await },
+                async move {
+                    // Run the blocking file I/O on a background thread so it
+                    // doesn't freeze the iced event loop during animation.
+                    tokio::task::spawn_blocking(move || {
+                        tokio::runtime::Handle::current().block_on(
+                            SystemCollector::collect_gpu_by_info(&info)
+                        )
+                    }).await.unwrap_or_default()
+                },
                 |d| Message::Loaded(Data::Gpu(d)),
             )
         } else {
             Task::perform(SystemCollector::collect_ram(), |d| Message::Loaded(Data::Ram(d)))
         };
-        (app, task)
+        (app, Task::batch(vec![
+            task,
+            Task::perform(async { tokio::time::sleep(std::time::Duration::from_millis(4)).await }, |_| Message::Tick),
+        ]))
     }
 
     fn namespace(&self) -> String { format!("mbs-sys-tip-{}", self.target) }
@@ -107,9 +119,29 @@ impl App {
     fn update(&mut self, m: Message) -> Task<Message> {
         match m {
             Message::Tick => {
+                self.anim_frame = self.anim_frame.wrapping_add(1);
+                let elapsed_ms = self.opened.elapsed().as_millis() as u64;
+                eprintln!("[tick] frame={} elapsed={}ms", self.anim_frame, elapsed_ms);
+                
                 if let Some(t) = self.closing_at {
-                    if t.elapsed().as_millis() > (self.drop_ms * 1.9) as u128 { std::process::exit(0); }
-                } else if self.opened.elapsed().as_millis() > AUTO_MS { std::process::exit(0); }
+                    if t.elapsed().as_millis() > (self.drop_ms * 1.9) as u128 {
+                        std::process::exit(0);
+                    }
+                } else if self.opened.elapsed().as_millis() > AUTO_MS {
+                    std::process::exit(0);
+                }
+                
+                let next_ms: u64 = if elapsed_ms < 2000 || self.closing_at.is_some() {
+                    std::env::var("MBS_TICK_MS").ok()
+                        .and_then(|s| s.parse().ok())
+                        .filter(|n| *n >= 1 && *n <= 100)
+                        .unwrap_or(4)
+                } else { 500 };
+                
+                return Task::perform(
+                    async move { tokio::time::sleep(std::time::Duration::from_millis(next_ms)).await },
+                    |_| Message::Tick,
+                );
             }
             Message::SearchChanged(q) => {
                 self.search_query = q;
@@ -174,80 +206,16 @@ impl App {
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
-        // Adaptive tick: 60fps during entrance animation and while
-        // closing, drop to 2fps once settled (still catches AUTO_MS
-        // timeout within 500ms of the deadline). Without this, the
-        // 60fps view-tree rebuild burns ~10% CPU on an idle tooltip.
-        // Animation tick. Priority:
-        //   1. MBS_TICK_MS env override (for A/B tuning without rebuild)
-        //   2. Dynamic: 80% of detected monitor refresh interval
-        //   3. Fallback: 6ms (aligns with 165Hz)
-        //
-        // The dynamic path exists because hardcoding is fragile: on 60Hz
-        // a 4ms tick wastes CPU, on 240Hz a 16ms tick chops visibly. The
-        // 80% factor gives modest headroom over vsync (source runs 25%
-        // faster than display, so dropped frames don't cascade).
-        //
-        // MBS_TICK_DIAG=1 (env, on the parent bar) enables per-frame dt
-        // logging from TooltipBg::draw for jitter diagnosis.
-        let _anim_total_ms = self.drop_ms as u64
-            + self.expand_ms as u64
-            + (self.drop_ms * 0.6) as u64;
-        let _animating = self.opened.elapsed().as_millis()
-            < (_anim_total_ms as u128).saturating_add(100)
-            || self.closing_at.is_some();
-        let _tick_ms: u64 = if _animating {
-            std::env::var("MBS_TICK_MS")
-                .ok()
-                .and_then(|s| s.parse::<u64>().ok())
-                .filter(|n| *n >= 1 && *n <= 100)
-                .unwrap_or_else(|| {
-                    let hz = crate::overlays::tooltip_engine::detect_refresh_hz() as u64;
-                    // 80% of refresh period, floored at 3ms, capped at 16ms.
-                    // 60Hz  → 16ms (~62fps, plenty of vsync headroom)
-                    // 120Hz → 8ms  (125fps, 4% headroom)
-                    // 144Hz → 6ms  (167fps, 16% headroom)
-                    // 165Hz → 6ms  (167fps, 1% headroom — conservative)
-                    // 240Hz → 4ms  (250fps, 4% headroom)
-                    ((800 / hz.max(30)).max(3)).min(16)
-                })
-        } else {
-            500
-        };
-
-        iced::Subscription::batch([
-            iced::time::every(std::time::Duration::from_millis(_tick_ms)).map(|_| Message::Tick),
-            iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
-                {
-                if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) { Some(Message::Dismiss) } else { None }
-            }
-            }),
-        ])
+        // Animation is driven by Command::perform recursion in update(),
+        // not by a subscription timer. Subscriptions here only handle ESC.
+        iced::event::listen_with(|event, _status, _window| {
+            let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape), .. }) = event else {
+                return None;
+            };
+            Some(Message::Dismiss)
+        })
     }
     fn theme(&self) -> Theme { Theme::Dark }
-}
-
-fn hex_metric(label: &'static str, value: String, color: Color, theme: &ShellTheme, font_size: u16, alpha: f32) -> Element<'static, Message> {
-    let apply = |c: Color| Color { a: c.a * alpha, ..c };
-    let muted = apply(theme.muted);
-    let surface_alt = apply(theme.surface_alt);
-    let color = apply(color);
-    let bg = ShapeBox::new()
-        .shape(ShapeType::Hexagon { cut: 12 })
-        .background(surface_alt)
-        .border(color, 1.5)
-        .size(Length::Fill, Length::Fixed(HEX_H));
-    let content = column![
-        text(label).size((font_size.saturating_sub(5).max(8)) as f32).bold().color(muted).wrapping(iced::widget::text::Wrapping::None),
-        text(value).size(((font_size + 2).max(14)) as f32).bold().color(color).wrapping(iced::widget::text::Wrapping::None),
-    ].align_x(Alignment::Center)
-     .width(Length::Fill)
-     .height(Length::Fill)
-     .padding(Padding { top: 6.0, right: 4.0, bottom: 6.0, left: 4.0 });
-
-    container(Stack::new().push(bg.view()).push(content))
-        .width(Length::Fill).height(Length::Fixed(HEX_H)).clip(true).into()
 }
 
 fn truncate_name(name: &str) -> String {
@@ -728,6 +696,10 @@ pub fn run() -> Result<(), iced_layershell::Error> {
         App::view,
     )
     .subscription(App::subscription)
+    .style(|_state, _theme| iced::theme::Style {
+        background_color: iced::Color::TRANSPARENT,
+        text_color: iced::Color::WHITE,
+    })
     .settings(Settings { layer_settings: layer, ..Default::default() })
     .run()
 }

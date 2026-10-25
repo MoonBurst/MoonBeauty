@@ -1,5 +1,6 @@
 pub mod annotator_ipc;
 pub mod audio;
+pub mod email_client;
 pub mod borg;
 pub mod clock;
 pub mod lock_coordinator;

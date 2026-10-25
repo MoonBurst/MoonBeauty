@@ -8,7 +8,7 @@
 
 use iced::widget::canvas::{self, Canvas, Frame, Geometry};
 use iced::widget::{button, container, text, text_input, Column, Row, Stack};
-use iced::{event, mouse, Alignment, Color, Element, Length, Point, Rectangle, Size};
+use iced::{mouse, Alignment, Color, Element, Length, Point, Rectangle, Size};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -726,7 +726,6 @@ fn draw_ann<F: Fn(Point) -> Point>(frame: &mut Frame, a: &Annotation, to_disp: &
             let x = p1.x.min(p2.x); let y = p1.y.min(p2.y);
             let w = (p2.x - p1.x).abs().max(6.0);
             let h = (p2.y - p1.y).abs().max(6.0);
-            frame.fill_rectangle(Point::new(x, y), Size::new(w, h), Color::from_rgba(r.r, r.g, r.b, 0.55));
             frame.fill_rectangle(Point::new(x, y), Size::new(w, sw), r);
             frame.fill_rectangle(Point::new(x, y + h - sw), Size::new(w, sw), r);
             frame.fill_rectangle(Point::new(x, y), Size::new(sw, h), r);
