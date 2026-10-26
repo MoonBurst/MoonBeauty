@@ -1,0 +1,48 @@
+[package]
+name = "moon-beauty-shell"
+version = "0.2.0"
+edition = "2021"
+authors = ["MoonBeauty"]
+description = "High-performance Wayland desktop shell and overlay matrix in Rust & Iced"
+
+[dependencies]
+sha2 = "0.10"
+rand_chacha = "0.3"
+rand = "0.8"
+async-channel = "2"
+iced = { version = "0.14", features = ["advanced", "tokio", "canvas", "image", "svg"] }
+iced_layershell = "0.14.2"
+tokio = { version = "1.38", features = ["full"] }
+bollard = "0.17"
+futures-util = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5.0"
+walkdir = "2.5"
+regex = "1.10"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+imap = "2.4"
+lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-native-tls"] }
+native-tls = "0.2"
+mail-parser = "0.9"
+html2text = "0.12"
+rfd = { version = "0.14", default-features = false, features = ["xdg-portal", "tokio"] }
+pkcs8 = "0.10"
+sysinfo = "0.31"
+zbus = { version = "4.4", features = ["tokio"] }
+wayland-client = "0.31.15"
+wayland-protocols = "0.32.13"
+wayland-protocols-wlr = "0.3.12"
+smithay-client-toolkit = "0.21.1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+panic = "abort"
+strip = true
+
+[patch.crates-io]
+iced_layershell = { path = "vendor/iced_layershell" }
+# layershellev = { path = "vendor/layershellev" }  # unused: vendored copy is broken & unreferenced

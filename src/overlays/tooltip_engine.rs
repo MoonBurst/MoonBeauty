@@ -1,5 +1,5 @@
 use iced::widget::canvas::{self, Frame, Geometry, Path, Stroke};
-use iced::{Color, Element, Length, Point, Rectangle, Theme};
+use iced::{Color, Element, Length, Point, Rectangle, Size, Theme};
 
 pub struct Anim { pub w: f32, pub h: f32, pub slant: f32, pub opacity: f32 }
 
@@ -78,7 +78,7 @@ impl ParallelogramBg {
         // width by a fraction of a pixel changes the layout tree, which
         // forces iced to redraw the canvas underneath. This bypasses
         // cosmic-text shaping entirely, saving 2-3ms per frame.
-        let marker_w = (self.frame % 2) as f32 * 0.01;
+        let marker_w = (self.frame % 2) as f32;
         let marker_el: Element<'static, Message> = iced::widget::Space::new()
             .width(Length::Fixed(marker_w))
             .height(Length::Fixed(0.0))
@@ -96,20 +96,23 @@ pub struct TooltipBg {
 }
 
 impl<Message> canvas::Program<Message> for TooltipBg {
-    type State = ();
+    // Tracks last-rendered (bounds, w, h, slant). Redraws only when the
+    // animation actually produces new geometry — not on every event.
+    type State = Option<(Rectangle, f32, f32, f32)>;
 
     fn update(
         &self,
-        _state: &mut Self::State,
+        state: &mut Self::State,
         _event: &iced::Event,
-        _bounds: Rectangle,
+        bounds: Rectangle,
         _cursor: iced::mouse::Cursor,
     ) -> Option<iced::widget::Action<Message>> {
-        // The tooltip's drop/expand animation rebuilds this widget with new w/h
-        // every 16ms tick. Reactive rendering would otherwise only paint the
-        // first frame, producing a choppy animation. Forcing redraw makes
-        // the parallelogram follow the smoothstep easing.
-        Some(iced::widget::Action::request_redraw())
+        let key = (bounds, self.w, self.h, self.slant);
+        if *state != Some(key) {
+            *state = Some(key);
+            return Some(iced::widget::Action::request_redraw());
+        }
+        None
     }
     fn draw(&self, _s: &Self::State, renderer: &iced::Renderer, _t: &Theme,
             bounds: Rectangle, _c: iced::mouse::Cursor) -> Vec<Geometry> {
@@ -134,14 +137,27 @@ impl<Message> canvas::Program<Message> for TooltipBg {
         let w = self.w; let h = self.h; let sl = self.slant;
         let path = if self.slant_right {
             Path::new(|b| { b.move_to(Point::new(sl + half, half)); b.line_to(Point::new(w - half, half));
-                b.line_to(Point::new(w - sl - half, h - half)); b.line_to(Point::new(half, h - half)); b.close(); })
+                b.line_to(Point::new(w - sl - half, h - half - 1.0)); b.line_to(Point::new(half, h - half - 1.0)); b.close(); })
         } else {
             Path::new(|b| { b.move_to(Point::new(half, half)); b.line_to(Point::new(w - sl - half, half));
-                b.line_to(Point::new(w - half, h - half)); b.line_to(Point::new(sl + half, h - half)); b.close(); })
+                b.line_to(Point::new(w - half, h - half - 1.0)); b.line_to(Point::new(sl + half, h - half - 1.0)); b.close(); })
         };
         if self.background.a > 0.0 { frame.fill(&path, self.background); }
         if self.border_width > 0.0 && self.border_color.a > 0.0 {
-            frame.stroke(&path, Stroke::default().with_color(self.border_color).with_width(self.border_width));
+            let bw = self.border_width;
+            // Top + bottom borders as FILLED rectangles (never clipped, no AA blend)
+            frame.fill_rectangle(Point::new(half, half), Size::new(w - bw, bw), self.border_color);
+            frame.fill_rectangle(Point::new(half, h - bw - half), Size::new(w - bw, bw), self.border_color);
+            // Slanted edges as stroked diagonals
+            let slant_stroke = Stroke::default().with_color(self.border_color).with_width(bw);
+            let slant_path = if self.slant_right {
+                Path::new(|b| { b.move_to(Point::new(sl + half, half)); b.line_to(Point::new(half, h - half));
+                    b.move_to(Point::new(w - half, half)); b.line_to(Point::new(w - sl - half, h - half)); })
+            } else {
+                Path::new(|b| { b.move_to(Point::new(half, half)); b.line_to(Point::new(sl + half, h - half));
+                    b.move_to(Point::new(w - sl - half, half)); b.line_to(Point::new(w - half, h - half)); })
+            };
+            frame.stroke(&slant_path, slant_stroke);
         }
         vec![frame.into_geometry()]
     }

@@ -173,7 +173,10 @@ impl LockCoordinator {
     }
 
     pub fn spawn() -> ! {
-        let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
+        let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| {
+            eprintln!("[lock-coord] FATAL: XDG_RUNTIME_DIR is not set; refusing to place lockscreen socket in shared /tmp");
+            std::process::exit(1);
+        });
         eprintln!("[lock-coord-v225] START pid={}", std::process::id());
         let pid = std::process::id();
         let socket_path = PathBuf::from(&runtime_dir)
@@ -211,7 +214,17 @@ impl LockCoordinator {
 
         eprintln!("[lock-coord-v225] binding socket at {:?}", socket_path);
         let listener = match std::os::unix::net::UnixListener::bind(&socket_path) {
-            Ok(l) => { eprintln!("[lock-coord-v225] socket bound OK"); l }
+            Ok(l) => {
+                let _ = std::fs::set_permissions(
+                    &socket_path,
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        std::fs::Permissions::from_mode(0o600)
+                    },
+                );
+                eprintln!("[lock-coord-v225] socket bound OK");
+                l
+            }
             Err(e) => {
                 eprintln!("[lock-coord] bind failed: {}", e);
                 Self::kill_all(&children);
@@ -318,13 +331,15 @@ impl LockCoordinator {
                     Some((peer_id, msg)) = event_rx.recv() => {
                         match msg {
                             LockIpc::Key(s) => {
+                                let added = s.chars().count();
                                 for c in s.chars() {
                                     buffer.push(c);
+                                }
+                                if std::env::var_os("MBS_LOCK_DEBUG").is_some() {
                                     eprintln!(
-                                        "[lock-coord] key from peer {}: {:?} (0x{:02x}) → len={}",
+                                        "[lock-coord] key from peer {}: +{} chars → len={}",
                                         peer_id,
-                                        c,
-                                        c as u32,
+                                        added,
                                         buffer.chars().count()
                                     );
                                 }
@@ -337,12 +352,9 @@ impl LockCoordinator {
                                 Self::broadcast(&mut peers, &LockIpc::BufferUpdate(n)).await;
                             }
                             LockIpc::Submit => {
-                                let chars_hex: Vec<String> = buffer.chars()
-                                    .map(|c| format!("{:04x}({:?})", c as u32, c.escape_default().to_string()))
-                                    .collect();
                                 eprintln!(
-                                    "[lock-coord] submit from peer {} (len={}) chars=[{}]",
-                                    peer_id, buffer.chars().count(), chars_hex.join(",")
+                                    "[lock-coord] submit from peer {} (len={})",
+                                    peer_id, buffer.chars().count()
                                 );
                                 let ok = Self::authenticate(&buffer).await;
                                 if ok {
@@ -432,12 +444,15 @@ impl LockCoordinator {
         }
 
         // ── DEBUG bypass ──
-        // Set MBS_LOCK_DEBUG_PASS=yourpassword to skip sudo entirely.
-        // If this makes auth succeed, char capture is correct and the
-        // problem is sudo in this context. If it still fails, chars are wrong.
+        // Requires BOTH MBS_DEBUG=1 and MBS_LOCK_DEBUG_PASS=… so a single
+        // forgotten env var cannot permanently compromise the lockscreen.
+        // If only MBS_LOCK_DEBUG_PASS is set, print a loud warning and fall
+        // through to real auth.
         if let Ok(debug_pass) = std::env::var("MBS_LOCK_DEBUG_PASS") {
             if !debug_pass.is_empty() {
-                if debug_pass == clean {
+                if std::env::var_os("MBS_DEBUG").is_none() {
+                    eprintln!("[lock-coord] WARNING: MBS_LOCK_DEBUG_PASS is set but MBS_DEBUG is not. Bypass DISABLED. Set MBS_DEBUG=1 to enable (testing only).");
+                } else if debug_pass == clean {
                     eprintln!("[lock-coord] DEBUG BYPASS: password matched MBS_LOCK_DEBUG_PASS");
                     return true;
                 } else {
@@ -446,19 +461,19 @@ impl LockCoordinator {
                         clean.len(),
                         debug_pass.len()
                     );
-                    // Do NOT return false — a stale MBS_LOCK_DEBUG_PASS must
-                    // never block real authentication.
                 }
             }
         }
 
-        eprintln!(
-            "[lock-coord] auth attempt: len={} first={:?} last={:?} sha256_prefix={}",
-            clean.chars().count(),
-            clean.chars().next(),
-            clean.chars().last(),
-            sha256_prefix(&clean),
-        );
+        if std::env::var_os("MBS_LOCK_DEBUG").is_some() {
+            eprintln!(
+                "[lock-coord] auth attempt: len={} sha256_prefix={}",
+                clean.chars().count(),
+                sha256_prefix(&clean),
+            );
+        } else {
+            eprintln!("[lock-coord] auth attempt: len={}", clean.chars().count());
+        }
 
         // ── Strategy 0: pamtester (PAM login — correct mechanism for a
         //    lockscreen; validates the user's own password independent of

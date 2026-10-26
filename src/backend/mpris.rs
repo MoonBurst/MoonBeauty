@@ -69,6 +69,30 @@ impl MprisBackend {
     }
 
     pub async fn poll() -> Option<MprisTrack> {
+        // Cache for 5s. MPRIS changes are user-driven (a track change every
+        // few minutes at most); a 3s poll cadence D-Bus round-trips 20x per
+        // minute for no benefit.
+        use std::sync::{Mutex, OnceLock};
+        use std::time::Instant;
+        static CACHE: OnceLock<Mutex<Option<(Instant, Option<MprisTrack>)>>> = OnceLock::new();
+        let c = CACHE.get_or_init(|| Mutex::new(None));
+        {
+            let g = c.lock().unwrap();
+            if let Some((t, tr)) = &*g {
+                if t.elapsed().as_secs() < 5 {
+                    return tr.clone();
+                }
+            }
+        }
+        let result = Self::poll_uncached().await;
+        {
+            let mut g = c.lock().unwrap();
+            *g = Some((Instant::now(), result.clone()));
+        }
+        result
+    }
+
+    async fn poll_uncached() -> Option<MprisTrack> {
         let (conn, bus_name) = Self::get_active_player().await?;
         let proxy = zbus::Proxy::new(&conn, bus_name.as_str(), MPRIS_PATH, MPRIS_IFACE)
             .await

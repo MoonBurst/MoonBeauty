@@ -13,3 +13,15 @@ pub mod style;
 
 pub use config::{Base16Palette, ShellSettings, ShellTheme};
 pub use ipc::{send_client_command, IpcCommand, IpcServer, OverlayTarget};
+
+
+/// Debug-only logging. No-ops unless `MBS_DEBUG` is set in the environment.
+/// Use this for hot-path diagnostics that must not spam the journal every frame.
+#[macro_export]
+macro_rules! dbg_log {
+    ($($arg:tt)*) => {
+        if ::std::env::var_os("MBS_DEBUG").is_some() {
+            eprintln!($($arg)*);
+        }
+    };
+}

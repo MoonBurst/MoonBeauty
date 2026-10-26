@@ -85,19 +85,25 @@ impl ShapeBox {
 }
 
 impl<Message> canvas::Program<Message> for ShapeBox {
-    type State = ();
+    // Tracks the last-rendered bounds and shape params. We only request a
+    // redraw when one of them changes — NOT on every event. The old code
+    // requested redraw unconditionally, which combined with the 50 ms IPC
+    // poll (20 events/sec) to force a full-bar repaint at 60 fps idle.
+    type State = Option<(Rectangle, ShapeType, Color, Color, f32, f32)>;
 
     fn update(
         &self,
-        _state: &mut Self::State,
+        state: &mut Self::State,
         _event: &iced::Event,
-        _bounds: Rectangle,
+        bounds: Rectangle,
         _cursor: Cursor,
     ) -> Option<iced::widget::Action<Message>> {
-        // Decorative canvas. Under iced 0.14 reactive rendering, an unmodified
-        // canvas only paints on the first frame. Requesting a redraw on
-        // every event keeps capsule backgrounds in sync with layout changes.
-        Some(iced::widget::Action::request_redraw())
+        let key = (bounds, self.shape, self.background, self.border_color, self.border_width, self.slant_width);
+        if *state != Some(key) {
+            *state = Some(key);
+            return Some(iced::widget::Action::request_redraw());
+        }
+        None
     }
 
     fn draw(

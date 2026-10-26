@@ -43,9 +43,15 @@ pub fn read_state_file(path: &std::path::Path) -> (String, i32, i32, i32, i32) {
 
 pub fn write_state_file(path: &std::path::Path, state: &str, sx: i32, sy: i32, cx: i32, cy: i32) {
     let tmp = path.with_extension("tmp");
-    if let Ok(mut f) = std::fs::File::create(&tmp) {
-        let _ = write!(f, "{}\n{}\n{}\n{}\n{}\n", state, sx, sy, cx, cy);
-        let _ = f.sync_all();
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .write(true).create(true).truncate(true)
+            .mode(0o600).open(&tmp)
+        {
+            let _ = write!(f, "{}\n{}\n{}\n{}\n{}\n", state, sx, sy, cx, cy);
+            let _ = f.sync_all();
+        }
     }
     let _ = std::fs::rename(&tmp, path);
 }

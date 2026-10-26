@@ -68,20 +68,20 @@ fn connect_engines() -> Vec<Docker> {
         if std::path::Path::new(path).exists() {
             match Docker::connect_with_unix(path, 120, bollard::API_DEFAULT_VERSION) {
                 Ok(d) => {
-                    eprintln!("[bollard] connected {}", path);
+                    crate::dbg_log!("[bollard] connected {}", path);
                     engines.push(d);
                 }
                 Err(e) => {
-                    eprintln!("[bollard] {} exists but connect failed: {}", path, e);
+                    crate::dbg_log!("[bollard] {} exists but connect failed: {}", path, e);
                 }
             }
         } else {
-            eprintln!("[bollard] no socket at {}", path);
+            crate::dbg_log!("[bollard] no socket at {}", path);
         }
     }
     
     if engines.is_empty() {
-        eprintln!("[bollard] no accessible sockets found");
+        crate::dbg_log!("[bollard] no accessible sockets found");
     }
     engines
 }
@@ -126,7 +126,7 @@ impl PodmanBackend {
                         }
                     }
                 }
-                Err(e) => eprintln!("[bollard] engine {} list failed: {}", engine_idx, e),
+                Err(e) => crate::dbg_log!("[bollard] engine {} list failed: {}", engine_idx, e),
             }
         }
         eprintln!(

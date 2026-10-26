@@ -62,6 +62,20 @@ fn label<'a, Message: 'a>(
     r.into()
 }
 
+static SVG_HANDLE_CACHE: OnceLock<Mutex<std::collections::HashMap<String, iced::widget::svg::Handle>>> =
+    OnceLock::new();
+
+fn cached_svg_handle(path: &str) -> iced::widget::svg::Handle {
+    let cache = SVG_HANDLE_CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    let mut g = cache.lock().unwrap();
+    if let Some(h) = g.get(path) {
+        return h.clone();
+    }
+    let h = iced::widget::svg::Handle::from_path(path);
+    g.insert(path.to_string(), h.clone());
+    h
+}
+
 static CAPSULE_WIDTHS: OnceLock<Mutex<std::collections::HashMap<String, f32>>> = OnceLock::new();
 
 fn widths_map() -> &'static Mutex<std::collections::HashMap<String, f32>> {
@@ -72,7 +86,9 @@ pub fn record_width(id: &str, w: f32) {
     if let Ok(mut m) = widths_map().lock() {
         let old = m.get(id).copied();
         if old != Some(w) {
-            eprintln!("[capsule-width] {} = {:.1}px", id, w);
+            if std::env::var_os("MBS_DEBUG").is_some() {
+                eprintln!("[capsule-width] {} = {:.1}px", id, w);
+            }
         }
         m.insert(id.to_string(), w);
     }
@@ -467,7 +483,7 @@ impl CapsuleRenderer {
             let icon_elem: Element<'a, Message> = if let Some(p) = &item.icon_path {
                 let exists = std::path::Path::new(p).exists();
                 if exists && p.ends_with(".svg") {
-                    iced::widget::svg(iced::widget::svg::Handle::from_path(p.clone()))
+                    iced::widget::svg(cached_svg_handle(p))
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))
                         .into()

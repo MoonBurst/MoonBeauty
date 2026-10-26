@@ -95,8 +95,11 @@ pub enum IpcCommand {
 }
 
 pub fn get_socket_path() -> PathBuf {
-    let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
-        .unwrap_or_else(|_| format!("/tmp/user-{}", std::process::id()));
+    // XDG_RUNTIME_DIR is user-owned 0700. Falling back to /tmp is unsafe:
+    // any local user can race for the socket or read/write it.
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| {
+        panic!("XDG_RUNTIME_DIR is not set; refusing to place IPC socket in shared /tmp");
+    });
     PathBuf::from(runtime_dir).join("moon-beauty-shell.sock")
 }
 
@@ -122,7 +125,16 @@ impl IpcServer {
         if path.exists() {
             let _ = std::fs::remove_file(&path);
         }
-        let listener = UnixListener::bind(path)?;
+        let listener = UnixListener::bind(&path)?;
+        // Defense in depth: XDG_RUNTIME_DIR is 0700, but explicitly chmod
+        // the socket to 0600 in case the dir mode ever regresses.
+        let _ = std::fs::set_permissions(
+            &path,
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::Permissions::from_mode(0o600)
+            },
+        );
         Ok(Self { listener })
     }
 
@@ -146,8 +158,9 @@ pub enum AnnotatorCommand {
 }
 
 pub fn get_annotator_socket_path() -> std::path::PathBuf {
-    let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
-        .unwrap_or_else(|_| format!("/tmp/user-{}", std::process::id()));
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| {
+        panic!("XDG_RUNTIME_DIR is not set; refusing to place annotator socket in shared /tmp");
+    });
     std::path::PathBuf::from(runtime_dir).join("mbs-annotator-ctl.sock")
 }
 

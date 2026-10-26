@@ -4,14 +4,27 @@ use iced::{Alignment, Color, Element, Length, Padding};
 use crate::backend::system::{GpuInfo, SystemCollector};
 use crate::config::settings::{ContentRule, FriendProfile, ShellSettings};
 
-/// Unbuffered debug — writes to /tmp/mbs-settings-dbg.log immediately.
-/// Works even when stderr is buffered (which it is for child processes).
+/// Debug log — gated on MBS_DEBUG or MBS_SETTINGS_DEBUG so release builds
+/// stay silent. Uses a persistent file handle (opened once) instead of
+/// opening/writing/closing per call.
 fn mbs_dbg(msg: &str) {
     use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true).append(true).open("/tmp/mbs-settings-dbg.log")
-    {
-        let _ = writeln!(f, "{}", msg);
+    use std::sync::{Mutex, OnceLock};
+
+    if std::env::var_os("MBS_DEBUG").is_none() && std::env::var_os("MBS_SETTINGS_DEBUG").is_none() {
+        return;
+    }
+
+    static LOG: OnceLock<Mutex<std::fs::File>> = OnceLock::new();
+    let file = LOG.get_or_init(|| {
+        let f = std::fs::OpenOptions::new()
+            .create(true).append(true)
+            .open("/tmp/mbs-settings-dbg.log")
+            .expect("open /tmp/mbs-settings-dbg.log");
+        Mutex::new(f)
+    });
+    if let Ok(mut f) = file.lock() {
+        let _ = writeln!(*f, "{}", msg);
     }
 }
 use crate::config::theme::{hex_to_color, ShellTheme};
@@ -43,6 +56,8 @@ pub enum SettingsMessage {
     TooltipWidthPx(u32),
     TooltipHeightPx(u32),
     TooltipPauseMs(u32),
+    TooltipOffsetLeft(i32),
+    TooltipOffsetRight(i32),
     BorderWidth(u32),
     ControlBorderWidth(u32),
     CapsuleSpacing(i32),
@@ -270,6 +285,8 @@ impl SettingsOverlay {
             SettingsMessage::TooltipWidthPx(v) => settings.tooltip_width_px = v.clamp(200, 1000),
             SettingsMessage::TooltipHeightPx(v) => settings.tooltip_height_px = v.clamp(100, 1000),
             SettingsMessage::TooltipPauseMs(v) => settings.tooltip_pause_ms = v.clamp(0, 1000),
+            SettingsMessage::TooltipOffsetLeft(v) => settings.tooltip_offset_left = v.clamp(-100, 200),
+            SettingsMessage::TooltipOffsetRight(v) => settings.tooltip_offset_right = v.clamp(-100, 200),
             SettingsMessage::BorderWidth(v) => settings.global_border_width = (v as f32).clamp(1.0, 12.0),
             SettingsMessage::ControlBorderWidth(v) => settings.control_border_width = (v as f32).clamp(1.0, 8.0),
             SettingsMessage::CapsuleSpacing(v) => settings.capsule_spacing = v.clamp(-50, 40),
@@ -1542,6 +1559,18 @@ SettingsMessage::SaveSettings => {}
                             row![text("Tooltip Pause Time").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}ms", settings.tooltip_pause_ms)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                             slider(0..=100, (settings.tooltip_pause_ms / 10).min(100), |v: u32| SettingsMessage::TooltipPauseMs(v * 10)).width(Length::Fill),
                         ].spacing(3).width(Length::FillPortion(1)),
+                    column![
+                        row![text("Tooltip Text Size").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tooltip_font_size)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
+                        slider(8..=28, settings.tooltip_font_size, SettingsMessage::TooltipFontSize).width(Length::Fill),
+                    ].spacing(3).width(Length::FillPortion(1)),
+                    column![
+                        row![text("Tooltip Left Offset").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tooltip_offset_left)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
+                        slider(-50..=100, settings.tooltip_offset_left, |v| SettingsMessage::TooltipOffsetLeft(v)).width(Length::Fill),
+                    ].spacing(3).width(Length::FillPortion(1)),
+                    column![
+                        row![text("Tooltip Right Offset").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tooltip_offset_right)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
+                        slider(-50..=100, settings.tooltip_offset_right, |v| SettingsMessage::TooltipOffsetRight(v)).width(Length::Fill),
+                    ].spacing(3).width(Length::FillPortion(1)),
                         column![
                                     row![text("Tooltip Text Size").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tooltip_font_size)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                                     slider(8..=28, settings.tooltip_font_size, SettingsMessage::TooltipFontSize).width(Length::Fill),

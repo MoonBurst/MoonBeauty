@@ -127,9 +127,15 @@ impl WeatherBackend {
     }
 
     async fn detect_coords() -> (String, String) {
-        if let Ok(out) = Command::new("curl").args(["-s", "--max-time", "3", "http://ip-api.com/json"]).output().await {
+        // ip-api.com's free tier is HTTP-only (HTTPS is a paid upgrade).
+        // Use ipapi.co (HTTPS on free tier) so a network attacker can't
+        // inject a fake lat/lon. Response keys differ: latitude/longitude.
+        if let Ok(out) = Command::new("curl")
+            .args(["-s", "--max-time", "3", "https://ipapi.co/json/"])
+            .output().await
+        {
             if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
-                if let (Some(lat), Some(lon)) = (val["lat"].as_f64(), val["lon"].as_f64()) {
+                if let (Some(lat), Some(lon)) = (val["latitude"].as_f64(), val["longitude"].as_f64()) {
                     return (lat.to_string(), lon.to_string());
                 }
             }

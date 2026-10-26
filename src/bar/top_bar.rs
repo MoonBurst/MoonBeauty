@@ -149,7 +149,8 @@ impl TopBar {
             .shape(bar_shape)
             .background(theme.background)
             .border(theme.border, theme.border_width)
-            .slant_width(theme.slant_width * 1.5);
+            .slant_width(theme.slant_width * 1.5)
+            .size(Length::Fill, Length::Fixed(settings.bar_height as f32));
 
         let content = row![
             left_row,

@@ -132,10 +132,31 @@
                   Empty string → shell picks primary/focused output itself.
                 '';
               };
+
+              notifDaemon = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = ''
+                  Install the D-Bus activation service for org.freedesktop.Notifications
+                  so this shell handles desktop notifications, lazily spawned on demand.
+                  Set false if you use dunst, mako, or swaync instead.
+                '';
+              };
             };
 
             config = lib.mkIf cfg.enable {
               home.packages = [ cfg.package ];
+
+              # Lazy notification daemon: D-Bus activates us on the first Notify(),
+              # we exit after 30s idle. Saves ~55 MB at rest vs eager-spawning.
+              xdg.dataFile."dbus-1/services/org.freedesktop.Notifications.service" =
+                lib.mkIf cfg.notifDaemon {
+                  text = ''
+                    [D-BUS Service]
+                    Name=org.freedesktop.Notifications
+                    Exec=${cfg.package}/bin/moon-beauty-shell --notif-surface
+                  '';
+                };
 
               systemd.user.services.moon-beauty-shell = {
                 Unit = {
@@ -175,10 +196,28 @@
                 type = lib.types.package;
                 default = self.packages.${pkgs.system}.default;
               };
+
+              notifDaemon = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = ''
+                  Install the D-Bus activation service for org.freedesktop.Notifications
+                  system-wide. Set false if you use dunst, mako, or swaync.
+                '';
+              };
             };
 
             config = lib.mkIf cfg.enable {
-              environment.systemPackages = [ cfg.package ];
+              environment.systemPackages = [
+                cfg.package
+              ] ++ lib.optional cfg.notifDaemon (pkgs.writeTextDir
+                "share/dbus-1/services/org.freedesktop.Notifications.service"
+                ''
+                  [D-BUS Service]
+                  Name=org.freedesktop.Notifications
+                  Exec=${cfg.package}/bin/moon-beauty-shell --notif-surface
+                ''
+              );
 
               # Sway must import WAYLAND_DISPLAY + SWAYSOCK into systemd
               # --user so the service inherits them, then start the unit.

@@ -1,5 +1,5 @@
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Stack, checkbox};
-use iced::{Alignment, Element, Length};
+use iced::{Element, Length};
 
 use crate::config::settings::ShellSettings;
 use crate::config::theme::ShellTheme;
@@ -308,6 +308,15 @@ impl EmailOverlay {
             EmailMessage::SaveAttachment(name) => {
                 if let Some(email) = &self.parsed_email {
                     if let Some((_, data)) = email.attachments.iter().find(|(n, _)| n == &name) {
+                        // Sanitize: keep only the basename, strip leading dots.
+                        // Otherwise `../../.bashrc` from a malicious email would
+                        // overwrite the user's shell init.
+                        let safe_name: String = std::path::Path::new(&name)
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .map(|s| s.trim_start_matches('.').to_string())
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or_else(|| "attachment".to_string());
                         let settings = crate::config::settings::ShellSettings::load();
                         let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
                         let download_dir = if !settings.attachment_download_dir.trim().is_empty() {
@@ -327,7 +336,7 @@ impl EmailOverlay {
                             }
                         };
                         let _ = std::fs::create_dir_all(&download_dir);
-                        let out_path = download_dir.join(&name);
+                        let out_path = download_dir.join(&safe_name);
                         eprintln!("[attach] saving to {:?}", out_path);
                         if std::fs::write(&out_path, data).is_ok() {
                             let _ = std::process::Command::new("notify-send")

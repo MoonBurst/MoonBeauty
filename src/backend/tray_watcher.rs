@@ -114,7 +114,7 @@ pub struct TrayItem {
 pub async fn fetch_tray_items() -> Vec<TrayItem> {
     let conn = match zbus::Connection::session().await {
         Ok(c) => c,
-        Err(e) => { eprintln!("[tray-fetch] session bus: {e}"); return Vec::new(); }
+        Err(e) => { crate::dbg_log!("[tray-fetch] session bus: {e}"); return Vec::new(); }
     };
     let watcher = match zbus::Proxy::new(
         &conn,
@@ -123,11 +123,11 @@ pub async fn fetch_tray_items() -> Vec<TrayItem> {
         "org.kde.StatusNotifierWatcher",
     ).await {
         Ok(p) => p,
-        Err(e) => { eprintln!("[tray-fetch] watcher proxy: {e}"); return Vec::new(); }
+        Err(e) => { crate::dbg_log!("[tray-fetch] watcher proxy: {e}"); return Vec::new(); }
     };
     let raw_items: Vec<String> = match watcher.get_property("RegisteredStatusNotifierItems").await {
         Ok(v) => v,
-        Err(e) => { eprintln!("[tray-fetch] RegisteredStatusNotifierItems: {e}"); return Vec::new(); }
+        Err(e) => { crate::dbg_log!("[tray-fetch] RegisteredStatusNotifierItems: {e}"); return Vec::new(); }
     };
 
     let mut out = Vec::new();
@@ -135,7 +135,7 @@ pub async fn fetch_tray_items() -> Vec<TrayItem> {
         let Some((bus, path)) = parse_registered(&raw) else { continue };
         let proxy = match zbus::Proxy::new(&conn, bus.as_str(), path.as_str(), "org.kde.StatusNotifierItem").await {
             Ok(p) => p,
-            Err(e) => { eprintln!("[tray-fetch] {} proxy: {e}", raw); continue; }
+            Err(e) => { crate::dbg_log!("[tray-fetch] {} proxy: {e}", raw); continue; }
         };
         let id: String = proxy.get_property("Id").await.unwrap_or_default();
         let title: String = proxy.get_property("Title").await.unwrap_or_default();
@@ -167,7 +167,7 @@ pub async fn fetch_tray_items() -> Vec<TrayItem> {
             }
             Err(_) => String::new(),
         };
-        eprintln!("[tray-fetch] item: {} path: {:?}", title, icon_path);
+        crate::dbg_log!("[tray-fetch] item: {} path: {:?}", title, icon_path);
         out.push(TrayItem { bus, path, id, title, icon_path, tooltip });
     }
     out

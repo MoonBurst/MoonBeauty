@@ -754,6 +754,7 @@ fn handle_email_keypress(event: iced::Event, status: iced::event::Status, _windo
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    Noop,
     TickHardware,
     TickWeather,
     TickEmailSync,
@@ -859,7 +860,10 @@ pub struct MoonBeautyShellApp {
     notifs: NotificationOverlay,
     settings_ui: SettingsOverlay,
     lockscreen: LockscreenOverlay,
-}
+    weather_tick: bool,
+
+    last_cursor_x: f32,
+    last_cursor_time: std::time::Instant,}
 
 impl MoonBeautyShellApp {
     fn close_tray(&mut self) {
@@ -1080,7 +1084,10 @@ impl MoonBeautyShellApp {
             email: EmailOverlay::new(),
             notifs: NotificationOverlay::new(),
             lockscreen: LockscreenOverlay::new(),
-        };
+            weather_tick: false,
+        
+            last_cursor_x: 0.0,
+            last_cursor_time: std::time::Instant::now() - std::time::Duration::from_secs(30),};
 
         let mut init_tasks = vec![
             Command::done(Message::TickEmailSync),
@@ -1588,7 +1595,13 @@ impl MoonBeautyShellApp {
                         CapsuleAction::OpenOverlay(id) => {
                             eprintln!("[topbar-action] OpenOverlay: id = {:?}", id);
 
-                            // 1. DROPDOWN TOOLTIPS (Alarm, CPU, GPU, RAM, Weather, Tray)
+                            
+
+                            // Recent click => use cursor position for dynamic placement.
+                            // Fallback to capsule_center_x if no click in last 5s (e.g. IPC trigger).
+                            let recent_click = self.last_cursor_time.elapsed() < std::time::Duration::from_secs(5);
+
+                            // 1. DROPDOWN TOOLTIPS (Alarm, CPU, GPU, RAM, Tray)
                             if matches!(id.as_str(), "weather" | "cpu" | "gpu" | "ram" | "alarm" | "calendar" | "music" | "unified" | "net" | "custom") {
                                 // Toggle off if already open
                                 let running = self.weather_tooltip_child.as_mut()
@@ -1610,7 +1623,11 @@ impl MoonBeautyShellApp {
                                     Some(self.settings.notif_screen_name.as_str())
                                 } else { None };
                                 let sw = get_screen_width_for(target_output);
-                                let cx = capsule_center_x(&self.settings, sw, &id);
+                                let cx = if recent_click && self.last_cursor_x > 0.0 {
+                                    self.last_cursor_x as i32
+                                } else {
+                                    capsule_center_x(&self.settings, sw, &id)
+                                };
                                 let exe = resolve_exe();
                                 let mut cmd = std::process::Command::new(&exe);
 
@@ -1676,7 +1693,7 @@ impl MoonBeautyShellApp {
                                 }
                                                                                                                                 cmd
                                    .env("MBS_TOOLTIP_W", tip_w.max(cap_w as u32).to_string())
-                                   .env("MBS_TOOLTIP_H", tip_h.to_string())
+                                   .env("MBS_TOOLTIP_H", compute_tooltip_height(&id, self).to_string())
                                    .env("MBS_TOOLTIP_DROP_MS", self.settings.tooltip_drop_ms.to_string())
                                    .env("MBS_TOOLTIP_EXPAND_MS", self.settings.tooltip_expand_ms.to_string())
                                    .env("MBS_SCREEN_W", sw.to_string())
@@ -1686,7 +1703,8 @@ impl MoonBeautyShellApp {
                                    .env("MBS_CAPSULE_CX", cx.to_string())
                                    .env("MBS_CAPSULE_W", cap_w.to_string());
 
-                                match cmd.spawn() {
+eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
+                                                                match cmd.spawn() {
                                     Ok(c) => {
                                         self.weather_tooltip_child = Some(c);
                                     }
@@ -3002,6 +3020,8 @@ impl MoonBeautyShellApp {
                 }
                 self.active_overlay = None;
             }
+            
+            Message::Noop => {}
             Message::CloseShell => {
                 std::process::exit(0);
             }
@@ -3477,7 +3497,10 @@ impl MoonBeautyShellApp {
         }
 
         let bar_view = TopBar::view(&self.settings, &self.theme, &self.telemetry, self.tray_expanded, &self.tray_items, self.tray_anim_width).map(Message::TopBar);
-        let base_content = Stack::new().push(bar_view);
+
+        let base_content: Element<'_, Message> = bar_view.into();
+
+
 
         if let Some(overlay) = overlay_element {
             Stack::new().push(base_content).push(overlay).into()
@@ -3487,6 +3510,42 @@ impl MoonBeautyShellApp {
     }
 }
 
+
+fn compute_tooltip_height(id: &str, app: &MoonBeautyShellApp) -> u32 {
+    let bar_h = app.settings.bar_height;
+    let content_h: u32 = match id {
+        "weather" => {
+            let lines = app.telemetry.weather.as_ref()
+                .map(|w| w.tooltip_lines.len().min(15) as u32)
+                .unwrap_or(1);
+            lines * 24 + 40
+        }
+        "calendar" => {
+            use chrono::Datelike;
+            let now = chrono::Local::now();
+            let first = chrono::NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
+                .unwrap_or_default();
+            let (ny, nm) = if now.month() == 12 { (now.year() + 1, 1) } else { (now.year(), now.month() + 1) };
+            let next = chrono::NaiveDate::from_ymd_opt(ny, nm, 1).unwrap_or_default();
+            let days = next.signed_duration_since(first).num_days() as u32;
+            let offset = first.weekday().num_days_from_sunday() as u32;
+            let weeks = (offset + days + 6) / 7;
+            40 + 36 + 24 + weeks * 50 + 20
+        }
+        "alarm" => 340,
+        "cpu" => app.telemetry.cpu.top_procs.len().min(10) as u32 * 24 + 100,
+        "gpu" => app.telemetry.gpu.top_procs.len().min(10) as u32 * 24 + 100,
+        "ram" => app.telemetry.ram.top_procs.len().min(10) as u32 * 24 + 100,
+        "net" => 450,
+        "music" => 400,
+        "unified" => 400,
+        "custom" => 300,
+        _ => 400,
+    };
+    let total = content_h + bar_h + 20;
+    eprintln!("[compute-h] id={} content_h={} bar_h={} total={}", id, content_h, bar_h, total);
+    total
+}
 
 fn capsule_min_width(id: &str) -> f32 {
     match id {

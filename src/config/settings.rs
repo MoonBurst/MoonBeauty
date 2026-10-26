@@ -239,6 +239,10 @@ pub struct ShellSettings {
     pub tooltip_height_px: u32,
     #[serde(default = "default_tooltip_pause_ms", alias = "tooltipPauseMs")]
     pub tooltip_pause_ms: u32,
+    #[serde(default = "default_tooltip_offset", alias = "tooltipOffsetLeft")]
+    pub tooltip_offset_left: i32,
+    #[serde(default = "default_tooltip_offset", alias = "tooltipOffsetRight")]
+    pub tooltip_offset_right: i32,
     #[serde(default, alias = "tooltipSizes")]
     pub tooltip_sizes: HashMap<String, (u32, u32)>,
     #[serde(default = "default_slant_mode", alias = "slantStyleMode")]
@@ -374,6 +378,7 @@ fn default_tooltip_expand_ms() -> u32 { 162 }
 fn default_tooltip_width_px() -> u32 { 380 }
 fn default_tooltip_height_px() -> u32 { 300 }
 fn default_tooltip_pause_ms() -> u32 { 0 }
+fn default_tooltip_offset() -> i32 { 32 }
 fn default_slant_mode() -> String { "symmetric".to_string() }
 fn default_bar_shape() -> String { "slant".to_string() }
 fn default_global_border_width() -> f32 { 3.0 }
@@ -390,7 +395,7 @@ fn default_tray_width() -> u32 { 60 }
 fn default_tray_timeout() -> u32 { 3 }
 fn default_tray_icon_size() -> u32 { 20 }
 fn default_launcher_icon_size() -> u32 { 100 }
-fn default_poll_interval() -> u64 { 2000 }
+fn default_poll_interval() -> u64 { 30000 }
 fn default_true() -> bool { true }
 
 fn default_notif_hold() -> u64 { 3 }
@@ -449,6 +454,8 @@ impl Default for ShellSettings {
             tooltip_width_px: default_tooltip_width_px(),
             tooltip_height_px: default_tooltip_height_px(),
             tooltip_pause_ms: default_tooltip_pause_ms(),
+            tooltip_offset_left: default_tooltip_offset(),
+            tooltip_offset_right: default_tooltip_offset(),
             tooltip_sizes: HashMap::new(),
             slant_mode: default_slant_mode(),
             bar_shape: default_bar_shape(),
@@ -526,7 +533,10 @@ impl ShellSettings {
 
     pub fn tooltip_size(&self, id: &str) -> (u32, u32) {
         self.tooltip_sizes.get(id).copied()
-            .unwrap_or((self.tooltip_width_px, self.tooltip_height_px))
+            .unwrap_or_else(|| match id {
+                "alarm" => (500, 400),
+                _ => (self.tooltip_width_px, self.tooltip_height_px),
+            })
     }
 
     pub fn get_window_size(&self, id: &str, _def_w: u32, _def_h: u32) -> (f32, f32) {
@@ -540,6 +550,7 @@ impl ShellSettings {
 
     pub fn load() -> Self {
         let path = Self::config_path();
+        eprintln!("[settings] config_path = {:?} exists={}", path, path.exists());
         if path.exists() {
             if let Ok(content) = fs::read_to_string(&path) {
                 if let Ok(mut settings) = serde_json::from_str::<ShellSettings>(&content) {

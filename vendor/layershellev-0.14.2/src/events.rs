@@ -310,6 +310,7 @@ pub(crate) enum DispatchMessageInner {
     },
     XdgInfoChanged(XdgInfoChangedType),
     Ime(Ime),
+    Closed,
 }
 
 /// This tell the DispatchMessage by dispatch
@@ -413,6 +414,7 @@ pub enum DispatchMessage {
 impl From<DispatchMessageInner> for DispatchMessage {
     fn from(val: DispatchMessageInner) -> Self {
         match val {
+            DispatchMessageInner::Closed => DispatchMessage::Closed,
             DispatchMessageInner::NewDisplay(_) => unimplemented!(),
             DispatchMessageInner::MouseButton {
                 state,

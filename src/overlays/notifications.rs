@@ -428,7 +428,7 @@ impl NotificationOverlay {
                             still_missing += 1;
                         }
                     }
-                    if still_missing > 0 {
+                    if still_missing > 0 && std::env::var_os("MBS_DEBUG").is_some() {
                         eprintln!("[notif-migrate] {} entries still have no resolvable icon", still_missing);
                     }
                     if migrated {
@@ -507,28 +507,28 @@ impl NotificationOverlay {
             Some(p) => {
                 let specific = format!("resources/{0}/{0}.png", p.name);
                 if std::path::Path::new(&specific).exists() {
-                    eprintln!("[notif-icon] {} → friend avatar: {}", app_name, specific);
+                    crate::dbg_log!("[notif-icon] {} → friend avatar: {}", app_name, specific);
                     Some(specific)
                 } else if std::path::Path::new("resources/fallback.png").exists() {
-                    eprintln!("[notif-icon] {} → friend fallback (missing {})", app_name, specific);
+                    crate::dbg_log!("[notif-icon] {} → friend fallback (missing {})", app_name, specific);
                     Some("resources/fallback.png".to_string())
                 } else if let Some(p) = desktop_entry.and_then(resolve_desktop_icon) {
-                    eprintln!("[notif-icon] {} → desktop icon fallback: {}", app_name, p);
+                    crate::dbg_log!("[notif-icon] {} → desktop icon fallback: {}", app_name, p);
                     Some(p)
                 } else {
                     let p = resolve_icon_name(&app_name.to_lowercase().replace(' ', "-"));
                     if let Some(p) = p {
-                        eprintln!("[notif-icon] {} → app-name icon: {}", app_name, p);
+                        crate::dbg_log!("[notif-icon] {} → app-name icon: {}", app_name, p);
                         Some(p)
                     } else {
-                        eprintln!("[notif-icon] {} → NONE", app_name);
+                        crate::dbg_log!("[notif-icon] {} → NONE", app_name);
                         None
                     }
                 }
             }
             None => {
                 if let Some(p) = desktop_entry.and_then(resolve_desktop_icon) {
-                    eprintln!("[notif-icon] {} → desktop icon: {}", app_name, p);
+                    crate::dbg_log!("[notif-icon] {} → desktop icon: {}", app_name, p);
                     Some(p)
                 } else {
                     // Try multiple name variants for the app_name fallback.
@@ -546,13 +546,13 @@ impl NotificationOverlay {
                     for v in &variants {
                         if v.is_empty() { continue; }
                         if let Some(p) = resolve_icon_name(v) {
-                            eprintln!("[notif-icon] {} → app-name variant '{}': {}", app_name, v, p);
+                            crate::dbg_log!("[notif-icon] {} → app-name variant '{}': {}", app_name, v, p);
                             found = Some(p);
                             break;
                         }
                     }
                     if found.is_none() {
-                        eprintln!("[notif-icon] {} → NONE (desktop_entry={:?}, tried={:?})",
+                        crate::dbg_log!("[notif-icon] {} → NONE (desktop_entry={:?}, tried={:?})",
                             app_name, desktop_entry, variants);
                     }
                     found
@@ -661,7 +661,9 @@ impl NotificationOverlay {
         let a = app_name.to_string();
         let s = summary.to_string();
         let b = body.to_string();
-        let readout_template = "Message from {sender}".to_string(); // FORCED OVERRIDE
+        let readout_template = _custom_readout
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "Message from {sender}".to_string());
 
         std::thread::spawn(move || {
             // Smart sender extraction
@@ -722,9 +724,9 @@ impl NotificationOverlay {
                 spoken = spoken.replace(key, val);
             }
             
-            eprintln!("[tts-trace] app={:?} summary={:?} body={:?}", a, s, b);
-            eprintln!("[tts-trace] extracted sender={:?} message={:?}", sender, msg);
-            eprintln!("[tts-trace] template={:?} -> spoken={:?}", readout_template, spoken);
+            crate::dbg_log!("[tts-trace] app={:?} summary={:?} body={:?}", a, s, b);
+            crate::dbg_log!("[tts-trace] extracted sender={:?} message={:?}", sender, msg);
+            crate::dbg_log!("[tts-trace] template={:?} -> spoken={:?}", readout_template, spoken);
 
             if let Some(cmd) = tts_command {
                 let vol_str = format!("{:.2}", (volume as f32) / 100.0);
@@ -853,7 +855,7 @@ impl NotificationOverlay {
                 None
             };
             if let Some((a, s, b, r, c)) = payload {
-                eprintln!("[tts-fire] id={} app={:?}", fid, a);
+                crate::dbg_log!("[tts-fire] id={} app={:?}", fid, a);
                 Self::speak_tts(&a, &s, &b, r.as_deref(), c, volume);
             }
         }
@@ -1152,7 +1154,7 @@ impl NotificationOverlay {
 
                 let inner_icon: Element<'a, NotifMessage> = if let Some(ref path) = toast.avatar_path {
                     if std::path::Path::new(path).exists() {
-                        eprintln!("[notif-render] id={} icon=OK {}", id, path);
+                        crate::dbg_log!("[notif-render] id={} icon=OK {}", id, path);
                         if path.ends_with(".svg") {
                             iced::widget::svg(iced::widget::svg::Handle::from_path(path.clone()))
                                 .width(Length::Fixed(icon_size))
@@ -1166,7 +1168,7 @@ impl NotificationOverlay {
                                 .into()
                         }
                     } else {
-                        if log_now { eprintln!("[notif-render] id={} icon=MISSING {}", id, path); }
+                        if log_now { crate::dbg_log!("[notif-render] id={} icon=MISSING {}", id, path); }
                         container(text("🔔").size(icon_size * 0.7))
                             .width(Length::Fixed(icon_size))
                             .height(Length::Fixed(icon_size))
@@ -1174,7 +1176,7 @@ impl NotificationOverlay {
                             .into()
                     }
                 } else {
-                    if log_now { eprintln!("[notif-render] id={} icon=NONE", id); }
+                    if log_now { crate::dbg_log!("[notif-render] id={} icon=NONE", id); }
                     container(text("🔔").size(icon_size * 0.7))
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))

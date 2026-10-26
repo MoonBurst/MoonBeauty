@@ -38,14 +38,21 @@ impl Default for LockscreenOverlay {
 
 impl LockscreenOverlay {
     pub fn new() -> Self {
-        let (ipc_tx, ipc_rx) = match Self::connect_coordinator() {
-            Some(pair) => {
-                eprintln!("[lock-child] connected to coordinator");
-                (Some(pair.0), Some(pair.1))
-            }
-            None => {
-                eprintln!("[lock-child] !!! no coordinator socket — lock will be inoperable");
-                (None, None)
+        // Only --lockscreen-instance children have MBS_LOCK_SOCKET. Bar,
+        // notif-surface, and tooltip processes do not, and warning about
+        // it would be a false alarm.
+        let (ipc_tx, ipc_rx) = if std::env::var_os("MBS_LOCK_SOCKET").is_none() {
+            (None, None)
+        } else {
+            match Self::connect_coordinator() {
+                Some(pair) => {
+                    eprintln!("[lock-child] connected to coordinator");
+                    (Some(pair.0), Some(pair.1))
+                }
+                None => {
+                    eprintln!("[lock-child] !!! socket set but connect failed");
+                    (None, None)
+                }
             }
         };
         Self {

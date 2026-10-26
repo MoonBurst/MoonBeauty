@@ -54,6 +54,8 @@ pub struct App {
     trash_confirm: bool,
     sources_enabled: [bool; 3],
     anim_frame: u64,
+    settings: ShellSettings,
+    theme: ShellTheme,
 }
 
 #[allow(dead_code)]
@@ -66,15 +68,20 @@ impl App {
         let grow_right = std::env::var("MBS_GROW_RIGHT").map(|v| v == "1").unwrap_or_else(|_| cx < sw / 2);
         let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
         let s = ShellSettings::load();
-        let h = s.tooltip_height_px;
+        let h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(s.tooltip_height_px);
+    eprintln!("[info_tooltip-h] MBS_TOOLTIP_H = {}", h);
         let drop_ms = s.tooltip_drop_ms as f32;
         let expand_ms = s.tooltip_expand_ms as f32;
         let w_start: f32 = std::env::var("MBS_CAPSULE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(W_START);
         let sl = std::env::var("MBS_SLANT_L").ok().map(|s| if s == "R" { SlantSide::Right } else { SlantSide::Left }).unwrap_or(SlantSide::Left);
         let sr = std::env::var("MBS_SLANT_R").ok().map(|s| if s == "R" { SlantSide::Right } else { SlantSide::Left }).unwrap_or(SlantSide::Left);
 
+        let settings = ShellSettings::load();
+        let theme = ShellTheme::from_settings(&settings);
         let app = Self { opened: Instant::now(), mode: mode.clone(), data: None, grow_right, w, w_start, slant_l: sl, slant_r: sr, h, drop_ms, expand_ms, closing_at: None, search_query: String::new(), trash_confirm: false, sources_enabled: [true, true, true], anim_frame: 0,
-};
+            settings,
+            theme,
+        };
         let task = Task::perform(fetch_data(mode), Message::Loaded);
         (app, Task::batch(vec![
             task,
@@ -185,14 +192,28 @@ impl App {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let settings = ShellSettings::load();
-        let theme = ShellTheme::from_settings(&settings);
+        let settings = &self.settings;
+        let theme = &self.theme;
+        let content_h = match &self.data {
+            Some(InfoData::Calendar(c)) => {
+                let total_cells = c.first_day_offset as u32 + c.days_in_month;
+                let weeks = (total_cells + 6) / 7;
+                40.0 + 36.0 + 24.0 + (weeks as f32) * 50.0 + 20.0 + settings.bar_height as f32
+            }
+            Some(InfoData::Music(_)) => 400.0 + settings.bar_height as f32,
+            Some(InfoData::Unified(..)) => 400.0 + settings.bar_height as f32,
+            Some(InfoData::Net(_)) => 450.0 + settings.bar_height as f32,
+            Some(InfoData::Custom) => 300.0 + settings.bar_height as f32,
+            None => self.h as f32,
+        };
+        let effective_h = self.h as f32;
+
         let anim = if let Some(t) = self.closing_at {
             crate::overlays::tooltip_engine::compute_close(
                 t.elapsed().as_millis() as f32,
                 self.w_start,
                 self.w as f32,
-                self.h as f32,
+                effective_h,
                 theme.slant_width,
                 settings.bar_height as f32,
                 self.drop_ms,
@@ -202,7 +223,7 @@ impl App {
                 self.opened.elapsed().as_millis() as f32,
             self.w_start,
             self.w as f32,
-            self.h as f32,
+            effective_h,
             theme.slant_width,
             settings.bar_height as f32,
             self.drop_ms,
@@ -224,10 +245,13 @@ impl App {
             frame: self.opened.elapsed().as_millis() as u64,
         };
 
-        let content: Element<'_, Message> = self.build_content(&theme, &settings, anim.opacity);
+        let content: Element<'_, Message> = self.build_content(&theme, &settings, anim.opacity, effective_h);
         let clipped = crate::overlays::tooltip_engine::clip_content(content, anim.w, anim.h, self.grow_right);
-        let stacked: Element<'_, Message> = Stack::new().push(bg.view()).push(clipped).into();
-        crate::overlays::tooltip_engine::align_to_side(stacked, self.grow_right)
+        let stacked = iced::widget::container(Stack::new().push(bg.view()).push(clipped))
+            .width(Length::Fixed(anim.w))
+            .height(Length::Fixed(anim.h))
+            .clip(true);
+        crate::overlays::tooltip_engine::align_to_side(stacked.into(), self.grow_right)
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
@@ -244,7 +268,7 @@ impl App {
 }
 
 impl App {
-    fn build_content<'a>(&'a self, t: &ShellTheme, settings: &ShellSettings, alpha: f32) -> Element<'a, Message> {
+    fn build_content<'a>(&'a self, t: &ShellTheme, settings: &ShellSettings, alpha: f32, total_h: f32) -> Element<'a, Message> {
         let a = move |c: Color| Color { a: c.a * alpha, ..c };
         let text_col = a(t.text);
         let muted = a(t.muted);
@@ -255,7 +279,6 @@ impl App {
                 let success = a(t.success);
 
         let fs = settings.tooltip_font_size;
-        let total_h = self.h as f32;
         let bar_h = settings.bar_height.max(1) as f32;
         let slant_h = t.slant_width * (total_h / bar_h);
         let slant_right = self.slant_l == SlantSide::Right;
@@ -276,6 +299,12 @@ impl App {
         if let Some(d) = &self.data {
             match d {
                 InfoData::Calendar(c) => {
+                    // Compute exact content height from weeks
+                    let total_cells = c.first_day_offset as u32 + c.days_in_month;
+                    let weeks = (total_cells + 6) / 7;
+                    let content_h = 40.0 + 36.0 + 24.0 + (weeks as f32) * 50.0 + 20.0;
+
+
                     let header_h = fs as f32 + 16.0;
                     let header = row![
                         text("CALENDAR").size((fs.max(14)) as f32).bold().color(text_col).wrapping(iced::widget::text::Wrapping::None),
@@ -292,37 +321,41 @@ impl App {
                     col = col.push(slanted_row(month_el, y + month_h * 0.5, total_h, slant_h, slant_right, safe, w_f, month_h));
                     y += month_h + gap;
 
+                    // Grid setup
+                    let cell_h = fs as f32 + 8.0;
+                    // Fixed width for each of the 7 days so they don't collapse
+                    let cell_w = (w_f - (slant_h * 2.0) - safe * 2.0) / 7.0;
+
                     // Days of week
                     let dow_h = fs as f32 + 4.0;
-                    let dow_el = row![
-                        text("S").size((fs) as f32).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
-                        text("M").size((fs) as f32).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
-                        text("T").size((fs) as f32).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
-                        text("W").size((fs) as f32).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
-                        text("T").size((fs) as f32).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
-                        text("F").size((fs) as f32).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
-                        text("S").size((fs) as f32).color(muted).width(Length::FillPortion(1)).align_x(Alignment::Center),
-                    ].width(Length::Fill).into();
-                    col = col.push(slanted_row(dow_el, y + dow_h * 0.5, total_h, slant_h, slant_right, safe, w_f, dow_h));
+                    let mut dow_row = row![].spacing(0);
+                    for day_name in ["S", "M", "T", "W", "T", "F", "S"] {
+                        dow_row = dow_row.push(
+                            container(text(day_name).size(fs as f32).color(muted))
+                                .width(Length::Fixed(cell_w))
+                                .align_x(Alignment::Center)
+                        );
+                    }
+                    col = col.push(slanted_row(dow_row.into(), y + dow_h * 0.5, total_h, slant_h, slant_right, safe, w_f, dow_h));
                     y += dow_h + gap;
 
                     let mut day = 1;
-                    let cell_h = fs as f32 + 8.0;
-
                     for _row in 0..6 {
-                        let mut row_widgets = row![].width(Length::Fill);
+                        let mut row_widgets = row![].spacing(0);
                         for col_idx in 0..7 {
                             if _row == 0 && col_idx < c.first_day_offset {
-                                row_widgets = row_widgets.push(text("").width(Length::FillPortion(1)));
+                                row_widgets = row_widgets.push(container(text("")).width(Length::Fixed(cell_w)));
                             } else if day <= c.days_in_month {
                                 let is_today = day == c.today_day;
                                 let color = if is_today { a(t.danger) } else { text_col };
-                                
                                 let bg_col = if is_today { Some(iced::Background::Color(a(t.surface_alt))) } else { None };
                                 let border_col = if is_today { a(t.danger) } else { Color::TRANSPARENT };
-                                let cell = container(text(format!("{:2}", day)).size((fs) as f32).color(color))
-                                    .width(Length::FillPortion(1))
+                                
+                                let cell = container(text(format!("{:2}", day)).size(fs as f32).color(color))
+                                    .width(Length::Fixed(cell_w))
+                                    .height(Length::Fixed(cell_h))
                                     .center_x(Length::Fill)
+                                    .center_y(Length::Fill)
                                     .style(move |_t| container::Style {
                                         background: bg_col,
                                         border: iced::Border { color: border_col, width: if is_today { 1.5 } else { 0.0 }, radius: 4.0.into() },
@@ -332,7 +365,7 @@ impl App {
                                 row_widgets = row_widgets.push(cell);
                                 day += 1;
                             } else {
-                                row_widgets = row_widgets.push(text("").width(Length::FillPortion(1)));
+                                row_widgets = row_widgets.push(container(text("")).width(Length::Fixed(cell_w)));
                             }
                         }
                         col = col.push(slanted_row(row_widgets.into(), y + cell_h * 0.5, total_h, slant_h, slant_right, safe, w_f, cell_h));
@@ -952,6 +985,7 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     let s = ShellSettings::load();
     let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(380);
     let h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(s.tooltip_height_px);
+    eprintln!("[info_tooltip-h] MBS_TOOLTIP_H = {}", h);
 
     let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
     let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1920);
@@ -961,12 +995,28 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     let bar_h = s.bar_height as i32;
     let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
     let half_cap = (cap_w / 2.0) as i32;
-    let slant_px = s.slant_width as i32;
+    
+    // Alignment offset for the slanted corner + padding.
+    let adjust: i32 = s.slant_width as i32 + 20; // slant + padding
+
+    let adjust_left = s.tooltip_offset_left;
+    let adjust_right = s.tooltip_offset_right;
+
+    let adjust_left = s.tooltip_offset_left;
+    let adjust_right = s.tooltip_offset_right;
+    let adjust_left = s.tooltip_offset_left;
+    let adjust_right = s.tooltip_offset_right;
+
+    let adjust_left = s.tooltip_offset_left;
+    let adjust_right = s.tooltip_offset_right;
+
+    let adjust_left = s.tooltip_offset_left;
+    let adjust_right = s.tooltip_offset_right;
 
     let (anchor, margin) = if grow_right {
-        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, (cx - half_cap).max(0)))
+        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, (cx - half_cap + adjust_left).max(0)))
     } else {
-        (Anchor::Top | Anchor::Right, (margin_top, (sw - cx - half_cap - slant_px).max(0), 0, 0))
+        (Anchor::Top | Anchor::Right, (margin_top, (sw - cx - half_cap + adjust_right).max(0), 0, 0))
     };
 
     let layer = LayerShellSettings {

@@ -2157,6 +2157,12 @@ impl<T> Dispatch<xdg_popup::XdgPopup, ()> for WindowState<T> {
         _conn: &Connection,
         _qhandle: &QueueHandle<Self>,
     ) {
+        if let xdg_popup::Event::PopupDone = event {
+            let Some(unit_index) = state.units.iter().position(|unit| unit.shell == *surface)
+            else { return; };
+            let id = state.units[unit_index].id;
+            state.message.push((Some(id), DispatchMessageInner::Closed));
+        }
         if let xdg_popup::Event::Configure { width, height, .. } = event {
             let Some(unit_index) = state.units.iter().position(|unit| unit.shell == *surface)
             else {
@@ -2167,6 +2173,7 @@ impl<T> Dispatch<xdg_popup::XdgPopup, ()> for WindowState<T> {
             state.units[unit_index].request_refresh(RefreshRequest::NextFrame)
         }
     }
+
 }
 
 impl<T> Dispatch<zxdg_output_v1::ZxdgOutputV1, ()> for WindowState<T> {
@@ -3091,7 +3098,7 @@ impl<T: 'static> WindowState<T> {
                                     let positioner = wmbase.create_positioner(&qh, ());
                                     positioner.set_size(width as i32, height as i32);
                                     positioner.set_anchor_rect(x, y, width as i32, height as i32);
-                                    let wl_xdg_surface =
+                                            let wl_xdg_surface =
                                         wmbase.get_xdg_surface(&wl_surface, &qh, ());
                                     let popup =
                                         wl_xdg_surface.get_popup(None, &positioner, &qh, ());

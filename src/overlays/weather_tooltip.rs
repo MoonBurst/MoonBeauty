@@ -49,6 +49,8 @@ impl App {
         let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(420);
         let s = ShellSettings::load();
         let h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(520);
+    eprintln!("[weather_tooltip-h] MBS_TOOLTIP_H = {}", h);
+    eprintln!("[child-h] weather_tooltip MBS_TOOLTIP_H = {}", h);
         
         let drop_ms = s.tooltip_drop_ms as f32;
         let expand_ms = s.tooltip_expand_ms as f32;
@@ -207,7 +209,7 @@ impl App {
         }
 
         container(col)
-            .padding(Padding { top: vpad, right: 0.0, bottom: vpad, left: 0.0 })
+            .padding(Padding { top: vpad, right: 0.0, bottom: vpad, left: 20.0 })
             .width(Length::Fixed(self.w as f32))
             .height(Length::Fixed(self.h as f32))
             .clip(true)
@@ -215,7 +217,7 @@ impl App {
     }
 }
 
-fn slanted_row<'a, M: 'a>(
+pub fn slanted_row<'a, M: 'a>(
     inner: Element<'a, M>,
     y_mid: f32,
     total_h: f32,
@@ -250,6 +252,8 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     let s = ShellSettings::load();
     let w: u32 = std::env::var("MBS_TOOLTIP_W").ok().and_then(|v| v.parse().ok()).unwrap_or(420);
     let h: u32 = std::env::var("MBS_TOOLTIP_H").ok().and_then(|v| v.parse().ok()).unwrap_or(520);
+    eprintln!("[weather_tooltip-h] MBS_TOOLTIP_H = {}", h);
+    eprintln!("[child-h] weather_tooltip MBS_TOOLTIP_H = {}", h);
 
     let cx: i32 = std::env::var("MBS_CAPSULE_CX").ok().and_then(|v| v.parse().ok()).unwrap_or(200);
     let sw: i32 = std::env::var("MBS_SCREEN_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1920);
@@ -259,12 +263,31 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     let bar_h = s.bar_height as i32;
     let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
     let half_cap = (cap_w / 2.0) as i32;
-    let slant_px = s.slant_width as i32;
+    
+    // Symmetric alignment: +32 on the left, -32 on the right.
+    let adjust: i32 = s.slant_width as i32 + 20; // slant + padding
+
+    // Alignment offset for the slanted corner + padding.
+    let adjust: i32 = s.slant_width as i32 + 20; // slant + padding
+
+    let adjust_left = s.tooltip_offset_left;
+    let adjust_right = s.tooltip_offset_right;
+
+    let adjust_left = s.tooltip_offset_left;
+    let adjust_right = s.tooltip_offset_right;
+    let adjust_left = s.tooltip_offset_left;
+    let adjust_right = s.tooltip_offset_right;
+
+    let adjust_left = s.tooltip_offset_left;
+    let adjust_right = s.tooltip_offset_right;
+
+    let adjust_left = s.tooltip_offset_left;
+    let adjust_right = s.tooltip_offset_right;
 
     let (anchor, margin) = if grow_right {
-        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, (cx - half_cap).max(0)))
+        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, (cx - half_cap + adjust_left).max(0)))
     } else {
-        (Anchor::Top | Anchor::Right, (margin_top, (sw - cx - half_cap - slant_px).max(0), 0, 0))
+        (Anchor::Top | Anchor::Right, (margin_top, (sw - cx - half_cap + adjust_right).max(0), 0, 0))
     };
 
     let layer = LayerShellSettings {
@@ -288,3 +311,132 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     .settings(Settings { layer_settings: layer, ..Default::default() })
     .run()
 }
+
+/// Generic popup renderer. Takes any content Element and applies
+/// the capsule-matching shape + two-phase animation. Reusable for
+/// weather, RAM, CPU, calendar, music, unified, net, custom, etc.
+///
+/// `slant_factor` scales the base slant:
+///   1.0 = matches capsule slant (theme.slant_width, ~12px)
+///   1.5 = matches outer bar background (theme.slant_width * 1.5, ~18px)
+pub fn render_tooltip_popup<'a>(
+    content: iced::Element<'a, ()>,
+    theme: &'a ShellTheme,
+    settings: &'a ShellSettings,
+    opened: std::time::Instant,
+    w: u32,
+    h: u32,
+    cap_w: f32,
+    slant_factor: f32,
+) -> iced::Element<'a, ()> {
+    let elapsed = opened.elapsed().as_millis() as f32;
+    let bar_h = settings.bar_height as f32;
+    let tooltip_h = (h as f32 - bar_h).max(0.0);
+    let drop_ms = settings.tooltip_drop_ms as f32;
+    let expand_ms = settings.tooltip_expand_ms as f32;
+    let pause_ms = settings.tooltip_pause_ms as f32;
+
+    let smooth = |t: f32| t * t * (3.0 - 2.0 * t);
+    let drop_t = (elapsed / drop_ms.max(1.0)).clamp(0.0, 1.0);
+    let expand_t = ((elapsed - drop_ms - pause_ms) / expand_ms.max(1.0)).clamp(0.0, 1.0);
+    let drop_e = smooth(drop_t);
+    let expand_e = smooth(expand_t);
+
+    let base_slant = theme.slant_width * slant_factor;
+    let final_slant = base_slant * (tooltip_h / bar_h.max(1.0));
+    let base_flat = (cap_w - base_slant).max(1.0);
+    let final_flat = (w as f32 - final_slant).max(1.0);
+
+    let current_h = drop_e * tooltip_h;
+    let current_slant = base_slant * (current_h / bar_h.max(1.0));
+    let current_flat = base_flat + (final_flat - base_flat) * expand_e;
+    let current_w = current_flat + current_slant;
+
+    let bg = crate::overlays::tooltip_engine::ParallelogramBg {
+        w: current_w,
+        h: current_h,
+        slant: current_slant,
+        slant_right: std::env::var("MBS_SLANT_L").map(|v| v == "R").unwrap_or(false), // false means left edge leans \, right edge leans \
+        background: theme.background,
+        border_color: theme.text,
+        border_width: theme.control_border_width,
+        frame: elapsed as u64,
+    };
+
+    let clipped = crate::overlays::tooltip_engine::clip_content(
+        content, current_w, current_h, true
+    );
+
+    let stacked: iced::Element<'a, ()> = iced::widget::Stack::new()
+        .push(iced::widget::pin(bg.view()).x(0.0).y(0.0))
+        .push(iced::widget::pin(clipped).x(0.0).y(0.0))
+        .into();
+
+    iced::Element::from(
+        iced::widget::container(stacked)
+            .width(iced::Length::Fixed(w as f32))
+            .height(iced::Length::Fixed(h as f32))
+            .clip(true)
+    )
+}
+
+/// Weather-specific content builder + calls the generic renderer.
+pub fn view_popup_content<'a>(
+    weather: &'a Option<WeatherData>,
+    settings: &'a ShellSettings,
+    theme: &'a ShellTheme,
+    opened: std::time::Instant,
+    w: u32,
+    h: u32,
+    cap_w: f32,
+    _slant_end: i32,
+) -> iced::Element<'a, ()> {
+    let line_count = weather.as_ref().map(|w| w.tooltip_lines.len().min(15)).unwrap_or(1);
+    let target_h = (line_count as f32 * 24.0 + 40.0).max(100.0);
+    let content_h = target_h + settings.bar_height as f32;
+    
+    let effective_h = h as f32;
+    let effective_target_h = (effective_h - settings.bar_height as f32).max(1.0);
+    
+    let bar_h = settings.bar_height as f32;
+    let full_slant = theme.slant_width * (effective_target_h / bar_h.max(1.0));
+
+    let mut col: iced::widget::Column<'_, ()> = iced::widget::column![].spacing(4);
+
+    if let Some(wx) = weather {
+        for (idx, line) in wx.tooltip_lines.iter().take(15).enumerate() {
+            let y_mid = 20.0 + idx as f32 * 24.0 + 12.0;
+            let text_widget = iced::widget::text(line.clone())
+                .size(16)
+                .color(theme.text)
+                .font(iced::Font::MONOSPACE)
+                .wrapping(iced::widget::text::Wrapping::None);
+
+            col = col.push(crate::overlays::weather_tooltip::slanted_row(
+                text_widget.into(), y_mid, effective_target_h, full_slant, false, 20.0, w as f32, 24.0
+            ));
+        }
+    } else {
+        let text_widget = iced::widget::text("Loading weather...").size(16).color(theme.muted);
+        col = col.push(crate::overlays::weather_tooltip::slanted_row(
+            text_widget.into(), 32.0, effective_target_h, full_slant, false, 20.0, w as f32, 24.0
+        ));
+    }
+
+    let content = iced::widget::container(col)
+        .padding(iced::Padding { top: 20.0, right: 0.0, bottom: 20.0, left: 0.0 });
+
+    render_tooltip_popup(content.into(), theme, settings, opened, w, effective_h as u32, cap_w, 1.0)
+}
+
+
+
+
+
+
+
+
+
+
+
+

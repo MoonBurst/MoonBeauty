@@ -38,6 +38,8 @@ pub struct App {
     gpu_list: Vec<GpuInfo>,
     selected_gpu: usize,
     anim_frame: u64,
+    settings: ShellSettings,
+    theme: ShellTheme,
 }
 
 #[allow(dead_code)]
@@ -81,13 +83,17 @@ impl App {
         eprintln!("[gpu-init] selected_gpu={} (from settings.gpu_selected_id={:?})",
             selected_gpu, s.gpu_selected_id);
 
+        let settings = ShellSettings::load();
+        let theme = ShellTheme::from_settings(&settings);
         let app = Self {
             opened: Instant::now(), target: target.clone(), data: None, grow_right,
             w, h, drop_ms, expand_ms, w_start, slant_l, slant_r, closing_at: None,
             search_query: String::new(),
             gpu_list,
             selected_gpu, anim_frame: 0,
-            };
+            settings,
+            theme,
+        };
         let task = if target == "cpu" {
             Task::perform(SystemCollector::collect_cpu(), |d| Message::Loaded(Data::Cpu(d)))
         } else if target == "gpu" {
@@ -179,16 +185,24 @@ impl App {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let settings = ShellSettings::load();
-        let theme = ShellTheme::from_settings(&settings);
+        let settings = &self.settings;
+        let theme = &self.theme;
+        let content_h = match &self.data {
+            Some(Data::Cpu(c)) => (c.top_procs.len().min(10) as f32 * 24.0) + 100.0 + settings.bar_height as f32,
+            Some(Data::Gpu(g)) => (g.top_procs.len().min(10) as f32 * 24.0) + 100.0 + settings.bar_height as f32,
+            Some(Data::Ram(r)) => (r.top_procs.len().min(10) as f32 * 24.0) + 100.0 + settings.bar_height as f32,
+            None => self.h as f32,
+        };
+        let effective_h = self.h as f32;
+
         let anim = if let Some(t) = self.closing_at {
             crate::overlays::tooltip_engine::compute_close(
-                t.elapsed().as_millis() as f32, self.w_start, self.w as f32, self.h as f32,
+                t.elapsed().as_millis() as f32, self.w_start, self.w as f32, effective_h,
                 theme.slant_width, settings.bar_height as f32, self.drop_ms,
             )
         } else {
             crate::overlays::tooltip_engine::compute(
-                self.opened.elapsed().as_millis() as f32, self.w_start, self.w as f32, self.h as f32,
+                self.opened.elapsed().as_millis() as f32, self.w_start, self.w as f32, effective_h,
                 theme.slant_width, settings.bar_height as f32, self.drop_ms, self.expand_ms,
             )
         };
@@ -201,8 +215,11 @@ impl App {
         };
         let content: Element<'_, Message> = self.build_content(&theme, &settings, anim.opacity);
         let clipped = crate::overlays::tooltip_engine::clip_content(content, anim.w, anim.h, self.grow_right);
-        let stacked: Element<'_, Message> = Stack::new().push(bg.view()).push(clipped).into();
-        crate::overlays::tooltip_engine::align_to_side(stacked, self.grow_right)
+        let stacked = iced::widget::container(Stack::new().push(bg.view()).push(clipped))
+            .width(Length::Fixed(anim.w))
+            .height(Length::Fixed(anim.h))
+            .clip(true);
+        crate::overlays::tooltip_engine::align_to_side(stacked.into(), self.grow_right)
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
@@ -666,17 +683,27 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
     
     let half_cap = (cap_w / 2.0) as i32;
-    let slant_px = s.slant_width as i32;
+    
+    // Dynamic alignment offset for the slanted corner + padding.
+
+    let adjust_left = s.tooltip_offset_left;
+    let adjust_right = s.tooltip_offset_right;
+
+    let adjust_left = s.tooltip_offset_left;
+    let adjust_right = s.tooltip_offset_right;
+    let adjust_left = s.tooltip_offset_left;
+    let adjust_right = s.tooltip_offset_right;
+
+    let adjust_left = s.tooltip_offset_left;
+    let adjust_right = s.tooltip_offset_right;
+
+    let adjust_left = s.tooltip_offset_left;
+    let adjust_right = s.tooltip_offset_right;
 
     let (anchor, margin) = if grow_right {
-        // Left side: left edge of tooltip binds to left edge of capsule
-        let left_edge = (cx - half_cap).max(0);
-        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, left_edge))
+        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, (cx - half_cap + adjust_left).max(0)))
     } else {
-        // Right side: right edge of tooltip binds to right edge of capsule.
-        // We subtract `slant_px` to account for the Parallelogram's inner slant.
-        let right_edge = sw - cx - half_cap - slant_px;
-        (Anchor::Top | Anchor::Right, (margin_top, right_edge.max(0), 0, 0))
+        (Anchor::Top | Anchor::Right, (margin_top, (sw - cx - half_cap + adjust_right).max(0), 0, 0))
     };
 
     let layer = LayerShellSettings {

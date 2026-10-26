@@ -151,16 +151,27 @@ impl SystemCollector {
     tokio::task::spawn_blocking(move || {
         let mut sys = sys_state().lock().unwrap();
 
-        // First refresh: establishes baseline
+        // Cheap: per-core CPU usage (reads /proc/stat, ~1-2ms)
         sys.refresh_cpu_usage();
-        sys.refresh_processes(ProcessesToUpdate::All);
 
-        // On the very first call we have no inter-poll gap, so sleep 250ms
-        // and refresh again. Subsequent calls get a fresh 2s delta from the
-        // last poll (whatever the app's poll interval is) so no sleep needed.
-        if is_first {
-            std::thread::sleep(std::time::Duration::from_millis(250));
-            sys.refresh_cpu_usage();
+        // Expensive: full process list. On a 250+ process system this reads
+        // ~1500 files per call. Throttle to 15s — the aggregate usage number
+        // is what matters every poll; the per-process breakdown is only
+        // surfaced in tooltips, which are fine with 15s freshness.
+        let should_refresh_procs = {
+            use std::sync::Mutex;
+            use std::time::Instant;
+            static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+            let mut g = LAST.lock().unwrap();
+            let refresh = g.map(|t| t.elapsed().as_secs() >= 15).unwrap_or(true);
+            if refresh { *g = Some(Instant::now()); }
+            refresh
+        };
+        if should_refresh_procs || is_first {
+            if is_first {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                sys.refresh_cpu_usage();
+            }
             sys.refresh_processes(ProcessesToUpdate::All);
         }
 
@@ -293,7 +304,22 @@ impl SystemCollector {
     tokio::task::spawn_blocking(|| {
         let mut sys = sys_state().lock().unwrap();
         sys.refresh_memory();
-        sys.refresh_processes(ProcessesToUpdate::All);
+
+        // Same 15s throttle as collect_cpu — the process list is the
+        // expensive part. refresh_memory() (which reads /proc/meminfo) is
+        // cheap and stays at poll rate.
+        let should_refresh_procs = {
+            use std::sync::Mutex;
+            use std::time::Instant;
+            static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+            let mut g = LAST.lock().unwrap();
+            let refresh = g.map(|t| t.elapsed().as_secs() >= 15).unwrap_or(true);
+            if refresh { *g = Some(Instant::now()); }
+            refresh
+        };
+        if should_refresh_procs {
+            sys.refresh_processes(ProcessesToUpdate::All);
+        }
 
         let total_gib = sys.total_memory() as f32 / (1024.0 * 1024.0 * 1024.0);
         let avail_gib = sys.available_memory() as f32 / (1024.0 * 1024.0 * 1024.0);
@@ -469,8 +495,28 @@ impl SystemCollector {
     }
 
     pub fn get_top_net_procs() -> Vec<ProcessItem> {
+        // Cached for 15s. The `ss` subprocess takes 20-50ms and this is
+        // called synchronously on the UI thread every hardware tick — which
+        // is 2s by default. Throttling removes real UI jank.
+        use std::sync::{Mutex, OnceLock};
+        use std::time::Instant;
+        static CACHE: OnceLock<Mutex<(Option<Instant>, Vec<ProcessItem>)>> = OnceLock::new();
+        let cache = CACHE.get_or_init(|| Mutex::new((None, Vec::new())));
+
+        {
+            let g = cache.lock().unwrap();
+            if let Some(t) = g.0 {
+                if t.elapsed().as_secs() < 15 {
+                    return g.1.clone();
+                }
+            }
+        }
+
         let out = std::process::Command::new("ss").args(["-tunap"]).output();
-        let Ok(out) = out else { return Vec::new(); };
+        let Ok(out) = out else {
+            // On transient failure, return the previous result rather than empty.
+            return cache.lock().unwrap().1.clone();
+        };
         let text = String::from_utf8_lossy(&out.stdout);
         let mut procs = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -495,6 +541,12 @@ impl SystemCollector {
             }
         }
         procs.truncate(15);
+
+        {
+            let mut g = cache.lock().unwrap();
+            g.0 = Some(Instant::now());
+            g.1 = procs.clone();
+        }
         procs
     }
 
@@ -610,8 +662,30 @@ impl SystemCollector {
     /// which does not exist on many modern kernels. Also falls back to
     /// nvidia-smi compute apps for NVIDIA GPUs.
     async fn get_top_gpu_processes(card_id: &str) -> Vec<ProcessItem> {
+        // Cached for 15s per card. Reading /proc/*/fdinfo for every process
+        // is heavy I/O — on a busy system that's 200+ fdinfo reads per
+        // hardware poll (every 2s by default). The GPU process list barely
+        // changes on a 2s cadence, so 15s is a huge accuracy-preserving win.
+        use std::sync::{Mutex, OnceLock};
+        use std::time::Instant;
+        use std::collections::HashMap;
+        static CACHE: OnceLock<Mutex<HashMap<String, (Instant, Vec<ProcessItem>)>>> = OnceLock::new();
+        let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+        {
+            let g = cache.lock().unwrap();
+            if let Some((t, items)) = g.get(card_id) {
+                if t.elapsed().as_secs() < 15 {
+                    return items.clone();
+                }
+            }
+        }
+
         if card_id.starts_with("nvidia") {
-            return Self::get_nvidia_compute_procs().await;
+            let procs = Self::get_nvidia_compute_procs().await;
+            let mut g = cache.lock().unwrap();
+            g.insert(card_id.to_string(), (Instant::now(), procs.clone()));
+            return procs;
         }
 
         // Resolve this card's PCI address. Try the symlink first (most reliable),
@@ -629,10 +703,14 @@ impl SystemCollector {
                     })
             });
         let Some(pci_addr) = pci_addr else {
-            eprintln!("[gpu-procs] {} has no PCI address", card_id);
+            if std::env::var_os("MBS_DEBUG").is_some() {
+                eprintln!("[gpu-procs] {} has no PCI address", card_id);
+            }
             return Vec::new();
         };
-        eprintln!("[gpu-procs] scanning for pdev={}", pci_addr);
+        if std::env::var_os("MBS_DEBUG").is_some() {
+            eprintln!("[gpu-procs] scanning for pdev={}", pci_addr);
+        }
 
         let Ok(proc_dir) = fs::read_dir("/proc") else {
             return Vec::new();
@@ -715,14 +793,16 @@ impl SystemCollector {
         let mut procs: Vec<_> = users.into_iter().collect();
         procs.sort_by_key(|(_, (_, mem))| std::cmp::Reverse(*mem));
 
-        eprintln!(
-            "[gpu-procs] found {} clients on {}, vram_reported={}",
-            procs.len(),
-            pci_addr,
-            any_vram_reported
-        );
+        if std::env::var_os("MBS_DEBUG").is_some() {
+            eprintln!(
+                "[gpu-procs] found {} clients on {}, vram_reported={}",
+                procs.len(),
+                pci_addr,
+                any_vram_reported
+            );
+        }
 
-        procs
+        let result: Vec<ProcessItem> = procs
             .into_iter()
             .take(15)
             .map(|(pid, (name, kib))| ProcessItem {
@@ -735,7 +815,13 @@ impl SystemCollector {
                 },
                 is_highlight: false,
             })
-            .collect()
+            .collect();
+
+        {
+            let mut g = cache.lock().unwrap();
+            g.insert(card_id.to_string(), (Instant::now(), result.clone()));
+        }
+        result
     }
 
     /// Enumerate NVIDIA compute-app processes via nvidia-smi.

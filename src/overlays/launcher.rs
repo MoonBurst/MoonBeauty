@@ -52,6 +52,20 @@ impl Default for AppLauncher {
 }
 
 impl AppLauncher {
+    /// Cheap constructor — no scan. Used by processes that never open the
+    /// launcher (notif-surface). Saves ~200 file reads per startup.
+    pub fn new_empty() -> Self {
+        Self {
+            search_query: String::new(),
+            all_apps: Vec::new(),
+            filtered_apps: Vec::new(),
+            focus_requested: false,
+            selected_index: 0,
+            dict_cache: std::collections::HashMap::new(),
+            dict_pending: None,
+        }
+    }
+
     pub fn new() -> Self {
         let mut all_apps = vec![
             AppEntry { name: "Settings & Options".into(), exec: "internal:settings".into(), icon: "⚙".into(), icon_path: None },
@@ -580,7 +594,7 @@ impl AppLauncher {
         apps.sort_by_key(|a| a.name.to_lowercase());
         let with_icons = apps.iter().filter(|a| a.icon_path.is_some()).count();
 
-        if debug || total_files != 63 {
+        if (debug || std::env::var_os("MBS_DEBUG").is_some()) && total_files != 63 {
             eprintln!(
                 "[launcher] {} .desktop files across {} dirs, {} hidden, {} tryExec-missing, {} de-filtered, {} apps, {} with icons",
                 total_files, dirs.len(), hidden, no_exec, de_filtered, apps.len(), with_icons

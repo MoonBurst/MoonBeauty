@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
-use lettre::message::{header::ContentType, Mailbox};
+use lettre::message::Mailbox;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use lettre::transport::smtp::authentication::Credentials;
 
@@ -282,10 +282,10 @@ pub fn save_index(folder: &str, envs: &[NativeEnvelope]) {
 }
 
 pub async fn fetch_envelopes(folder: &str) -> Result<Vec<NativeEnvelope>, String> {
-    eprintln!("[sync] fetch_envelopes called for {}", folder);
+    if std::env::var_os("MBS_DEBUG").is_some() { eprintln!("[sync] fetch_envelopes called for {}", folder); }
     let cached = load_index(folder);
     if !cached.is_empty() {
-        eprintln!("[sync] loaded {} emails from cache", cached.len());
+        if std::env::var_os("MBS_DEBUG").is_some() { eprintln!("[sync] loaded {} emails from cache", cached.len()); }
         return Ok(cached);
     }
     let envs = fetch_from_network(folder).await?;
@@ -294,7 +294,7 @@ pub async fn fetch_envelopes(folder: &str) -> Result<Vec<NativeEnvelope>, String
 }
 
 pub async fn fetch_from_network(folder: &str) -> Result<Vec<NativeEnvelope>, String> {
-    eprintln!("[sync] fetch_from_network called for {}", folder);
+    if std::env::var_os("MBS_DEBUG").is_some() { eprintln!("[sync] fetch_from_network called for {}", folder); }
     let cfg = load_config();
     let folder = folder.to_string();
     let res = tokio::task::spawn_blocking(move || {
@@ -361,7 +361,7 @@ pub async fn sync_bodies_background(folder: String) {
     let _lock_file = match std::fs::OpenOptions::new().write(true).create_new(true).open(&lock_path) {
         Ok(f) => f,
         Err(_) => {
-            eprintln!("[sync] another process is already syncing, skipping duplicate spawn.");
+            if std::env::var_os("MBS_DEBUG").is_some() { eprintln!("[sync] another process is already syncing, skipping duplicate spawn."); }
             return;
         }
     };
@@ -379,11 +379,11 @@ pub async fn sync_bodies_background(folder: String) {
     if envs.is_empty() {
         return;
     }
-    eprintln!("[sync] starting background sync for {} emails in {}", envs.len(), folder);
+    if std::env::var_os("MBS_DEBUG").is_some() { eprintln!("[sync] starting background sync for {} emails in {}", envs.len(), folder); }
     let cfg = load_config();
     
     tokio::task::spawn_blocking(move || {
-        eprintln!("[sync] connecting to IMAP...");
+        if std::env::var_os("MBS_DEBUG").is_some() { eprintln!("[sync] connecting to IMAP..."); }
         let pass = resolve_password(&cfg);
         let tls = native_tls::TlsConnector::builder().build().unwrap();
         let client = imap::connect((cfg.imap_host.as_str(), cfg.imap_port), cfg.imap_host.as_str(), &tls).unwrap();
@@ -404,14 +404,14 @@ pub async fn sync_bodies_background(folder: String) {
                         if let Some(body) = fetch.body() {
                             let _ = std::fs::write(&cache_file, body);
                             count += 1;
-                            eprintln!("[sync] downloaded {}/{}: {}", count, total, env.id);
+                            if std::env::var_os("MBS_DEBUG").is_some() { eprintln!("[sync] downloaded {}/{}: {}", count, total, env.id); }
                         }
                     }
                 }
             }
         }
         let _ = session.logout();
-        eprintln!("[sync] background sync finished for {}", folder);
+        if std::env::var_os("MBS_DEBUG").is_some() { eprintln!("[sync] background sync finished for {}", folder); }
     }).await.unwrap_or_else(|e| eprintln!("[sync] task failed: {}", e));
 }
 
@@ -480,11 +480,19 @@ pub async fn read_message(id: &str, folder: &str) -> ParsedEmail {
                     .and_then(|c| c.subtype())
                     .unwrap_or("png");
                 let default_name = format!("image_{}.{}", i, subtype);
-                let name_str = part.attachment_name().unwrap_or(&default_name);
-                let img_path = img_dir.join(format!("{}_{}", id, name_str));
+                let raw_name = part.attachment_name().unwrap_or(&default_name);
+                // Attacker-controlled from Content-Disposition. Keep only the
+                // basename to block `../../foo` path traversal.
+                let safe_name: String = std::path::Path::new(raw_name)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.trim_start_matches('.').to_string())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| default_name.clone());
+                let img_path = img_dir.join(format!("{}_{}", id, safe_name));
                 let _ = std::fs::write(&img_path, part.contents());
                 parsed_email.images.push(img_path);
-                eprintln!("[email-debug] saved image: {} ({} bytes)", name_str, part.contents().len());
+                eprintln!("[email-debug] saved image: {} ({} bytes)", safe_name, part.contents().len());
             }
         }
 

@@ -8,8 +8,43 @@ pub struct AudioStatus {
 
 pub struct AudioBackend;
 
+fn cached(which: &'static str) -> Option<AudioStatus> {
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Instant;
+    use std::collections::HashMap;
+    static CACHE: OnceLock<Mutex<HashMap<&'static str, (Instant, AudioStatus)>>> = OnceLock::new();
+    let c = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let g = c.lock().unwrap();
+    g.get(which)
+        .filter(|(t, _)| t.elapsed().as_secs() < 5)
+        .map(|(_, s)| s.clone())
+}
+
+fn store(which: &'static str, status: AudioStatus) {
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Instant;
+    use std::collections::HashMap;
+    static CACHE: OnceLock<Mutex<HashMap<&'static str, (Instant, AudioStatus)>>> = OnceLock::new();
+    let c = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    c.lock().unwrap().insert(which, (Instant::now(), status));
+}
+
 impl AudioBackend {
     pub async fn get_sink() -> AudioStatus {
+        if let Some(s) = cached("sink") { return s; }
+        let s = Self::get_sink_uncached().await;
+        store("sink", s.clone());
+        s
+    }
+
+    pub async fn get_source() -> AudioStatus {
+        if let Some(s) = cached("source") { return s; }
+        let s = Self::get_source_uncached().await;
+        store("source", s.clone());
+        s
+    }
+
+    async fn get_sink_uncached() -> AudioStatus {
         if let Ok(out) = Command::new("wpctl")
             .args(["get-volume", "@DEFAULT_AUDIO_SINK@"])
             .output()
@@ -46,7 +81,7 @@ impl AudioBackend {
         AudioStatus::default()
     }
 
-    pub async fn get_source() -> AudioStatus {
+    async fn get_source_uncached() -> AudioStatus {
         if let Ok(out) = Command::new("wpctl")
             .args(["get-volume", "@DEFAULT_AUDIO_SOURCE@"])
             .output()

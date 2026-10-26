@@ -226,7 +226,7 @@ impl AnnotatorOverlay {
     }
 
     fn on_press(&mut self, p: Point) {
-        eprintln!("[mbs-child] on_press ({:.0},{:.0}) tool={:?}", p.x, p.y, self.tool);
+        crate::dbg_log!("[mbs-child] on_press ({:.0},{:.0}) tool={:?}", p.x, p.y, self.tool);
         
         // If already editing text, check if click is inside the box (for drag)
         if let Some(idx) = self.text_editing {
@@ -249,7 +249,7 @@ impl AnnotatorOverlay {
                 if let Some(a) = self.annotations.get(idx) {
                     self.text_drag_offset = Point::new(p.x - a.start.x, p.y - a.start.y);
                 }
-                eprintln!("[mbs-child] Text drag started, offset=({:.0},{:.0})", self.text_drag_offset.x, self.text_drag_offset.y);
+                crate::dbg_log!("[mbs-child] Text drag started, offset=({:.0},{:.0})", self.text_drag_offset.x, self.text_drag_offset.y);
                 return;
             }
 
@@ -266,7 +266,7 @@ impl AnnotatorOverlay {
 
         // Text tool doesn't use drag; it opens a multiline editor at the click position
         if self.tool == Tool::Text {
-            eprintln!("[mbs-child] Text tool pressed at ({:.0},{:.0})", p.x, p.y);
+            crate::dbg_log!("[mbs-child] Text tool pressed at ({:.0},{:.0})", p.x, p.y);
                         // Hit-test existing text annotations (newest first = topmost)
             for idx in (0..self.annotations.len()).rev() {
                 let a = &self.annotations[idx];
@@ -280,7 +280,7 @@ impl AnnotatorOverlay {
                 let bx = a.start.x - pad;
                 let by = a.start.y - pad;
                 if p.x >= bx && p.x <= bx + bw && p.y >= by && p.y <= by + bh {
-                    eprintln!("[mbs-child] Resuming text annotation idx={}", idx);
+                    crate::dbg_log!("[mbs-child] Resuming text annotation idx={}", idx);
                     self.text_buffer = a.text.clone();
                     self.text_font_size = a.font_size;
                     self.text_edit_original = Some(a.text.clone());
@@ -306,7 +306,7 @@ impl AnnotatorOverlay {
             self.text_buffer = String::new();
             self.text_font_size = 20.0;
             self.text_editing = Some(idx);
-            eprintln!("[mbs-child] Text editing started, idx={}", idx);
+            crate::dbg_log!("[mbs-child] Text editing started, idx={}", idx);
             return;
         }
         
@@ -344,8 +344,8 @@ impl AnnotatorOverlay {
             self.text_dragging = false;
             return;
         }
-        eprintln!("[mbs-child] on_release ({:.0},{:.0}) in_progress={}", p.x, p.y, self.in_progress.is_some());
-        eprintln!("[mbs-child] on_release at ({:.0},{:.0}) — in_progress={}",
+        crate::dbg_log!("[mbs-child] on_release ({:.0},{:.0}) in_progress={}", p.x, p.y, self.in_progress.is_some());
+        crate::dbg_log!("[mbs-child] on_release at ({:.0},{:.0}) — in_progress={}",
             p.x, p.y, self.in_progress.is_some());
         self.drawing = false;
         if let Some(mut a) = self.in_progress.take() {
@@ -356,10 +356,10 @@ impl AnnotatorOverlay {
                 _ => (a.end.x - a.start.x).abs() > 0.5 || (a.end.y - a.start.y).abs() > 0.5,
             };
             if ok {
-                eprintln!("[mbs-child] annotation ACCEPTED: {} total", self.annotations.len() + 1);
+                crate::dbg_log!("[mbs-child] annotation ACCEPTED: {} total", self.annotations.len() + 1);
                 self.annotations.push(a);
             } else {
-                eprintln!("[mbs-child] annotation REJECTED (too small: dx={:.2} dy={:.2})",
+                crate::dbg_log!("[mbs-child] annotation REJECTED (too small: dx={:.2} dy={:.2})",
                     (a.end.x - a.start.x).abs(), (a.end.y - a.start.y).abs());
             }
         }
