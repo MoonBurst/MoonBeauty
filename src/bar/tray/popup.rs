@@ -8,18 +8,10 @@ use std::time::Instant;
 use crate::libraries::config::theme::ShellTheme;
 use crate::libraries::config::ShellSettings;
 use crate::libraries::style::shape_box::SlantSide;
+use super::watcher::{TrayItem, fetch_tray_items};
 
 const W_START: f32 = 100.0;
 const AUTO_MS: u128 = 25_000;
-
-#[derive(Debug, Clone)]
-pub struct TrayItem {
-    pub bus: String,
-    pub path: String,
-    pub id: String,
-    pub title: String,
-    pub icon_path: Option<String>,
-}
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -246,81 +238,11 @@ impl App {
     fn theme(&self) -> Theme { Theme::Dark }
 }
 
-fn parse_registered(s: &str) -> Option<(String, String)> {
-    if let Some(idx) = s.find('/') { Some((s[..idx].to_string(), s[idx..].to_string())) }
-    else if !s.is_empty() { Some((s.to_string(), "/StatusNotifierItem".to_string())) }
-    else { None }
-}
-
-async fn fetch_tray_items() -> Vec<TrayItem> {
-    let conn = match zbus::Connection::session().await { Ok(c) => c, Err(_) => return Vec::new() };
-    let watcher = match zbus::Proxy::new(&conn, "org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher", "org.kde.StatusNotifierWatcher").await { Ok(p) => p, Err(_) => return Vec::new() };
-    let raw_items: Vec<String> = match watcher.get_property("RegisteredStatusNotifierItems").await { Ok(v) => v, Err(_) => return Vec::new() };
-
-    let mut out = Vec::new();
-    for raw in raw_items {
-        let Some((bus, path)) = parse_registered(&raw) else { continue };
-        let proxy = match zbus::Proxy::new(&conn, bus.as_str(), path.as_str(), "org.kde.StatusNotifierItem").await { Ok(p) => p, Err(_) => continue };
-
-        let id: String = proxy.get_property("Id").await.unwrap_or_default();
-        let title: String = proxy.get_property("Title").await.unwrap_or_default();
-        let status: String = proxy.get_property("Status").await.unwrap_or_default();
-        if status.eq_ignore_ascii_case("Passive") { continue; }
-
-        let icon_name: String = proxy.get_property("IconName").await.unwrap_or_default();
-        let mut icon_path = if !icon_name.is_empty() { resolve_icon(&icon_name) } else { None };
-        if icon_path.is_none() {
-            if let Ok(pixmaps) = proxy.get_property::<Vec<(i32, i32, Vec<u8>)>>("IconPixmap").await {
-                if let Some((w, h, data)) = pixmaps.into_iter().max_by_key(|(w, h, _)| (*w, *h)) {
-                    icon_path = save_pixmap(&id, w.max(0) as u32, h.max(0) as u32, &data);
-                }
-            }
-        }
-        out.push(TrayItem { bus, path, id, title, icon_path });
-    }
-    out
-}
-
 async fn call_sni_method(bus: &str, path: &str, method: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let conn = zbus::Connection::session().await?;
     let proxy = zbus::Proxy::new(&conn, bus, path, "org.kde.StatusNotifierItem").await?;
     proxy.call_method(method, &(0i32, 0i32)).await?;
     Ok(())
-}
-
-fn resolve_icon(icon_name: &str) -> Option<String> {
-    use std::path::Path;
-    if icon_name.is_empty() { return None; }
-    if icon_name.starts_with('/') { return if Path::new(icon_name).exists() { Some(icon_name.to_string()) } else { None }; }
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-    let roots = [
-        PathBuf::from("/run/current-system/sw/share/icons/hicolor"), PathBuf::from("/usr/share/icons/hicolor"),
-        home.join(".local/share/icons/hicolor"), home.join(".nix-profile/share/icons/hicolor"),
-    ];
-    let sizes = ["48x48", "64x64", "128x128", "256x256", "512x512", "scalable", "symbolic"];
-    let exts = ["png", "svg", "xpm"];
-    for root in &roots {
-        for size in &sizes {
-            for ext in &exts {
-                let p = root.join(size).join("apps").join(format!("{}.{}", icon_name, ext));
-                if p.exists() { return Some(p.to_string_lossy().into_owned()); }
-            }
-        }
-    }
-    None
-}
-
-fn save_pixmap(id: &str, w: u32, h: u32, data: &[u8]) -> Option<String> {
-    if w == 0 || h == 0 || data.len() != (w as usize * h as usize * 4) { return None; }
-    let mut rgba = Vec::with_capacity(data.len());
-    for chunk in data.as_chunks::<4>().0 {
-        rgba.push(chunk[1]); rgba.push(chunk[2]); rgba.push(chunk[3]); rgba.push(chunk[0]);
-    }
-    let img: image::RgbaImage = image::ImageBuffer::from_raw(w, h, rgba)?;
-    let safe: String = id.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
-    let path = std::env::temp_dir().join(format!("mbs-tray-{}.png", safe));
-    img.save(&path).ok()?;
-    Some(path.to_string_lossy().into_owned())
 }
 
 pub fn run() -> Result<(), iced_layershell::Error> {
