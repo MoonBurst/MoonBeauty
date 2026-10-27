@@ -551,7 +551,13 @@ impl ShellSettings {
 
     pub fn load() -> Self {
         let path = Self::config_path();
-        eprintln!("[settings] config_path = {:?} exists={}", path, path.exists());
+        // Log only under explicit debug — LockscreenOverlay::view calls
+        // this every frame, and 3 lock children × 60 fps = 180 log lines
+        // per second floods the log past anything useful. Gate behind
+        // MBS_SETTINGS_DEBUG so diagnostics can still turn it on.
+        if std::env::var_os("MBS_SETTINGS_DEBUG").is_some() {
+            eprintln!("[settings] config_path = {:?} exists={}", path, path.exists());
+        }
         if path.exists() {
             if let Ok(content) = fs::read_to_string(&path) {
                 if let Ok(mut settings) = serde_json::from_str::<ShellSettings>(&content) {

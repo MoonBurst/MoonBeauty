@@ -685,6 +685,53 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     .run()
 }
 
+fn handle_lock_keypress(event: iced::Event, status: iced::event::Status, _window: iced::window::Id) -> Option<Message> {
+    let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+        modified_key, text, ..
+    }) = event
+    else {
+        return None;
+    };
+    if status == iced::event::Status::Captured {
+        return None;
+    }
+
+    use iced::keyboard::{Key, key::Named};
+
+    // Named control keys FIRST. Enter's `text` is Some("\r"), which is a
+    // control char — must check `modified_key` before the printable filter
+    // below, or Enter gets rejected and Submit is never sent to the
+    // coordinator (which is exactly why the lockscreen stayed locked).
+    if let Key::Named(named) = &modified_key {
+        if matches!(named, Named::Enter | Named::Backspace | Named::Tab) {
+            if std::env::var_os("MBS_LOCK_DEBUG").is_some() {
+                eprintln!("[lock-key] named: {:?}", named);
+            }
+            return Some(Message::Lock(LockMessage::KeyPress(modified_key)));
+        }
+    }
+
+    // Printable chars: prefer `text` (respects IME, keyboard layout, and
+    // shift/caps). Filter control chars so stray \r\n don't pollute.
+    if let Some(t) = text {
+        if !t.is_empty() && !t.chars().any(|c| c.is_control()) {
+            if std::env::var_os("MBS_LOCK_DEBUG").is_some() {
+                eprintln!("[lock-key] text: {:?}", t);
+            }
+            return Some(Message::Lock(LockMessage::KeyPress(Key::Character(t))));
+        }
+    }
+
+    // Fallback: modified_key for chars where text is absent.
+    if let Key::Character(c) = modified_key {
+        if !c.is_empty() {
+            return Some(Message::Lock(LockMessage::KeyPress(Key::Character(c))));
+        }
+    }
+
+    None
+}
+
 fn handle_email_keypress(event: iced::Event, status: iced::event::Status, _window: iced::window::Id) -> Option<Message> {
     let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else { return None; };
     use iced::keyboard::{Key, key::Named};
@@ -754,7 +801,10 @@ fn handle_annotator_text_input(
     status: iced::event::Status,
     _window: iced::window::Id,
 ) -> Option<Message> {
-    let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
+    let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+        modified_key, text, modifiers, ..
+    }) = event
+    else {
         return None;
     };
     use iced::keyboard::{Key, key::Named};
@@ -762,23 +812,44 @@ fn handle_annotator_text_input(
     if modifiers.control() || modifiers.alt() || modifiers.logo() {
         return None;
     }
-
     if status == iced::event::Status::Captured {
         return None;
     }
 
-    match key {
-        Key::Character(s) if !s.is_empty() => {
-            Some(Message::Annotator(AnnotatorMessage::CharacterInput(s.to_string())))
+    // Named keys first (Enter's `text` is Some("\r"), a control char —
+    // must be intercepted here before the printable filter below).
+    if let Key::Named(named) = &modified_key {
+        match named {
+            Named::Enter => {
+                return Some(Message::Annotator(AnnotatorMessage::NewLinePressed));
+            }
+            Named::Backspace => {
+                return Some(Message::Annotator(AnnotatorMessage::BackspacePressed));
+            }
+            _ => {}
         }
-        Key::Named(Named::Backspace) => {
-            Some(Message::Annotator(AnnotatorMessage::BackspacePressed))
-        }
-        Key::Named(Named::Enter) => {
-            Some(Message::Annotator(AnnotatorMessage::NewLinePressed))
-        }
-        _ => None,
     }
+
+    // Printable: prefer `text` (respects IME, layout, shift/caps). Convert
+    // SmolStr → String because AnnotatorMessage::CharacterInput takes String.
+    if let Some(t) = text {
+        if !t.is_empty() && !t.chars().any(|c| c.is_control()) {
+            return Some(Message::Annotator(AnnotatorMessage::CharacterInput(
+                t.to_string(),
+            )));
+        }
+    }
+
+    // Fallback: modified_key.
+    if let Key::Character(c) = modified_key {
+        if !c.is_empty() {
+            return Some(Message::Annotator(AnnotatorMessage::CharacterInput(
+                c.to_string(),
+            )));
+        }
+    }
+
+    None
 }
 
 #[derive(Debug, Clone)]
@@ -831,6 +902,12 @@ pub enum Message {
     /// click target shrinks to just the visible toasts. Everything else
     /// (the empty area around/above/below toasts) becomes pass-through.
     SetToastInputRegion(Vec<(i32, i32, i32, i32)>),
+    /// Fires from the 500ms subscription. If `standalone_child` is
+    /// Lockscreen and has exited (TTY switch, panic, SIGKILL), respawn
+    /// it immediately. Lockscreen must NEVER be absent — a dead lock is
+    /// an unlocked screen. Runs fast (500ms) so the worst-case window
+    /// between crash and respawn is 500ms + child boot (~300ms).
+    CheckLockscreenAlive,
 }
 
 impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message {
@@ -911,6 +988,12 @@ pub struct MoonBeautyShellApp {
 
     last_cursor_x: f32,
     last_cursor_time: std::time::Instant,
+    /// Timestamp of the previous CheckLockscreenAlive tick. If a tick
+    /// fires more than ~2s after the previous one, the session was
+    /// paused (TTY switch, suspend, hibernate). In that case the lock
+    /// child surfaces are likely stale (sway drops layer surfaces on
+    /// output detach without telling the client), so force-respawn.
+    last_lockscreen_check: std::time::Instant,
     /// Last observed active-toast count. Changes trigger a fresh
     /// SetToastInputRegion emit so the click target tracks the toasts.
     last_toast_count: usize,
@@ -987,7 +1070,17 @@ impl MoonBeautyShellApp {
     }
 
     fn kill_standalone(&mut self) {
-        if let Some((_, mut child)) = self.standalone_child.take() {
+        if let Some((target, mut child)) = self.standalone_child.take() {
+            // For lockscreen, the coordinator normally kills its own
+            // children on clean exit — but SIGKILL bypasses that path,
+            // leaving orphan `--lockscreen-instance` children holding
+            // dead sockets. Explicitly pkill them so the fresh coordinator
+            // binds cleanly without competing for the same outputs.
+            if matches!(target, OverlayTarget::Lockscreen) {
+                let _ = std::process::Command::new("pkill")
+                    .args(["-KILL", "-f", "--", "--lockscreen-instance"])
+                    .status();
+            }
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -1009,7 +1102,10 @@ impl MoonBeautyShellApp {
         if let Some(of) = stdout_file { cmd.stdout(of); }
 
         match cmd.spawn() {
-            Ok(c) => self.standalone_child = Some((target, c)),
+            Ok(c) => {
+                eprintln!("[ipc] spawned {:?} pid={} (log: {})", target, c.id(), log_path);
+                self.standalone_child = Some((target, c));
+            }
             Err(e) => eprintln!("[ipc] spawn {:?} failed: {e}", target),
         }
     }
@@ -1184,6 +1280,7 @@ impl MoonBeautyShellApp {
             last_cursor_time: std::time::Instant::now() - std::time::Duration::from_secs(30),
             last_toast_count: 0,
             last_active_pending_written: None,
+            last_lockscreen_check: std::time::Instant::now(),
         };
 
         let mut init_tasks = vec![
@@ -1530,6 +1627,12 @@ impl MoonBeautyShellApp {
                 return iced::widget::operation::focus(id).map(Message::Email);
             }
             Message::TickEmailSync => {
+                // Only the primary bar and the standalone email overlay
+                // sync IMAP. The notif-surface doesn't need email data and
+                // duplicating the sync doubles IMAP traffic + log noise.
+                if self.is_notif_surface {
+                    return Command::none();
+                }
                 if moon_beauty_shell::backend::email_client::config_exists() {
                     eprintln!("[sync] Boot/Timer triggered email sync");
                     let folder = "INBOX".to_string();
@@ -1640,10 +1743,40 @@ impl MoonBeautyShellApp {
                     // layer is KeyboardInteractivity::None, so in-bar overlays
                     // cannot receive keystrokes.
                     eprintln!("[ipc] toggle {:?} (standalone)", target);
-                    self.toggle_standalone(target);
+
+                    // SECURITY: the lockscreen must NEVER be unlockable via
+                    // IPC. Before this guard, two rapid Toggle(Lockscreen)
+                    // calls spawn-then-kill (200ms+ desktop-visible window),
+                    // and any local script could dismiss the lock by sending
+                    // two toggles. Lockscreen is now idempotent-spawn: IPC
+                    // can spawn it, but only password auth removes it.
+                    if matches!(target, OverlayTarget::Lockscreen) {
+                        if let Some(OverlayTarget::Lockscreen) = self.standalone_running() {
+                            eprintln!(
+                                "[ipc] lockscreen already active; ignoring duplicate toggle"
+                            );
+                            return Command::none();
+                        }
+                        eprintln!("[ipc] lockscreen spawn (cannot be toggled off via IPC)");
+                        self.spawn_standalone(OverlayTarget::Lockscreen);
+                    } else {
+                        self.toggle_standalone(target);
+                    }
                 }
                 IpcCommand::Open(target, arg) => {
                     if matches!(target, OverlayTarget::Launcher | OverlayTarget::Clipboard | OverlayTarget::NotificationsHistory | OverlayTarget::Settings | OverlayTarget::Todo | OverlayTarget::Notes | OverlayTarget::Unicode) {
+                        self.spawn_standalone(target);
+                    } else if matches!(target, OverlayTarget::Lockscreen) {
+                        // Lockscreen MUST be a standalone process so it can
+                        // spawn the multi-monitor coordinator. Idempotent: if
+                        // it's already active, ignore. Respawn = kill+spawn =
+                        // unlocked window. Only auth success removes the lock.
+                        if let Some(OverlayTarget::Lockscreen) = self.standalone_running() {
+                            eprintln!(
+                                "[ipc] lockscreen already active; ignoring duplicate open"
+                            );
+                            return Command::none();
+                        }
                         self.spawn_standalone(target);
                     } else if matches!(target, OverlayTarget::Annotator) {
                         // Annotator needs fullscreen + exclusive keyboard, which only
@@ -3173,6 +3306,60 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                 self.active_overlay = None;
             }
             
+            Message::CheckLockscreenAlive => {
+                // Only the primary bar watches the lock.
+                if self.is_notif_surface || self.is_standalone {
+                    return Command::none();
+                }
+
+                // Measure pause BEFORE anything else. If a tick fires >2s
+                // after the previous one, the session was suspended (TTY
+                // switch, suspend, hibernate). Layer surfaces held by the
+                // lock children are dropped by sway on output detach
+                // WITHOUT sending Closed to the client — from the child's
+                // perspective nothing happened, but its wl_surface is no
+                // longer composited and keyboard grab is gone. Detect via
+                // elapsed-time gap and force a full respawn.
+                let now = std::time::Instant::now();
+                let since_last = now.saturating_duration_since(self.last_lockscreen_check);
+                self.last_lockscreen_check = now;
+
+                let was_lockscreen = matches!(
+                    self.standalone_child.as_ref().map(|(t, _)| t),
+                    Some(OverlayTarget::Lockscreen)
+                );
+                if !was_lockscreen {
+                    return Command::none();
+                }
+
+                if since_last > std::time::Duration::from_millis(2000) {
+                    eprintln!(
+                        "[lockscreen-watchdog] session was paused ({:?}); forcing lock respawn",
+                        since_last
+                    );
+                    self.kill_standalone();
+                    self.spawn_standalone(OverlayTarget::Lockscreen);
+                    return Command::none();
+                }
+
+                // Also respawn if the coordinator actually exited.
+                let exited = match self.standalone_child.as_mut() {
+                    Some((_, child)) => {
+                        matches!(child.try_wait(), Ok(Some(_)) | Err(_))
+                    }
+                    None => true,
+                };
+                if !exited {
+                    return Command::none();
+                }
+
+                eprintln!(
+                    "[lockscreen-watchdog] coordinator dead; respawning immediately"
+                );
+                self.standalone_child = None;
+                self.spawn_standalone(OverlayTarget::Lockscreen);
+                return Command::none();
+            }
             Message::Noop => {}
             Message::SetToastInputRegion(_) => {
                 // Intercepted by `try_into` — never reaches update.
@@ -3462,7 +3649,7 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
         };
 
         let lock_key_sub = if matches!(self.active_overlay, Some(OverlayTarget::Lockscreen)) {
-            iced::event::listen_with(handle_email_keypress)
+            iced::event::listen_with(handle_lock_keypress)
         } else {
             iced::Subscription::none()
         };
@@ -3550,6 +3737,18 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                 .map(|_| Message::PollIpc)
         };
 
+        // Lockscreen watchdog: 500ms cadence. Combined with the
+        // coordinator's own 200ms child-watchdog, the two together
+        // mean the *screen is locked* or *will be locked within 800ms*
+        // under any crash scenario. Not bulletproof, but small enough
+        // that a human attacker cannot reliably exploit the window.
+        let lockscreen_watchdog_sub = if self.is_standalone || self.is_notif_surface {
+            iced::Subscription::none()
+        } else {
+            iced::time::every(std::time::Duration::from_millis(500))
+                .map(|_| Message::CheckLockscreenAlive)
+        };
+
         let notif_sub = if self.is_notif_surface {
             iced::time::every(std::time::Duration::from_millis(50))
                 .map(|_| Message::PollNotifs)
@@ -3571,7 +3770,8 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
         };
         iced::Subscription::batch(vec![clock_sub, toast_sub, hw_sub, email_sync_sub, weather_sub, anim_sub, esc_sub,
             enter_sub, ipc_sub, notif_sub, resize_sub, clip_sub, annotator_sub, text_typing_sub, email_sub,
-            launcher_sub, history_sub, todo_sub, notes_sub, rng_sub, reminders_sub, reminders_tick_sub, unicode_sub, lock_key_sub, lock_ipc_sub])
+            launcher_sub, history_sub, todo_sub, notes_sub, rng_sub, reminders_sub, reminders_tick_sub, unicode_sub,
+            lock_key_sub, lock_ipc_sub, lockscreen_watchdog_sub])
     }
 
     fn view(&self) -> Element<'_, Message> {

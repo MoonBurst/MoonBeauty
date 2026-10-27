@@ -20,13 +20,13 @@ pub struct LockscreenOverlay {
     pub buffer_len: usize,
     pub auth_failed: bool,
     pub is_caps_lock: bool,
+    /// Snapshot of `ShellSettings::global_padding` at construction time.
+    /// Read in `view()` (which runs at 60fps), so we cache it here instead
+    /// of calling `ShellSettings::load()` on every frame — that would read
+    /// + parse the JSON file 60×/sec per child.
+    cached_global_padding: u16,
     ipc_tx: Option<mpsc::Sender<LockIpc>>,
     ipc_rx: Option<mpsc::Receiver<LockIpc>>,
-    // Number of keystrokes/backspaces/submits we've sent to the coordinator
-    // that haven't yet been acknowledged with a BufferUpdate/Reset. Used to
-    // distinguish "authoritative coordinator count" from "stale ack of an
-    // earlier keystroke" — we only adopt coordinator's count when pending==0.
-    // Fixes the "dots flash backward when typing fast" flicker.
     pending_sends: u32,
 }
 
@@ -55,10 +55,12 @@ impl LockscreenOverlay {
                 }
             }
         };
+        let cached_global_padding = crate::config::ShellSettings::load().global_padding;
         Self {
             buffer_len: 0,
             auth_failed: false,
             is_caps_lock: Self::check_caps_lock(),
+            cached_global_padding,
             ipc_tx,
             ipc_rx,
             pending_sends: 0,
@@ -220,8 +222,7 @@ impl LockscreenOverlay {
         // the clipboard search bar, dictionary rows, and other overlay fields.
         // 360x56 with cut=16 gives a clearly visible octagon without
         // clipping the "Incorrect password" text or a 20-char dot display.
-        let _settings = crate::config::ShellSettings::load();
-        let pad = _settings.global_padding as f32;
+        let pad = self.cached_global_padding as f32;
 
         // Field dimensions scale with global_padding. At pad=12 (default)
         // this resolves to 360x56 cut=16 — matching V185. Smaller padding
@@ -237,7 +238,7 @@ impl LockscreenOverlay {
             ONCE.get_or_init(|| {
                 eprintln!(
                     "[lock-child] field: global_padding={} → w={:.0} h={:.0} cut={}",
-                    _settings.global_padding, field_w, field_h, cut_u16
+                    self.cached_global_padding, field_w, field_h, cut_u16
                 );
             });
         }

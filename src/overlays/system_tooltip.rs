@@ -162,13 +162,14 @@ impl App {
             Message::Dismiss => { self.closing_at = Some(Instant::now()); }
             Message::KillProcess(pid) => {
                 let target = self.target.clone();
+                let gpu_info = self.gpu_list.get(self.selected_gpu).cloned().unwrap_or_default();
                 return Task::batch([
                     Task::perform(SystemCollector::kill_process(pid), |_| Message::Noop),
                     Task::perform(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                         match target.as_str() {
                             "cpu" => Data::Cpu(SystemCollector::collect_cpu().await),
-                            "gpu" => Data::Gpu(SystemCollector::collect_gpu("card0", false, 0).await),
+                            "gpu" => Data::Gpu(SystemCollector::collect_gpu_by_info(&gpu_info).await),
                             _ => Data::Ram(SystemCollector::collect_ram().await),
                         }
                     }, Message::Loaded)
