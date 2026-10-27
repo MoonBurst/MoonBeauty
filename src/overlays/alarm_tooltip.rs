@@ -216,6 +216,8 @@ impl App {
 
         // Compute FINAL dimensions once.
         let final_h = effective_h - self.settings.bar_height as f32;
+        // Extra horizontal padding so spinner numbers don't clip against the left diagonal.
+        let safe: f32 = 40.0;
         let final_slant = (self.theme.slant_width * (final_h / self.settings.bar_height.max(1) as f32)).max(0.0);
         let final_w = self.w as f32;
         let slant_r = self.slant_l == SlantSide::Right;
@@ -226,31 +228,31 @@ impl App {
 
         let title_row = crate::overlays::weather_tooltip::slanted_row(
             text("SET ALARM").size(20).color(self.theme.warning).font(crate::style::shell_font(iced::font::Weight::Bold)).into(),
-            y + 20.0, final_h, final_slant, slant_r, 20.0, final_w, 40.0,
+            y + 20.0, final_h, final_slant, slant_r, safe, final_w, 40.0,
         );
         y += 40.0 + spacer;
 
         let cd_label = crate::overlays::weather_tooltip::slanted_row(
             text("Countdown").size(14).color(self.theme.muted).into(),
-            y + 15.0, final_h, final_slant, slant_r, 20.0, final_w, 30.0,
+            y + 15.0, final_h, final_slant, slant_r, safe, final_w, 30.0,
         );
         y += 30.0 + spacer;
 
         let cd_wrapped = crate::overlays::weather_tooltip::slanted_row(
             cd_row_el.into(),
-            y + 40.0, final_h, final_slant, slant_r, 20.0, final_w, 80.0,
+            y + 40.0, final_h, final_slant, slant_r, safe, final_w, 80.0,
         );
         y += 80.0 + spacer;
 
         let clk_label = crate::overlays::weather_tooltip::slanted_row(
             text("Clock Time").size(14).color(self.theme.muted).into(),
-            y + 15.0, final_h, final_slant, slant_r, 20.0, final_w, 30.0,
+            y + 15.0, final_h, final_slant, slant_r, safe, final_w, 30.0,
         );
         y += 30.0 + spacer;
 
         let clk_wrapped = crate::overlays::weather_tooltip::slanted_row(
             clk_row_el.into(),
-            y + 40.0, final_h, final_slant, slant_r, 20.0, final_w, 80.0,
+            y + 40.0, final_h, final_slant, slant_r, safe, final_w, 80.0,
         );
 
         let content = iced::widget::container(
