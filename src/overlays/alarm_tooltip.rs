@@ -199,20 +199,20 @@ impl App {
             text("h").size(16).color(self.theme.muted),
             spinner(self.cd_m, Message::AdjCountdownM(true), Message::AdjCountdownM(false)),
             text("m").size(16).color(self.theme.muted),
-            text("").width(16),
-            button(text("Start").size(16).color(self.theme.background)).on_press(Message::StartCountdown).padding([8, 20]).style(|_t, _s| button::Style { background: Some(iced::Background::Color(self.theme.success)), border: iced::Border::default(), ..Default::default() })
-        ].spacing(8).align_y(Alignment::Center);
+            text("").width(8),
+            button(text("Start").size(16).color(self.theme.background)).on_press(Message::StartCountdown).padding([6, 12]).style(|_t, _s| button::Style { background: Some(iced::Background::Color(self.theme.success)), border: iced::Border::default(), ..Default::default() })
+        ].spacing(6).align_y(Alignment::Center);
 
         let clk_row_el = row![
             spinner(self.clk_h, Message::AdjClockH(true), Message::AdjClockH(false)),
             text(":").size(20).color(self.theme.text),
             spinner(self.clk_m, Message::AdjClockM(true), Message::AdjClockM(false)),
-            text("").width(16),
+            text("").width(8),
             button(text(if self.is_pm { "PM" } else { "AM" }).size(14).color(self.theme.text))
-                .on_press(Message::ToggleAmPm).padding([8, 12]).style(|_t, _s| button::Style { background: Some(iced::Background::Color(self.theme.surface_alt)), border: iced::Border::default(), ..Default::default() }),
-            text("").width(16),
-            button(text("Set").size(16).color(self.theme.background)).on_press(Message::StartClock).padding([8, 20]).style(|_t, _s| button::Style { background: Some(iced::Background::Color(self.theme.success)), border: iced::Border::default(), ..Default::default() })
-        ].spacing(8).align_y(Alignment::Center);
+                .on_press(Message::ToggleAmPm).padding([4, 8]).style(|_t, _s| button::Style { background: Some(iced::Background::Color(self.theme.surface_alt)), border: iced::Border::default(), ..Default::default() }),
+            text("").width(8),
+            button(text("Set").size(16).color(self.theme.background)).on_press(Message::StartClock).padding([6, 12]).style(|_t, _s| button::Style { background: Some(iced::Background::Color(self.theme.success)), border: iced::Border::default(), ..Default::default() })
+        ].spacing(6).align_y(Alignment::Center);
 
         // Compute FINAL dimensions once.
         let final_h = effective_h - self.settings.bar_height as f32;
