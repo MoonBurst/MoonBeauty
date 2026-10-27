@@ -7,6 +7,12 @@ use moon_beauty_shell::bar::{CapsuleAction, TopBar, TopBarMessage};
 use moon_beauty_shell::libraries::config::{ShellSettings, ShellTheme};
 use moon_beauty_shell::libraries::ipc::{send_client_command, IpcCommand, OverlayTarget};
 use moon_beauty_shell::overlays::*;
+use moon_beauty_shell::bar::geometry::{
+    capsule_actual_width, capsule_center_x,
+};
+use moon_beauty_shell::bar::outputs::{get_screen_width_for, resolve_primary_output};
+use moon_beauty_shell::libraries::process::resolve_exe;
+
 use moon_beauty_shell::overlays::annotator::Tool;
 
 
@@ -144,22 +150,6 @@ fn focused_app_id() -> Option<String> {
         None
     }
     walk(&v)
-}
-
-fn resolve_exe() -> std::path::PathBuf {
-    std::env::current_exe()
-        .ok()
-        .map(|p| {
-            let s = p.to_string_lossy().into_owned();
-            // /proc/PID/exe on Linux returns "…/bin (deleted)" after `cargo build`
-            // replaces the running binary. Strip the suffix so spawn still works.
-            if let Some(stripped) = s.strip_suffix(" (deleted)") {
-                std::path::PathBuf::from(stripped)
-            } else {
-                p
-            }
-        })
-        .unwrap_or_else(|| std::path::PathBuf::from("moon-beauty-shell"))
 }
 
 
@@ -1896,16 +1886,19 @@ impl MoonBeautyShellApp {
                                 } else {
                                     capsule_center_x(&self.settings, sw, &id)
                                 };
-                                let exe = resolve_exe();
-                                let mut cmd = std::process::Command::new(&exe);
-
-                                if id == "weather" {
-                                    cmd.arg("--weather-tooltip");
-                                } else if matches!(id.as_str(), "calendar" | "music" | "unified" | "net" | "custom" | "clock") {
-                                    cmd.arg("--info-tooltip").env("MBS_INFO_MODE", &id);
+                                let target_output = if self.settings.notif_screen_name != "Auto"
+                                    && self.settings.notif_screen_name != "Auto (Primary)"
+                                    && !self.settings.notif_screen_name.is_empty() {
+                                    Some(self.settings.notif_screen_name.as_str())
+                                } else { None };
+                                let sw = get_screen_width_for(target_output);
+                                let cx = if id == "clock" {
+                                    capsule_center_x(&self.settings, sw, &id)
+                                } else if recent_click && self.last_cursor_x > 0.0 {
+                                    self.last_cursor_x as i32
                                 } else {
-                                    cmd.arg("--sys-tooltip").env("MBS_SYS_TARGET", &id);
-                                }
+                                    capsule_center_x(&self.settings, sw, &id)
+                                };
                                 let in_left = self.settings.bar_left.contains(&id);
                                 let in_center = self.settings.bar_center.contains(&id);
                                 let in_right = self.settings.bar_right.contains(&id);
@@ -1931,19 +1924,8 @@ impl MoonBeautyShellApp {
                                     }
                                 };
                                 let cap_w = capsule_actual_width(&id);
-                                eprintln!(
-                                    "[spawn] id={:?} cap_w={:.1} cx={} sw={} in_L={} in_R={} in_C={} slant_mode={:?}",
-                                    id, cap_w, cx, sw,
-                                    self.settings.bar_left.contains(&id),
-                                    self.settings.bar_right.contains(&id),
-                                    self.settings.bar_center.contains(&id),
-                                    self.settings.slant_mode
-                                );
                                 let grow_right = if in_left { true } else if in_right { false } else { cx < (sw as i32) / 2 };
-                                
-                                let (tip_w, tip_h) = self.settings.tooltip_size(&id);
-                                eprintln!("[spawn-size] id={:?} tip_w={} tip_h={} (override={:?})",
-                                    id, tip_w, tip_h, self.settings.tooltip_sizes.get(&id));
+                                let (tip_w, _tip_h) = self.settings.tooltip_size(&id);
                                 let tip_output = if self.settings.bar_monitor != "All"
                                     && !self.settings.bar_monitor.is_empty()
                                 {
@@ -1952,26 +1934,27 @@ impl MoonBeautyShellApp {
                                     std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty())
                                         .or_else(resolve_primary_output)
                                 };
-                                eprintln!("[spawn-output] id={:?} bar_monitor={:?} tip_output={:?}",
-                                    id, self.settings.bar_monitor, tip_output);
-                                if let Some(ref o) = tip_output {
-                                    cmd.env("MBS_OUTPUT", o);
-                                }
-                                                                                                                                cmd
-                                   .env("MBS_TOOLTIP_W", tip_w.max(cap_w as u32).to_string())
-                                   .env("MBS_TOOLTIP_H", compute_tooltip_height(&id, self).to_string())
-                                   .env("MBS_TOOLTIP_DROP_MS", self.settings.tooltip_drop_ms.to_string())
-                                   .env("MBS_TOOLTIP_EXPAND_MS", self.settings.tooltip_expand_ms.to_string())
-                                   .env("MBS_SCREEN_W", sw.to_string())
-                                   .env("MBS_SLANT_L", slant_l)
-                                   .env("MBS_SLANT_R", slant_r)
-                                   .env("MBS_GROW_RIGHT", if grow_right { "1" } else { "0" })
-                                   .env("MBS_CAPSULE_CX", cx.to_string())
-                                   .env("MBS_CAPSULE_W", cap_w.to_string());
 
-eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
-                                                                match cmd.spawn() {
+                                let req = moon_beauty_shell::bar::tooltip_spawn::SpawnRequest {
+                                    id: &id,
+                                    exe: resolve_exe(),
+                                    output: tip_output.as_deref(),
+                                    tooltip_w: tip_w,
+                                    tooltip_h: moon_beauty_shell::bar::tooltip_spawn::compute_height(
+                                        &id, &self.settings, &self.telemetry),
+                                    drop_ms: self.settings.tooltip_drop_ms,
+                                    expand_ms: self.settings.tooltip_expand_ms,
+                                    capsule_cx: cx,
+                                    capsule_w: cap_w,
+                                    screen_w: sw,
+                                    slant_l,
+                                    slant_r,
+                                    grow_right,
+                                };
+
+                                match moon_beauty_shell::bar::tooltip_spawn::spawn(&req) {
                                     Ok(c) => {
+                                        eprintln!("[ipc] spawned tooltip pid={}", c.id());
                                         self.weather_tooltip_child = Some(c);
                                     }
                                     Err(e) => eprintln!("[tooltip] Failed to spawn: {e}"),
@@ -3870,171 +3853,4 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
             base_content.into()
         }
     }
-}
-
-
-fn compute_tooltip_height(id: &str, app: &MoonBeautyShellApp) -> u32 {
-    let bar_h = app.settings.bar_height;
-    let content_h: u32 = match id {
-        "weather" => {
-            let lines = app.telemetry.weather.as_ref()
-                .map(|w| w.tooltip_lines.len().min(15) as u32)
-                .unwrap_or(1);
-            lines * 24 + 40
-        }
-        "calendar" => {
-            use chrono::Datelike;
-            let now = chrono::Local::now();
-            let first = chrono::NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
-                .unwrap_or_default();
-            let (ny, nm) = if now.month() == 12 { (now.year() + 1, 1) } else { (now.year(), now.month() + 1) };
-            let next = chrono::NaiveDate::from_ymd_opt(ny, nm, 1).unwrap_or_default();
-            let days = next.signed_duration_since(first).num_days() as u32;
-            let offset = first.weekday().num_days_from_sunday() as u32;
-            let weeks = (offset + days + 6) / 7;
-            40 + 36 + 24 + weeks * 50 + 20
-        }
-        "alarm" => 340,
-        "cpu" => app.telemetry.cpu.top_procs.len().min(10) as u32 * 24 + 100,
-        "gpu" => app.telemetry.gpu.top_procs.len().min(10) as u32 * 24 + 100,
-        "ram" => app.telemetry.ram.top_procs.len().min(10) as u32 * 24 + 100,
-        "net" => 450,
-        "music" => 400,
-        "unified" => 400,
-        "custom" => 300,
-        "clock" => 320,
-        _ => 400,
-    };
-    let total = content_h + bar_h + 20;
-    eprintln!("[compute-h] id={} content_h={} bar_h={} total={}", id, content_h, bar_h, total);
-    total
-}
-
-fn capsule_min_width(id: &str) -> f32 {
-    match id {
-        "calendar" => 110.0,
-        "music" => 140.0,
-        "alarm" => 90.0,
-        "weather" => 95.0,
-        "unified" => 80.0,
-        "notify" => 120.0,
-        "clock" => 85.0,
-        "audio" => 95.0,
-        "mic" => 80.0,
-        "net" => 145.0,
-        "cpu" => 115.0,
-        "gpu" => 150.0,
-        "ram" => 105.0,
-        "battery" => 85.0,
-        _ => 80.0,
-    }
-}
-
-fn capsule_actual_width(id: &str) -> f32 {
-    moon_beauty_shell::bar::capsules::lookup_width(id).unwrap_or_else(|| capsule_min_width(id))
-}
-
-fn row_width(items: &[&String], sp: f32) -> f32 {
-    let n = items.len();
-    items.iter().enumerate().map(|(i, id)| {
-        let w = capsule_actual_width(id.as_str());
-        if i + 1 < n { w + sp } else { w }
-    }).sum()
-}
-
-fn resolve_primary_output() -> Option<String> {
-    let out = std::process::Command::new("swaymsg")
-        .args(["-t", "get_outputs", "-r"]).output().ok()?;
-    if !out.status.success() { return None; }
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
-    let arr = v.as_array()?;
-    // Prefer the output marked "primary"
-    for o in arr {
-        if o.get("primary").and_then(|p| p.as_bool()) == Some(true) {
-            if let Some(name) = o.get("name").and_then(|n| n.as_str()) {
-                return Some(name.to_string());
-            }
-        }
-    }
-    // Fallback: focused
-    for o in arr {
-        if o.get("focused").and_then(|f| f.as_bool()) == Some(true) {
-            if let Some(name) = o.get("name").and_then(|n| n.as_str()) {
-                return Some(name.to_string());
-            }
-        }
-    }
-    None
-}
-
-fn capsule_center_x(s: &ShellSettings, sw: u32, target: &str) -> i32 {
-    let sw_f = sw as f32;
-    let sp = s.capsule_spacing as f32;
-    let pad = 16.0;
-
-    let visible = |id: &String| s.visible_capsules.get(id).copied().unwrap_or(true);
-    let left_items: Vec<&String> = s.bar_left.iter().filter(|id| visible(id)).collect();
-    let center_items: Vec<&String> = s.bar_center.iter().filter(|id| visible(id)).collect();
-    let right_items: Vec<&String> = s.bar_right.iter().filter(|id| visible(id)).collect();
-
-    // 1. bar_left
-    let mut x = pad;
-    for (i, id) in left_items.iter().enumerate() {
-        let w = capsule_actual_width(id.as_str());
-        if id.as_str() == target { return (x + w / 2.0) as i32; }
-        x += w + if i + 1 < left_items.len() { sp } else { 0.0 };
-    }
-
-    // 2. bar_center — account for asymmetric left/right widths
-    let left_w = row_width(&left_items, sp);
-    let right_w = row_width(&right_items, sp);
-    let center_w = row_width(&center_items, sp);
-    let avail = sw_f - 2.0 * pad;
-    let fill_w = ((avail - left_w - center_w - right_w) / 2.0).max(0.0);
-    let mut x = pad + left_w + fill_w;
-    for (i, id) in center_items.iter().enumerate() {
-        let w = capsule_actual_width(id.as_str());
-        if id.as_str() == target { return (x + w / 2.0) as i32; }
-        x += w + if i + 1 < center_items.len() { sp } else { 0.0 };
-    }
-
-    // 3. bar_right
-    let mut x = pad + avail - right_w;
-    for (i, id) in right_items.iter().enumerate() {
-        let w = capsule_actual_width(id.as_str());
-        if id.as_str() == target { return (x + w / 2.0) as i32; }
-        x += w + if i + 1 < right_items.len() { sp } else { 0.0 };
-    }
-
-    200
-}
-
-fn get_screen_width_for(output: Option<&str>) -> u32 {
-    if let Ok(o) = std::process::Command::new("swaymsg")
-        .args(["-t", "get_outputs", "-r"]).output()
-    {
-        if o.status.success() {
-            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&o.stdout) {
-                if let Some(arr) = v.as_array() {
-                    if let Some(name) = output {
-                        for out in arr {
-                            if out.get("name").and_then(|n| n.as_str()) == Some(name) {
-                                if let Some(w) = out.get("rect").and_then(|r| r.get("width")).and_then(|w| w.as_u64()) {
-                                    return if w > 0 { w as u32 } else { 1920 };
-                                }
-                            }
-                        }
-                    }
-                    for out in arr {
-                        if out.get("focused").and_then(|f| f.as_bool()) == Some(true) {
-                            if let Some(w) = out.get("rect").and_then(|r| r.get("width")).and_then(|w| w.as_u64()) {
-                                return if w > 0 { w as u32 } else { 1920 };
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    1920
 }
