@@ -16,11 +16,43 @@
 //!   - helpers        (10f)
 //!   - split app.rs into app/{mod,update,view,...} submodules (10g)
 
+pub mod helpers;
+pub mod new_app;
+pub mod subscription;
+pub mod update;
+pub mod view;
+
+// Helper functions from crate root (main.rs). Rust allows child modules
+// to reach parent-module items without them being `pub` (child modules
+// see the parent's private namespace). Plain `use` — not `pub use` —
+// because we don't need to re-export them outside `app`.
+use crate::{
+    detect_notif_surface,
+    detect_standalone_overlay,
+    focus_notification_app,
+    focused_app_id,
+    handle_annotator_text_input,
+    handle_email_keypress,
+    handle_lock_keypress,
+    is_app_focused,
+    notification_candidates,
+    resolve_exe,
+};
+
+
+use iced::widget::{container, Stack};
+use iced::{Element, Length, Padding, Task as Command};
+use moon_beauty_shell::overlays::screenshot::annotator::Tool;
+use moon_beauty_shell::bar::outputs::{get_screen_width_for, resolve_primary_output};
+use moon_beauty_shell::bar::geometry::{capsule_actual_width, capsule_center_x};
+use moon_beauty_shell::bar::tooltip_spawn::{
+    compute_height as compute_tooltip_height, spawn as spawn_tooltip, SpawnRequest,
+};
 use moon_beauty_shell::bar::unified::UnifiedTelemetry;
-use moon_beauty_shell::bar::TopBarMessage;
+use moon_beauty_shell::bar::{CapsuleAction, TopBar, TopBarMessage};
 use moon_beauty_shell::libraries::backend::*;
 use moon_beauty_shell::libraries::config::{ShellSettings, ShellTheme};
-use moon_beauty_shell::libraries::ipc::{IpcCommand, OverlayTarget};
+use moon_beauty_shell::libraries::ipc::{send_client_command, IpcCommand, OverlayTarget};
 use moon_beauty_shell::overlays::*;
 
 #[derive(Debug, Clone)]
