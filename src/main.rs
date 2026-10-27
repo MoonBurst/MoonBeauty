@@ -861,6 +861,10 @@ impl MoonBeautyShellApp {
     }
 
     pub fn close_tray(&mut self) {
+        eprintln!(
+            "[close-tray] invoked: expanded={} width={:.1} target_set={} (settings.tray_width)",
+            self.tray_expanded, self.tray_anim_width, self.settings.tray_width
+        );
         if self.tray_expanded {
             self.tray_expanded = false;
             self.tray_anim_start_width = self.tray_anim_width;
@@ -1053,6 +1057,7 @@ impl MoonBeautyShellApp {
             tray_anim_started_at: std::time::Instant::now(),
             tray_anim_duration_ms: 220,
             tray_timeout_gen: 0,
+            tray_opened_at: std::time::Instant::now(),
             detected_gpus: if is_notif_surface || is_standalone { Vec::new() } else { SystemCollector::list_gpus_sync() },
 
             launcher: AppLauncher::new(),
@@ -1101,6 +1106,7 @@ impl MoonBeautyShellApp {
         };
 
         let mut init_tasks = vec![
+            Command::done(Message::FetchTrayItems),
             Command::done(Message::TickEmailSync),
             Command::perform(async {
                 moon_beauty_shell::bar::weather::WeatherBackend::fetch().await.ok()
@@ -1881,6 +1887,7 @@ impl MoonBeautyShellApp {
                                 self.tray_timeout_gen = self.tray_timeout_gen.wrapping_add(1);
                                 let my_gen = self.tray_timeout_gen;
                                 
+                                self.tray_opened_at = std::time::Instant::now();
                                 self.tray_expanded = true;
                                 self.tray_anim_start_width = self.tray_anim_width;
                                 self.tray_anim_started_at = std::time::Instant::now();
@@ -1890,22 +1897,14 @@ impl MoonBeautyShellApp {
                                 self.tray_target_width = expanded_w;
                                 self.tray_anim_duration_ms = 220;
 
-                                let timeout = self.settings.tray_timeout_sec;
-                                if timeout > 0 {
-                                    return Command::batch(vec![
-                                        Command::perform(
-                                            moon_beauty_shell::bar::tray::watcher::fetch_tray_items(),
-                                            Message::TrayItemsLoaded,
-                                        ),
-                                        Command::perform(
-                                            async move {
-                                                tokio::time::sleep(std::time::Duration::from_secs(timeout as u64)).await;
-                                                my_gen
-                                            },
-                                            Message::CollapseTrayIfGen,
-                                        ),
-                                    ]);
-                                }
+                                // Auto-close is handled by the tray_watchdog_sub
+                                // subscription (see subscription()), which polls
+                                // tray_opened_at.elapsed() every 500ms while
+                                // tray_expanded is true. No per-open timer needed.
+                                return Command::perform(
+                                    moon_beauty_shell::bar::tray::watcher::fetch_tray_items(),
+                                    Message::TrayItemsLoaded,
+                                );
                                 return Command::perform(
                                     moon_beauty_shell::bar::tray::watcher::fetch_tray_items(),
                                     Message::TrayItemsLoaded,
@@ -3047,9 +3046,49 @@ impl MoonBeautyShellApp {
             Message::CollapseTray => {
                 self.close_tray();
             }
-            Message::CollapseTrayIfGen(gen) => {
-                if gen == self.tray_timeout_gen && self.tray_expanded {
+            Message::TrayWatchdogTick => {
+                // 1) Timeout check
+                if self.tray_expanded
+                    && self.settings.tray_timeout_sec > 0
+                    && self.tray_opened_at.elapsed().as_secs()
+                        >= self.settings.tray_timeout_sec as u64
+                {
+                    eprintln!(
+                        "[tray-watchdog] elapsed={}s >= timeout={}s, closing (settings.tray_width={})",
+                        self.tray_opened_at.elapsed().as_secs(),
+                        self.settings.tray_timeout_sec,
+                        self.settings.tray_width
+                    );
                     self.close_tray();
+                }
+
+                // 2) Animation step. Note: the completion check is OUTSIDE
+                //    the `elapsed < duration` guard so the snap-to-target
+                //    ALWAYS runs on the first tick past duration. Previous
+                //    version froze at width=89.7 because once elapsed
+                //    reached 180ms, the guard `elapsed < duration` became
+                //    false and the inner `if t >= 1.0 { snap }` never ran.
+                if (self.tray_anim_width - self.tray_target_width).abs() > 0.01 {
+                    let elapsed_ms =
+                        self.tray_anim_started_at.elapsed().as_millis() as u64;
+                    let dur = self.tray_anim_duration_ms.max(1);
+                    let t = (elapsed_ms as f32 / dur as f32).clamp(0.0, 1.0);
+                    let expanding = self.tray_target_width > self.tray_anim_start_width;
+                    let eased = if expanding {
+                        1.0 - (1.0 - t).powi(3)
+                    } else {
+                        t * t * t
+                    };
+                    let delta = self.tray_target_width - self.tray_anim_start_width;
+                    self.tray_anim_width = self.tray_anim_start_width + delta * eased;
+                    // Force-snap when past duration OR t is at ceiling.
+                    if elapsed_ms >= dur || t >= 1.0 {
+                        self.tray_anim_width = self.tray_target_width;
+                    }
+                    eprintln!(
+                        "[tray-anim] elapsed={}ms t={:.2} width={:.1} target={:.1}",
+                        elapsed_ms, t, self.tray_anim_width, self.tray_target_width
+                    );
                 }
             }
             Message::TrayAnimTick => {
@@ -3071,6 +3110,15 @@ impl MoonBeautyShellApp {
                 if t >= 1.0 {
                     self.tray_anim_width = self.tray_target_width;
                 }
+            }
+            Message::FetchTrayItems => {
+                // Background refresh so tray_items is populated before
+                // the user ever clicks the tray capsule. Eliminates the
+                // 0-item → N-item re-animation on first open.
+                return Command::perform(
+                    moon_beauty_shell::bar::tray::watcher::fetch_tray_items(),
+                    Message::TrayItemsLoaded,
+                );
             }
             Message::TrayItemsLoaded(items) => {
                 self.tray_items = items;
@@ -3610,10 +3658,41 @@ impl MoonBeautyShellApp {
         } else {
             iced::Subscription::none()
         };
+        // Tray watchdog: dedicated 500ms timer while expanded. Fixes the
+        // "tray never closes" bug where the Command::perform-based timer
+        // silently failed to fire. Polling is cheap — only active while
+        // tray_expanded is true.
+        // Tray watchdog sub drives both the timeout check AND the
+        // collapse/expand animation. 16ms cadence while animating,
+        // 500ms cadence while steady-expanded (timeout check only).
+        // This replaces reliance on TrayAnimTick's sub, which has been
+        // observed to silently not fire in this iced version (same
+        // failure class as the earlier Command::perform timer).
+        let tray_animating = (self.tray_anim_width - self.tray_target_width).abs() > 0.01;
+        // Tray items pre-fetch: every 15s, keeps the item list warm so
+        // first open animates straight to the correct width instead of
+        // briefly showing 0 items (target=206) then re-animating to N
+        // items (target=186). This is a low-cost D-Bus call per item.
+        let tray_fetch_sub = if self.is_notif_surface || self.is_standalone {
+            iced::Subscription::none()
+        } else {
+            iced::time::every(std::time::Duration::from_secs(15))
+                .map(|_| Message::FetchTrayItems)
+        };
+
+        let tray_watchdog_sub = if tray_animating {
+            iced::time::every(std::time::Duration::from_millis(16))
+                .map(|_| Message::TrayWatchdogTick)
+        } else if self.tray_expanded && self.settings.tray_timeout_sec > 0 {
+            iced::time::every(std::time::Duration::from_millis(500))
+                .map(|_| Message::TrayWatchdogTick)
+        } else {
+            iced::Subscription::none()
+        };
         iced::Subscription::batch(vec![clock_sub, toast_sub, hw_sub, email_sync_sub, weather_sub, anim_sub, esc_sub,
             enter_sub, ipc_sub, notif_sub, resize_sub, clip_sub, annotator_sub, text_typing_sub, email_sub,
             launcher_sub, history_sub, todo_sub, notes_sub, rng_sub, reminders_sub, reminders_tick_sub, unicode_sub,
-            lock_key_sub, lock_ipc_sub, lockscreen_watchdog_sub])
+            lock_key_sub, lock_ipc_sub, lockscreen_watchdog_sub, tray_watchdog_sub, tray_fetch_sub])
     }
 
     pub fn view(&self) -> Element<'_, Message> {
