@@ -23,6 +23,27 @@ use crate::libraries::style::TextExt;
 //
 // Falls back to app_name-based lookup if desktop_entry is missing.
 
+/// Search the standard freedesktop icon theme dirs for a file named
+/// `<name>.{png,svg,xpm}`.
+///
+/// **When to use this:** for notification avatars (chat app icons, email
+/// client icons) and anywhere else that has an icon *name* to resolve
+/// (e.g. from a `.desktop` file's `Icon=` field).
+///
+/// **Difference from `bar::tray::watcher::resolve_icon`:**
+///   - This function does NOT normalize the icon bytes. It returns the
+///     source path directly.
+///   - The tray version ALWAYS runs the file through ImageMagick
+///     (`-strip`) and appends a content hash, because iced's image
+///     cache is keyed on path and the tray's files live for the whole
+///     session. Notifications are rendered once per toast — a cache
+///     hit is less critical, so we skip the normalization cost.
+///   - The tray version is stricter about decode validity because a
+///     broken icon means a permanently-broken capsule slot; a broken
+///     notification avatar just falls back to the default icon.
+///
+/// **Theme coverage:** hicolor first, then Adwaita/breeze/Papirus/Yaru/
+/// Numix. Also `/usr/share/pixmaps` and Nix paths for flat/old apps.
 fn resolve_icon_name(name: &str) -> Option<String> {
     if name.is_empty() { return None; }
     // Absolute path? Trust it or fail.
@@ -84,6 +105,25 @@ fn resolve_icon_name(name: &str) -> Option<String> {
     None
 }
 
+/// Given a desktop-entry hint (e.g. `"firefox"`, `"org.mozilla.firefox"`),
+/// find its `.desktop` file under the standard applications dirs, read
+/// the `Icon=` field from `[Desktop Entry]`, then resolve that icon name
+/// via `resolve_icon_name`.
+///
+/// **When to use this:** when the notification's `desktop_entry` hint is
+/// available (from the `desktop-entry` hint field of the D-Bus Notify
+/// call). This is the most reliable way to get an app's *actual* icon —
+/// SNI/tray apps sometimes use a different icon than the launcher entry,
+/// but for notifications the desktop-entry is authoritative.
+///
+/// **Fallback order** for notification avatars in push_notification:
+///   1. Friend profile avatar (`resources/<name>/<name>.png`)
+///   2. `resources/fallback.png`
+///   3. `resolve_desktop_icon(desktop_entry)` — this function
+///   4. `resolve_icon_name(app_name)` — pure name lookup
+///
+/// So this is called before the name-only fallback because a matching
+/// `.desktop` file gives higher confidence than a guessed icon name.
 fn resolve_desktop_icon(entry: &str) -> Option<String> {
     let clean = entry.trim_end_matches(".desktop").trim();
     if clean.is_empty() { return None; }

@@ -262,6 +262,37 @@ fn parse_registered(s: &str) -> Option<(String, String)> {
     }
 }
 
+/// Resolve an SNI icon name to a normalized, content-hashed PNG/SVG in
+/// `$XDG_RUNTIME_DIR/mbs-tray/`.
+///
+/// **When to use this:** for tray icons (SNI items registered with
+/// `org.kde.StatusNotifierWatcher`) and any other caller that needs a
+/// **render-stable** icon path for the whole session.
+///
+/// **Difference from `overlays::notifications::resolve_icon_name`:**
+///   - Raster icons are ALWAYS re-encoded through ImageMagick
+///     (`-strip`, `png:color-type=6`). This strips malformed chunks
+///     (e.g. Steam's broken iCCP) that iced's strict decoder rejects
+///     but libpng-adjacent decoders tolerate. Tray slots are rendered
+///     continuously for the whole session — a broken decode means a
+///     permanently blank slot.
+///   - The output filename gets a content hash (`icon-<safe>-<sha8>.png`).
+///     Iced's image cache is keyed on path; without a hash, changing
+///     file contents in place leaves iced serving stale 1x1 decodes.
+///   - SVG files bypass ImageMagick (iced has native SVG support),
+///     but still get hashed for the same cache-bust reason.
+///   - The fast path (`$XDG_RUNTIME_DIR/mbs-tray/icon-<safe>.<ext>` exists
+///     and has non-zero size) skips all of the above; subsequent refetches
+///     of the same icon are O(1) stat calls.
+///
+/// **Cost vs notifications:** one ImageMagick subprocess per *new* icon,
+/// amortized to zero across the session. Notifications skip this entirely
+/// because they're transient — a broken avatar just falls back to the
+/// default icon on the next toast.
+///
+/// **Fallback chain** if the source can't be decoded after re-encode:
+///   → return `None`, renderer shows the initial letter (from `title`,
+///     falling back to `id` and then `tooltip`).
 fn resolve_icon(icon_name: &str) -> Option<String> {
     use std::path::Path;
     if icon_name.is_empty() { return None; }
@@ -387,8 +418,7 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
         let status = std::process::Command::new(bin)
             .args([
                 source.to_str().unwrap_or(""),
-                "-strip",                        // strip all metadata/chunks
-                "-define", "png:color-type=6",   // RGBA
+                "-strip", // strip all metadata/chunks
                 base_dest.to_str().unwrap_or(""),
             ])
             .status();

@@ -48,7 +48,6 @@ use crate::libraries::style::TextExt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsTab {
     Notifications,
-    StylixSliders,
     ColorsStyles,
     Hardware,
     BarLayout,
@@ -705,7 +704,6 @@ SettingsMessage::SaveSettings => {}
 
         let tabs = [
             (SettingsTab::Notifications, "Notifications"),
-            (SettingsTab::StylixSliders, "Stylix & Sliders"),
             (SettingsTab::ColorsStyles, "Colors & Styles"),
             (SettingsTab::Hardware, "Hardware"),
             (SettingsTab::BarLayout, "Bar Layout & Slants"),
@@ -1126,40 +1124,6 @@ SettingsMessage::SaveSettings => {}
                 row![pings_col, right_scrollable].spacing(24).into()
             }
 
-            SettingsTab::StylixSliders => column![
-                column![
-                    row![text("Top Bar Height").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.bar_height)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
-                    slider(30..=80, settings.bar_height, SettingsMessage::BarHeight).width(Length::Fill),
-                ].spacing(3),
-                column![
-                    row![text("Bar Global Font Size").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.global_font_size)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
-                    slider(10..=24, settings.global_font_size as u32, |v| SettingsMessage::GlobalFontSize(v as u16)).width(Length::Fill),
-                ].spacing(3),
-                column![
-                    row![text("Overlay Window Font Size").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.overlay_font_size)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
-                    slider(11..=32, settings.overlay_font_size as u32, |v| SettingsMessage::OverlayFontSize(v as u16)).width(Length::Fill),
-                ].spacing(3),
-                column![
-                    row![text("Capsule Slant Width").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.slant_width as u32)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
-                    slider(4..=32, settings.slant_width as u32, SettingsMessage::SlantWidth).width(Length::Fill),
-                ].spacing(3),
-                column![
-                    row![text("Capsule Spacing").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.capsule_spacing)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
-                    slider(-50..=40, settings.capsule_spacing, SettingsMessage::CapsuleSpacing).width(Length::Fill),
-                ].spacing(3),
-                column![
-                    row![text("Tray Collapsed Width").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tray_width)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
-                    slider(30..=150, settings.tray_width, SettingsMessage::TrayWidth).width(Length::Fill),
-                ].spacing(3),
-                column![
-                    row![text("Window & Card Border Width").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.global_border_width as u32)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
-                    slider(1..=10, settings.global_border_width as u32, SettingsMessage::BorderWidth).width(Length::Fill),
-                ].spacing(3),
-                column![
-                    row![text("Control / Button Border Width").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.control_border_width as u32)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
-                    slider(1..=8, settings.control_border_width as u32, SettingsMessage::ControlBorderWidth).width(Length::Fill),
-                ].spacing(3),
-            ].spacing(12).into(),
 
             SettingsTab::ColorsStyles => {
                 let slots = [
@@ -1234,6 +1198,19 @@ SettingsMessage::SaveSettings => {}
                         .align_y(Alignment::Center),
                     );
                 }
+
+                col = col.push(
+                    column![
+                        row![text("Window & Card Border Width").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.global_border_width as u32)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
+                        slider(1..=10, settings.global_border_width as u32, SettingsMessage::BorderWidth).width(Length::Fill),
+                    ].spacing(3)
+                );
+                col = col.push(
+                    column![
+                        row![text("Control / Button Border Width").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.control_border_width as u32)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
+                        slider(1..=8, settings.control_border_width as u32, SettingsMessage::ControlBorderWidth).width(Length::Fill),
+                    ].spacing(3)
+                );
 
                 col.into()
             }
@@ -1582,10 +1559,6 @@ SettingsMessage::SaveSettings => {}
                         row![text("Tooltip Right Offset").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tooltip_offset_right)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
                         slider(-50..=100, settings.tooltip_offset_right, SettingsMessage::TooltipOffsetRight).width(Length::Fill),
                     ].spacing(3).width(Length::FillPortion(1)),
-                        column![
-                                    row![text("Tooltip Text Size").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tooltip_font_size)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
-                                    slider(8..=28, settings.tooltip_font_size, SettingsMessage::TooltipFontSize).width(Length::Fill),
-                                ].spacing(3).width(Length::FillPortion(1)),
                     ].spacing(20).width(Length::Fill),
                 ].spacing(12).width(Length::Fill).into();
 
@@ -1821,6 +1794,21 @@ SettingsMessage::SaveSettings => {}
                         .size(scale_sz(0.72) as f32)
                         .color(theme.muted),
                 ].spacing(8);
+
+                col = col.push(
+                    container(
+                        column![
+                            row![text("Overlay Window Font Size").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.overlay_font_size)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
+                            slider(11..=32, settings.overlay_font_size as u32, |v| SettingsMessage::OverlayFontSize(v as u16)).width(Length::Fill),
+                        ].spacing(6)
+                    )
+                    .padding([10, 14])
+                    .style(move |_t| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb8(18, 20, 26))),
+                        border: iced::Border { color: theme.border, width: 1.5, radius: 6.0.into() },
+                        ..Default::default()
+                    })
+                );
 
                 col = col.push(
                     container(
