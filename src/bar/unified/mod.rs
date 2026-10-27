@@ -8,9 +8,11 @@
 //!              (declarative health checks from settings.unified_items)
 
 pub mod podman;
+pub mod telemetry;
 pub mod borg;
 pub mod checks;
 
 pub use podman::{PodmanBackend, PodmanStatus, WatcherDetails, ContainerInfo};
 pub use borg::{BorgBackend, BorgStatus};
 pub use checks::{UnifiedItemStatus, check_unified_items, toggle_item};
+pub use telemetry::UnifiedTelemetry;

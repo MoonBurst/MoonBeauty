@@ -11,7 +11,7 @@ use std::io;
 use std::path::PathBuf;
 use std::process::Child;
 
-use crate::libraries::backend::UnifiedTelemetry;
+use crate::bar::unified::UnifiedTelemetry;
 use crate::libraries::config::ShellSettings;
 
 /// All data needed to spawn a tooltip popup.

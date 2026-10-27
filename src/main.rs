@@ -17,6 +17,7 @@ use moon_beauty_shell::overlays::screenshot::annotator::Tool;
 
 
 use moon_beauty_shell::overlays::screenshot;
+use moon_beauty_shell::bar::unified::UnifiedTelemetry;
 
 fn detect_notif_surface(args: &[String]) -> bool {
     args.iter().any(|a| a == "--notif-surface")

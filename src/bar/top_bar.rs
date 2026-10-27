@@ -3,7 +3,7 @@ use iced::{Alignment, Element, Length};
 
 use super::capsules::{CapsuleAction, CapsuleRenderer};
 use crate::bar::tray::TrayItem;
-use crate::libraries::backend::UnifiedTelemetry;
+use crate::bar::unified::UnifiedTelemetry;
 use crate::libraries::config::settings::ShellSettings;
 use crate::libraries::config::theme::ShellTheme;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
