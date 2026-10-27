@@ -19,6 +19,10 @@ use moon_beauty_shell::overlays::screenshot::annotator::Tool;
 use moon_beauty_shell::overlays::screenshot;
 use moon_beauty_shell::bar::unified::UnifiedTelemetry;
 
+mod app;
+
+use app::{Message, MoonBeautyShellApp};
+
 fn detect_notif_surface(args: &[String]) -> bool {
     args.iter().any(|a| a == "--notif-surface")
 }
@@ -813,163 +817,15 @@ fn handle_annotator_text_input(
     None
 }
 
-#[derive(Debug, Clone)]
-pub enum Message {
-    Noop,
-    TickHardware,
-    TickWeather,
-    TickEmailSync,
-    EmailSynced,
-    EmailSyncedWithDiff(Vec<moon_beauty_shell::libraries::backend::email_client::NativeEnvelope>, Vec<moon_beauty_shell::libraries::backend::email_client::NativeEnvelope>),
-    FocusComposeField,
-    ComposeTabPressed(bool),
-    WeatherLoaded(Option<moon_beauty_shell::bar::weather::WeatherData>),
-    TickClock,
-    TickToasts,
-    MetricsCollected(CpuMetrics, RamMetrics, GpuMetrics, AudioStatus, AudioStatus, Option<MprisTrack>),
-    IpcReceived(IpcCommand),
-    PollIpc,
-    PollNotifs,
-    ResizeNotifSurface(u32, u32),
-    WindowResized(f32),
-    TopBar(TopBarMessage),
-    Launcher(LauncherMessage),
-    Calc(CalcMessage),
-    Clipboard(ClipboardMessage),
-    Notes(NotesMessage),
-    Pass(PassMessage),
-    Power(PowerMessage),
-    Todo(TodoMessage),
-    Reminders(ReminderMessage),
-    Dict(DictMessage),
-    Unicode(UnicodeMessage),
-    Web(WebSearchMessage),
-    Amogus(AmogusMessage),
-    Annotator(AnnotatorMessage),
-    Rng(RngMessage),
-    Email(EmailMessage),
-    Notif(NotifMessage),
-    Settings(SettingsMessage),
-    Lock(LockMessage),
-    DismissActiveOverlay,
-    CloseShell,
-    TrayItemsLoaded(Vec<moon_beauty_shell::bar::tray::TrayItem>),
-    TrayAnimTick,
-    CollapseTrayIfGen(u64),
-    CollapseTray,
-    /// Pre-computed toast rectangles (surface-local coords). Emitted
-    /// whenever the toast count changes; `try_into` converts it to
-    /// `LayershellCustomAction::SetInputRegion` so the layer surface's
-    /// click target shrinks to just the visible toasts. Everything else
-    /// (the empty area around/above/below toasts) becomes pass-through.
-    SetToastInputRegion(Vec<(i32, i32, i32, i32)>),
-    /// Fires from the 500ms subscription. If `standalone_child` is
-    /// Lockscreen and has exited (TTY switch, panic, SIGKILL), respawn
-    /// it immediately. Lockscreen must NEVER be absent — a dead lock is
-    /// an unlocked screen. Runs fast (500ms) so the worst-case window
-    /// between crash and respawn is 500ms + child boot (~300ms).
-    CheckLockscreenAlive,
-}
 
-impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message {
-    type Error = Message;
-    fn try_into(
-        self,
-    ) -> Result<iced_layershell::actions::LayershellCustomActionWithId, Self::Error>
-    {
-        match self {
-            Message::ResizeNotifSurface(w, h) => {
-                Ok(iced_layershell::actions::LayershellCustomActionWithId::new(
-                    None,
-                    iced_layershell::actions::LayershellCustomAction::SizeChange((w, h)),
-                ))
-            }
-            Message::SetToastInputRegion(rects) => {
-                Ok(iced_layershell::actions::LayershellCustomActionWithId::new(
-                    None,
-                    iced_layershell::actions::LayershellCustomAction::SetInputRegion(
-                        iced_layershell::actions::ActionCallback::new(move |region| {
-                            for (x, y, w, h) in &rects {
-                                region.add(*x, *y, *w, *h);
-                            }
-                        }),
-                    ),
-                ))
-            }
-            other => Err(other),
-        }
-    }
-}
 
-pub struct MoonBeautyShellApp {
-    weather_tooltip_child: Option<std::process::Child>,
-    settings: ShellSettings,
-    theme: ShellTheme,
-    telemetry: UnifiedTelemetry,
-    active_overlay: Option<OverlayTarget>,
-    is_standalone: bool,
-    system_collector: SystemCollector,
-    standalone_child: Option<(OverlayTarget, std::process::Child)>,
-    ipc_rx: std::sync::mpsc::Receiver<IpcCommand>,
-    is_notif_surface: bool,
-    notif_rx: Option<std::sync::mpsc::Receiver<moon_beauty_shell::overlays::notifications::IncomingNotification>>,
-    settings_json_mtime: Option<std::time::SystemTime>,
-    window_w: f32,
-    notif_screen_at_startup: String,
-    notif_surface_size: (u32, u32),
-    tray_expanded: bool,
-    tray_items: Vec<moon_beauty_shell::bar::tray::TrayItem>,
-    tray_anim_width: f32,
-    tray_target_width: f32,
-    tray_anim_start_width: f32,
-    tray_anim_started_at: std::time::Instant,
-    tray_anim_duration_ms: u64,
-    tray_timeout_gen: u64,
-    detected_gpus: Vec<moon_beauty_shell::libraries::backend::GpuInfo>,
-
-    launcher: AppLauncher,
-    calc: CalculatorOverlay,
-    clipboard: ClipboardOverlay,
-    notes: NotesOverlay,
-    pass: PassOverlay,
-    power: PowerOverlay,
-    todo: TodoOverlay,
-    reminders: RemindersOverlay,
-    dict: DictionaryOverlay,
-    unicode: UnicodeOverlay,
-    web: WebSearchOverlay,
-    amogus: AmogusOverlay,
-    annotator: AnnotatorOverlay,
-    rng: RngOverlay,
-    email: EmailOverlay,
-    notifs: NotificationOverlay,
-    settings_ui: SettingsOverlay,
-    lockscreen: LockscreenOverlay,
-    weather_tick: bool,
-
-    last_cursor_x: f32,
-    last_cursor_time: std::time::Instant,
-    /// Timestamp of the previous CheckLockscreenAlive tick. If a tick
-    /// fires more than ~2s after the previous one, the session was
-    /// paused (TTY switch, suspend, hibernate). In that case the lock
-    /// child surfaces are likely stale (sway drops layer surfaces on
-    /// output detach without telling the client), so force-respawn.
-    last_lockscreen_check: std::time::Instant,
-    /// Last observed active-toast count. Changes trigger a fresh
-    /// SetToastInputRegion emit so the click target tracks the toasts.
-    last_toast_count: usize,
-    /// (count, written_at) for the active+pending count file. Write on
-    /// change; heartbeat every 3s so the file's mtime stays fresh and
-    /// the bar's staleness check never trips while we're alive.
-    last_active_pending_written: Option<(usize, std::time::Instant)>,
-}
 
 impl MoonBeautyShellApp {
     /// Compute surface-local rectangles for each currently-active toast.
     /// Coordinates mirror `view_toasts`' resting pin positions (post-drop,
     /// post-expand) so the input region matches where toasts actually sit
     /// once their slide-in animation settles.
-    fn compute_toast_rects(&self) -> Vec<(i32, i32, i32, i32)> {
+    pub fn compute_toast_rects(&self) -> Vec<(i32, i32, i32, i32)> {
         let s = &self.settings;
         let is_right = s.notif_corner.contains("right");
         let is_top = s.notif_corner.contains("top");
@@ -1004,7 +860,7 @@ impl MoonBeautyShellApp {
         rects
     }
 
-    fn close_tray(&mut self) {
+    pub fn close_tray(&mut self) {
         if self.tray_expanded {
             self.tray_expanded = false;
             self.tray_anim_start_width = self.tray_anim_width;
@@ -1016,7 +872,7 @@ impl MoonBeautyShellApp {
         self.tray_timeout_gen = self.tray_timeout_gen.wrapping_add(1);
     }
 
-    fn standalone_running(&mut self) -> Option<OverlayTarget> {
+    pub fn standalone_running(&mut self) -> Option<OverlayTarget> {
         if let Some((t, child)) = self.standalone_child.as_mut() {
             if matches!(child.try_wait(), Ok(None)) {
                 return Some(t.clone());
@@ -1030,7 +886,7 @@ impl MoonBeautyShellApp {
         None
     }
 
-    fn kill_standalone(&mut self) {
+    pub fn kill_standalone(&mut self) {
         if let Some((target, mut child)) = self.standalone_child.take() {
             // For lockscreen, the coordinator normally kills its own
             // children on clean exit — but SIGKILL bypasses that path,
@@ -1047,7 +903,7 @@ impl MoonBeautyShellApp {
         }
     }
 
-    fn spawn_standalone(&mut self, target: OverlayTarget) {
+    pub fn spawn_standalone(&mut self, target: OverlayTarget) {
         self.kill_standalone();
         let exe = resolve_exe();
         let tag = target.as_arg();
@@ -1071,7 +927,7 @@ impl MoonBeautyShellApp {
         }
     }
 
-    fn toggle_standalone(&mut self, target: OverlayTarget) {
+    pub fn toggle_standalone(&mut self, target: OverlayTarget) {
         match self.standalone_running() {
             Some(ref t) if t == &target => self.kill_standalone(),
             _ => self.spawn_standalone(target),
@@ -1081,7 +937,7 @@ impl MoonBeautyShellApp {
 
 impl MoonBeautyShellApp {
 
-    fn new_app() -> (Self, Command<Message>) {
+    pub fn new_app() -> (Self, Command<Message>) {
         let args: Vec<String> = std::env::args().collect();
         let standalone_target = detect_standalone_overlay(&args);
         if let Some(idx) = args.iter().position(|a| a == "--tray-context-menu") {
@@ -1391,7 +1247,7 @@ impl MoonBeautyShellApp {
         (app, Command::batch(init_tasks))
     }
 
-    fn update(&mut self, message: Message) -> Command<Message> {
+    pub fn update(&mut self, message: Message) -> Command<Message> {
         match message {
             Message::WindowResized(w) => {
                 self.window_w = w;
@@ -3345,7 +3201,7 @@ impl MoonBeautyShellApp {
         Command::none()
     }
 
-    fn subscription(&self) -> iced::Subscription<Message> {
+    pub fn subscription(&self) -> iced::Subscription<Message> {
         let clock_sub = iced::time::every(std::time::Duration::from_millis(1000)).map(|_| Message::TickClock);
         let toast_sub = if self.is_notif_surface && !self.notifs.active_toasts.is_empty() {
             iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::TickToasts)
@@ -3748,7 +3604,7 @@ impl MoonBeautyShellApp {
             lock_key_sub, lock_ipc_sub, lockscreen_watchdog_sub])
     }
 
-    fn view(&self) -> Element<'_, Message> {
+    pub fn view(&self) -> Element<'_, Message> {
         {
             static ONCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
             if !ONCE.swap(true, std::sync::atomic::Ordering::Relaxed) {
