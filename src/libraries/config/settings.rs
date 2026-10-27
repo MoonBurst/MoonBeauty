@@ -37,7 +37,6 @@ pub enum UnifiedToggle {
     Command { command: String },
 }
 
-
 impl UnifiedCheck {
     pub fn type_str(&self) -> &'static str {
         match self {
@@ -66,7 +65,10 @@ impl UnifiedCheck {
     pub fn from_type_param(t: &str, p: &str) -> Option<Self> {
         match t {
             "process" => Some(UnifiedCheck::Process { name: p.into() }),
-            "port_open" => p.parse::<u16>().ok().map(|port| UnifiedCheck::PortOpen { port }),
+            "port_open" => p
+                .parse::<u16>()
+                .ok()
+                .map(|port| UnifiedCheck::PortOpen { port }),
             "systemd_active" => Some(UnifiedCheck::SystemdActive { unit: p.into() }),
             "systemd_inactive" => Some(UnifiedCheck::SystemdInactive { unit: p.into() }),
             "file" => Some(UnifiedCheck::File { path: p.into() }),
@@ -101,9 +103,18 @@ impl UnifiedToggle {
         }
         let (action, target) = p.split_once(':')?;
         match t {
-            "systemctl" => Some(UnifiedToggle::Systemctl { action: action.into(), unit: target.into() }),
-            "podman" => Some(UnifiedToggle::Podman { action: action.into(), container: target.into() }),
-            "docker" => Some(UnifiedToggle::Docker { action: action.into(), container: target.into() }),
+            "systemctl" => Some(UnifiedToggle::Systemctl {
+                action: action.into(),
+                unit: target.into(),
+            }),
+            "podman" => Some(UnifiedToggle::Podman {
+                action: action.into(),
+                container: target.into(),
+            }),
+            "docker" => Some(UnifiedToggle::Docker {
+                action: action.into(),
+                container: target.into(),
+            }),
             _ => None,
         }
     }
@@ -137,14 +148,18 @@ pub struct FriendProfile {
     pub content_rules: Vec<ContentRule>,
 }
 
-fn default_profile_color() -> String { "#f7f700".to_string() }
+fn default_profile_color() -> String {
+    "#f7f700".to_string()
+}
 
 pub fn find_friend_profiles_path() -> PathBuf {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
     let candidates = [
         PathBuf::from("resources/friend_profiles.json"),
         home.join("projects/Moon-Beauty-Shell/resources/friend_profiles.json"),
-        dirs::config_dir().unwrap_or_else(|| PathBuf::from("/tmp")).join("moon-beauty-shell/resources/friend_profiles.json"),
+        dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("/tmp"))
+            .join("moon-beauty-shell/resources/friend_profiles.json"),
     ];
 
     for path in &candidates {
@@ -181,18 +196,34 @@ pub fn save_friend_profiles(profiles: &[FriendProfile]) -> Result<(), std::io::E
 pub struct GpuThresholds {
     #[serde(default = "default_temp_warn", alias = "tempWarn", alias = "temp_warn")]
     pub temp_warn: u32,
-    #[serde(default = "default_temp_danger", alias = "tempDanger", alias = "temp_danger")]
+    #[serde(
+        default = "default_temp_danger",
+        alias = "tempDanger",
+        alias = "temp_danger"
+    )]
     pub temp_danger: u32,
     #[serde(default = "default_vram_warn", alias = "vramWarn", alias = "vram_warn")]
     pub vram_warn: u32,
-    #[serde(default = "default_vram_danger", alias = "vramDanger", alias = "vram_danger")]
+    #[serde(
+        default = "default_vram_danger",
+        alias = "vramDanger",
+        alias = "vram_danger"
+    )]
     pub vram_danger: u32,
 }
 
-fn default_temp_warn() -> u32 { 70 }
-fn default_temp_danger() -> u32 { 80 }
-fn default_vram_warn() -> u32 { 4 }
-fn default_vram_danger() -> u32 { 2 }
+fn default_temp_warn() -> u32 {
+    70
+}
+fn default_temp_danger() -> u32 {
+    80
+}
+fn default_vram_warn() -> u32 {
+    4
+}
+fn default_vram_danger() -> u32 {
+    2
+}
 
 impl Default for GpuThresholds {
     fn default() -> Self {
@@ -279,7 +310,11 @@ pub struct ShellSettings {
     pub tray_icon_size: u32,
     #[serde(default = "default_launcher_icon_size", alias = "launcherIconSize")]
     pub launcher_icon_size: u32,
-    #[serde(default = "default_poll_interval", alias = "hardwarePollInterval", alias = "hardware_poll_interval_ms")]
+    #[serde(
+        default = "default_poll_interval",
+        alias = "hardwarePollInterval",
+        alias = "hardware_poll_interval_ms"
+    )]
     pub hardware_poll_interval_ms: u64,
 
     #[serde(default = "default_true", alias = "notificationsEnabled")]
@@ -320,7 +355,10 @@ pub struct ShellSettings {
     pub notif_excluded: String,
     #[serde(default, alias = "alarmSound")]
     pub alarm_sound: Option<String>,
-    #[serde(default = "default_alarm_sound_duration", alias = "alarmSoundDurationSec")]
+    #[serde(
+        default = "default_alarm_sound_duration",
+        alias = "alarmSoundDurationSec"
+    )]
     pub alarm_sound_duration_sec: u32,
     #[serde(default = "default_alarm_sound_volume", alias = "alarmSoundVolume")]
     pub alarm_sound_volume: u32,
@@ -328,11 +366,23 @@ pub struct ShellSettings {
     #[serde(default = "load_friend_profiles", alias = "friendProfiles")]
     pub friend_profiles: Vec<FriendProfile>,
 
-    #[serde(default = "default_bar_left", alias = "barLeft", alias = "barLeftModules")]
+    #[serde(
+        default = "default_bar_left",
+        alias = "barLeft",
+        alias = "barLeftModules"
+    )]
     pub bar_left: Vec<String>,
-    #[serde(default = "default_bar_center", alias = "barCenter", alias = "barCenterModules")]
+    #[serde(
+        default = "default_bar_center",
+        alias = "barCenter",
+        alias = "barCenterModules"
+    )]
     pub bar_center: Vec<String>,
-    #[serde(default = "default_bar_right", alias = "barRight", alias = "barRightModules")]
+    #[serde(
+        default = "default_bar_right",
+        alias = "barRight",
+        alias = "barRightModules"
+    )]
     pub bar_right: Vec<String>,
     #[serde(default, alias = "unifiedItems")]
     pub unified_items: Vec<UnifiedItem>,
@@ -354,91 +404,232 @@ pub struct ShellSettings {
     pub gpu0: GpuThresholds,
     #[serde(default, alias = "gpu1")]
     pub gpu1: GpuThresholds,
-    #[serde(default = "default_gpu_selected_id", alias = "gpuSelectedId", alias = "gpu_selected")]
+    #[serde(
+        default = "default_gpu_selected_id",
+        alias = "gpuSelectedId",
+        alias = "gpu_selected"
+    )]
     pub gpu_selected_id: String,
     #[serde(default, alias = "customColors", alias = "palette")]
     pub palette: Base16Palette,
     #[serde(default, alias = "ttsCommand")]
     pub tts_command: Option<String>,
-    #[serde(default = "default_overlay_cut", alias = "overlayCut", alias = "overlay_cut", alias = "launcherCut", alias = "launcher_cut")]
+    #[serde(
+        default = "default_overlay_cut",
+        alias = "overlayCut",
+        alias = "overlay_cut",
+        alias = "launcherCut",
+        alias = "launcher_cut"
+    )]
     pub overlay_cut: u32,
-    #[serde(default = "default_overlay_angle", alias = "overlayAngle", alias = "overlay_angle", alias = "launcherAngle", alias = "launcher_angle")]
+    #[serde(
+        default = "default_overlay_angle",
+        alias = "overlayAngle",
+        alias = "overlay_angle",
+        alias = "launcherAngle",
+        alias = "launcher_angle"
+    )]
     pub overlay_angle: u32,
     #[serde(default)]
     pub attachment_download_dir: String,
 }
 
-fn default_bar_height() -> u32 { 42 }
-fn default_font_size() -> u16 { 14 }
-fn default_overlay_font_size() -> u16 { 16 }
-fn default_tooltip_font_size() -> u16 { 14 }
-fn default_slant_width() -> f32 { 12.0 }
-fn default_tooltip_drop_ms() -> u32 { 180 }
-fn default_tooltip_expand_ms() -> u32 { 162 }
-fn default_tooltip_width_px() -> u32 { 380 }
-fn default_tooltip_height_px() -> u32 { 300 }
-fn default_tooltip_pause_ms() -> u32 { 0 }
-fn default_tooltip_offset() -> i32 { 32 }
-fn default_slant_mode() -> String { "symmetric".to_string() }
-fn default_bar_shape() -> String { "slant".to_string() }
-fn default_global_border_width() -> f32 { 3.0 }
-fn default_control_border_width() -> f32 { 2.0 }
-fn default_global_padding() -> u16 { 12 }
-fn default_capsule_spacing() -> i32 { 2 }
-fn default_cpu_temp_warn() -> u32 { 70 }
-fn default_cpu_temp_danger() -> u32 { 80 }
-fn default_cpu_usage_warn() -> u32 { 75 }
-fn default_cpu_usage_danger() -> u32 { 90 }
-fn default_ram_warn_gib() -> u32 { 8 }
-fn default_ram_danger_gib() -> u32 { 2 }
-fn default_tray_width() -> u32 { 60 }
-fn default_tray_timeout() -> u32 { 3 }
-fn default_tray_icon_size() -> u32 { 20 }
-fn default_launcher_icon_size() -> u32 { 100 }
-fn default_poll_interval() -> u64 { 30000 }
-fn default_true() -> bool { true }
+fn default_bar_height() -> u32 {
+    42
+}
+fn default_font_size() -> u16 {
+    14
+}
+fn default_overlay_font_size() -> u16 {
+    16
+}
+fn default_tooltip_font_size() -> u16 {
+    14
+}
+fn default_slant_width() -> f32 {
+    12.0
+}
+fn default_tooltip_drop_ms() -> u32 {
+    180
+}
+fn default_tooltip_expand_ms() -> u32 {
+    162
+}
+fn default_tooltip_width_px() -> u32 {
+    380
+}
+fn default_tooltip_height_px() -> u32 {
+    300
+}
+fn default_tooltip_pause_ms() -> u32 {
+    0
+}
+fn default_tooltip_offset() -> i32 {
+    32
+}
+fn default_slant_mode() -> String {
+    "symmetric".to_string()
+}
+fn default_bar_shape() -> String {
+    "slant".to_string()
+}
+fn default_global_border_width() -> f32 {
+    3.0
+}
+fn default_control_border_width() -> f32 {
+    2.0
+}
+fn default_global_padding() -> u16 {
+    12
+}
+fn default_capsule_spacing() -> i32 {
+    2
+}
+fn default_cpu_temp_warn() -> u32 {
+    70
+}
+fn default_cpu_temp_danger() -> u32 {
+    80
+}
+fn default_cpu_usage_warn() -> u32 {
+    75
+}
+fn default_cpu_usage_danger() -> u32 {
+    90
+}
+fn default_ram_warn_gib() -> u32 {
+    8
+}
+fn default_ram_danger_gib() -> u32 {
+    2
+}
+fn default_tray_width() -> u32 {
+    60
+}
+fn default_tray_timeout() -> u32 {
+    3
+}
+fn default_tray_icon_size() -> u32 {
+    20
+}
+fn default_launcher_icon_size() -> u32 {
+    100
+}
+fn default_poll_interval() -> u64 {
+    30000
+}
+fn default_true() -> bool {
+    true
+}
 
-fn default_notif_hold() -> u64 { 3 }
-fn default_notif_volume() -> u32 { 50 }
-fn default_notif_corner() -> String { "top-right".to_string() }
-fn default_notif_shape() -> String { "hex".to_string() }
-fn default_notif_screen() -> String { "Auto (Primary)".to_string() }
-fn default_bar_monitor() -> String { "All".to_string() }
-fn default_notif_baseline() -> i32 { 340 }
-fn default_notif_margin_x() -> i32 { 0 }
-fn default_notif_overlap() -> i32 { -20 }
-fn default_notif_card_width() -> u32 { 400 }
-fn default_notif_card_height() -> u32 { 150 }
-fn default_slide_in() -> u32 { 250 }
-fn default_drop_pause() -> u32 { 100 }
-fn default_drop_distance() -> u32 { 50 }
-fn default_summary_size() -> u16 { 24 }
-fn default_body_size() -> u16 { 22 }
-fn default_excluded() -> String { "greenclip, copyq".to_string() }
-fn default_alarm_sound_duration() -> u32 { 5 }
-fn default_alarm_sound_volume() -> u32 { 100 }
-fn default_gpu_selected_id() -> String { "card0".to_string() }
-fn default_overlay_width() -> u32 { 1200 }
-fn default_overlay_height() -> u32 { 800 }
-fn default_overlay_cut() -> u32 { 24 }
-fn default_overlay_angle() -> u32 { 45 }
+fn default_notif_hold() -> u64 {
+    3
+}
+fn default_notif_volume() -> u32 {
+    50
+}
+fn default_notif_corner() -> String {
+    "top-right".to_string()
+}
+fn default_notif_shape() -> String {
+    "hex".to_string()
+}
+fn default_notif_screen() -> String {
+    "Auto (Primary)".to_string()
+}
+fn default_bar_monitor() -> String {
+    "All".to_string()
+}
+fn default_notif_baseline() -> i32 {
+    340
+}
+fn default_notif_margin_x() -> i32 {
+    0
+}
+fn default_notif_overlap() -> i32 {
+    -20
+}
+fn default_notif_card_width() -> u32 {
+    400
+}
+fn default_notif_card_height() -> u32 {
+    150
+}
+fn default_slide_in() -> u32 {
+    250
+}
+fn default_drop_pause() -> u32 {
+    100
+}
+fn default_drop_distance() -> u32 {
+    50
+}
+fn default_summary_size() -> u16 {
+    24
+}
+fn default_body_size() -> u16 {
+    22
+}
+fn default_excluded() -> String {
+    "greenclip, copyq".to_string()
+}
+fn default_alarm_sound_duration() -> u32 {
+    5
+}
+fn default_alarm_sound_volume() -> u32 {
+    100
+}
+fn default_gpu_selected_id() -> String {
+    "card0".to_string()
+}
+fn default_overlay_width() -> u32 {
+    1200
+}
+fn default_overlay_height() -> u32 {
+    800
+}
+fn default_overlay_cut() -> u32 {
+    24
+}
+fn default_overlay_angle() -> u32 {
+    45
+}
 
 fn default_bar_left() -> Vec<String> {
-    vec!["calendar".into(), "music".into(), "alarm".into(), "weather".into(), "unified".into(), "notify".into()]
+    vec![
+        "calendar".into(),
+        "music".into(),
+        "alarm".into(),
+        "weather".into(),
+        "unified".into(),
+        "notify".into(),
+    ]
 }
 fn default_bar_center() -> Vec<String> {
-    vec!["audio".into(), "clock".into(), "mic".into(), "custom".into()]
+    vec![
+        "audio".into(),
+        "clock".into(),
+        "mic".into(),
+        "custom".into(),
+    ]
 }
 fn default_bar_right() -> Vec<String> {
-    vec!["tray".into(), "ram".into(), "gpu".into(), "cpu".into(), "net".into(), "battery".into()]
+    vec![
+        "tray".into(),
+        "ram".into(),
+        "gpu".into(),
+        "cpu".into(),
+        "net".into(),
+        "battery".into(),
+    ]
 }
 
 impl Default for ShellSettings {
     fn default() -> Self {
         let mut visible = HashMap::new();
         for key in &[
-            "calendar", "music", "alarm", "weather", "unified", "notify", "clock",
-            "audio", "mic", "net", "cpu", "gpu", "ram", "tray", "battery", "custom",
+            "calendar", "music", "alarm", "weather", "unified", "notify", "clock", "audio", "mic",
+            "net", "cpu", "gpu", "ram", "tray", "battery", "custom",
         ] {
             visible.insert(key.to_string(), true);
         }
@@ -532,12 +723,11 @@ impl ShellSettings {
     }
 
     pub fn tooltip_size(&self, id: &str) -> (u32, u32) {
-        self.tooltip_sizes.get(id).copied()
-            .unwrap_or(match id {
-                "alarm" => (500, 400),
-                "clock" => (540, 320),
-                _ => (self.tooltip_width_px, self.tooltip_height_px),
-            })
+        self.tooltip_sizes.get(id).copied().unwrap_or(match id {
+            "alarm" => (500, 400),
+            "clock" => (540, 320),
+            _ => (self.tooltip_width_px, self.tooltip_height_px),
+        })
     }
 
     pub fn get_window_size(&self, id: &str, _def_w: u32, _def_h: u32) -> (f32, f32) {
@@ -556,7 +746,11 @@ impl ShellSettings {
         // per second floods the log past anything useful. Gate behind
         // MBS_SETTINGS_DEBUG so diagnostics can still turn it on.
         if std::env::var_os("MBS_SETTINGS_DEBUG").is_some() {
-            eprintln!("[settings] config_path = {:?} exists={}", path, path.exists());
+            eprintln!(
+                "[settings] config_path = {:?} exists={}",
+                path,
+                path.exists()
+            );
         }
         if path.exists() {
             if let Ok(content) = fs::read_to_string(&path) {
@@ -566,7 +760,10 @@ impl ShellSettings {
                         // Migrate broken templates that inject "a new" or {summary}
                         for p in &mut disk_profiles {
                             if let Some(ref mut readout) = p.default_readout {
-                                if readout.contains("a new") || readout.contains("voice message") || readout.contains("{summary}") {
+                                if readout.contains("a new")
+                                    || readout.contains("voice message")
+                                    || readout.contains("{summary}")
+                                {
                                     *readout = "Message from {name}".to_string();
                                 }
                             }
@@ -583,8 +780,10 @@ impl ShellSettings {
     }
 
     pub fn save(&self) -> Result<(), std::io::Error> {
-        eprintln!("[save] writing tooltip_sizes={:?} bar_monitor={:?}",
-            self.tooltip_sizes, self.bar_monitor);
+        eprintln!(
+            "[save] writing tooltip_sizes={:?} bar_monitor={:?}",
+            self.tooltip_sizes, self.bar_monitor
+        );
         let path = Self::config_path();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;

@@ -1,8 +1,8 @@
+use super::coordinator::LockIpc;
 use chrono::Local;
 use iced::widget::{column, container, text};
 use iced::{Alignment, Element, Length, Padding};
 use std::sync::mpsc;
-use super::coordinator::LockIpc;
 
 use crate::libraries::config::theme::ShellTheme;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
@@ -74,13 +74,28 @@ impl LockscreenOverlay {
     /// Uses two threads: one reads coordinator messages, one writes ours.
     fn connect_coordinator() -> Option<(mpsc::Sender<LockIpc>, mpsc::Receiver<LockIpc>)> {
         let path = match std::env::var("MBS_LOCK_SOCKET") {
-            Ok(p) => { eprintln!("[lock-child-v225] socket env set: {:?}", p); p },
-            Err(_) => { eprintln!("[lock-child-v225] MBS_LOCK_SOCKET NOT SET"); return None; },
+            Ok(p) => {
+                eprintln!("[lock-child-v225] socket env set: {:?}", p);
+                p
+            }
+            Err(_) => {
+                eprintln!("[lock-child-v225] MBS_LOCK_SOCKET NOT SET");
+                return None;
+            }
         };
-        eprintln!("[lock-child-v225] attempting UnixStream::connect({:?})", path);
+        eprintln!(
+            "[lock-child-v225] attempting UnixStream::connect({:?})",
+            path
+        );
         let stream = match std::os::unix::net::UnixStream::connect(&path) {
-            Ok(s) => { eprintln!("[lock-child-v225] socket CONNECTED"); s },
-            Err(e) => { eprintln!("[lock-child-v225] connect failed: {}", e); return None; },
+            Ok(s) => {
+                eprintln!("[lock-child-v225] socket CONNECTED");
+                s
+            }
+            Err(e) => {
+                eprintln!("[lock-child-v225] connect failed: {}", e);
+                return None;
+            }
         };
         let reader_stream = stream.try_clone().ok()?;
         let writer_stream = stream;
@@ -93,9 +108,15 @@ impl LockscreenOverlay {
             use std::io::{BufRead, BufReader};
             let reader = BufReader::new(reader_stream);
             for line in reader.lines() {
-                let Ok(line) = line else { break; };
-                let Ok(msg) = serde_json::from_str::<LockIpc>(&line) else { continue; };
-                if in_tx.send(msg).is_err() { break; }
+                let Ok(line) = line else {
+                    break;
+                };
+                let Ok(msg) = serde_json::from_str::<LockIpc>(&line) else {
+                    continue;
+                };
+                if in_tx.send(msg).is_err() {
+                    break;
+                }
             }
             eprintln!("[lock-child] coordinator reader closed");
         });
@@ -107,7 +128,9 @@ impl LockscreenOverlay {
             while let Ok(msg) = out_rx.recv() {
                 let mut line = serde_json::to_string(&msg).unwrap_or_default();
                 line.push('\n');
-                if w.write_all(line.as_bytes()).is_err() { break; }
+                if w.write_all(line.as_bytes()).is_err() {
+                    break;
+                }
             }
             eprintln!("[lock-child] coordinator writer closed");
         });
@@ -132,7 +155,9 @@ impl LockscreenOverlay {
     ///   None otherwise (updates applied in-place)
     pub fn drain_ipc(&mut self) -> Option<LockMessage> {
         let mut result = None;
-        let Some(rx) = self.ipc_rx.as_ref() else { return None; };
+        let Some(rx) = self.ipc_rx.as_ref() else {
+            return None;
+        };
         while let Ok(msg) = rx.try_recv() {
             match msg {
                 LockIpc::BufferUpdate(n) => {
@@ -166,9 +191,7 @@ impl LockscreenOverlay {
     /// confirmation. Coordinator's BufferUpdate will overwrite if drift occurs.
     pub fn forward_key(&mut self, key: &iced::keyboard::Key) {
         let (msg, delta) = match key {
-            iced::keyboard::Key::Character(c) => {
-                (Some(LockIpc::Key(c.to_string())), 1_i32)
-            }
+            iced::keyboard::Key::Character(c) => (Some(LockIpc::Key(c.to_string())), 1_i32),
             iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => {
                 (Some(LockIpc::Backspace), -1_i32)
             }
@@ -178,7 +201,9 @@ impl LockscreenOverlay {
             _ => (None, 0_i32),
         };
 
-        let Some(msg) = msg else { return; };
+        let Some(msg) = msg else {
+            return;
+        };
         if let Some(tx) = self.ipc_tx.as_ref() {
             if tx.send(msg).is_err() {
                 // Channel dead; don't apply optimistic update that will
@@ -258,7 +283,7 @@ impl LockscreenOverlay {
                 .bold()
                 .color(display_color)
                 .align_x(Alignment::Center)
-                .wrapping(iced::widget::text::Wrapping::None)
+                .wrapping(iced::widget::text::Wrapping::None),
         )
         .width(Length::Fixed(field_w))
         .height(Length::Fixed(field_h))
@@ -279,7 +304,12 @@ impl LockscreenOverlay {
             .width(Length::Fill)
             .align_x(Alignment::Center)
             .clip(true)
-            .padding(Padding { top: 28.0, right: 0.0, bottom: 0.0, left: 0.0 });
+            .padding(Padding {
+                top: 28.0,
+                right: 0.0,
+                bottom: 0.0,
+                left: 0.0,
+            });
 
         let mut inner: iced::widget::Column<'a, LockMessage> = column![
             text(time_str).size(64).bold().color(theme.text_strong),
@@ -292,14 +322,29 @@ impl LockscreenOverlay {
 
         if self.is_caps_lock {
             inner = inner.push(
-                container(text("⇪ CAPS LOCK ON").size(11).bold().color(theme.warning))
-                    .padding(Padding { top: 12.0, right: 0.0, bottom: 0.0, left: 0.0 })
+                container(text("⇪ CAPS LOCK ON").size(11).bold().color(theme.warning)).padding(
+                    Padding {
+                        top: 12.0,
+                        right: 0.0,
+                        bottom: 0.0,
+                        left: 0.0,
+                    },
+                ),
             );
         }
 
         inner = inner.push(
-            container(text("Type to unlock  •  Enter to submit").size(10).color(theme.muted))
-                .padding(Padding { top: 24.0, right: 0.0, bottom: 0.0, left: 0.0 })
+            container(
+                text("Type to unlock  •  Enter to submit")
+                    .size(10)
+                    .color(theme.muted),
+            )
+            .padding(Padding {
+                top: 24.0,
+                right: 0.0,
+                bottom: 0.0,
+                left: 0.0,
+            }),
         );
 
         let card_content = container(inner)
@@ -310,10 +355,17 @@ impl LockscreenOverlay {
             .clip(true);
 
         let card_bg = ShapeBox::new()
-            .shape(ShapeType::AngledHexagon { cut: cut_f, angle_deg })
+            .shape(ShapeType::AngledHexagon {
+                cut: cut_f,
+                angle_deg,
+            })
             .background(theme.background)
             .border(
-                if self.auth_failed { theme.danger } else { theme.text },
+                if self.auth_failed {
+                    theme.danger
+                } else {
+                    theme.text
+                },
                 theme.border_width,
             )
             .size(Length::Fixed(card_w), Length::Fixed(card_h));
@@ -328,13 +380,17 @@ impl LockscreenOverlay {
             .push(card_bg.view())
             .push(centered);
 
-        container(container(card).center_x(Length::Fill).center_y(Length::Fill))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(move |_t| container::Style {
-                background: Some(iced::Background::Color(theme.background)),
-                ..Default::default()
-            })
-            .into()
+        container(
+            container(card)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_t| container::Style {
+            background: Some(iced::Background::Color(theme.background)),
+            ..Default::default()
+        })
+        .into()
     }
 }

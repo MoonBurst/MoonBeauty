@@ -36,7 +36,10 @@ pub fn spawn(req: &SpawnRequest) -> io::Result<Child> {
 
     if req.id == "weather" {
         cmd.arg("--weather-tooltip");
-    } else if matches!(req.id, "calendar" | "music" | "unified" | "net" | "custom" | "clock") {
+    } else if matches!(
+        req.id,
+        "calendar" | "music" | "unified" | "net" | "custom" | "clock"
+    ) {
         cmd.arg("--info-tooltip").env("MBS_INFO_MODE", req.id);
     } else {
         cmd.arg("--sys-tooltip").env("MBS_SYS_TARGET", req.id);
@@ -46,21 +49,32 @@ pub fn spawn(req: &SpawnRequest) -> io::Result<Child> {
         cmd.env("MBS_OUTPUT", out);
     }
 
-    cmd.env("MBS_TOOLTIP_W", req.tooltip_w.max(req.capsule_w as u32).to_string())
-       .env("MBS_TOOLTIP_H", req.tooltip_h.to_string())
-       .env("MBS_TOOLTIP_DROP_MS", req.drop_ms.to_string())
-       .env("MBS_TOOLTIP_EXPAND_MS", req.expand_ms.to_string())
-       .env("MBS_SCREEN_W", req.screen_w.to_string())
-       .env("MBS_SLANT_L", req.slant_l)
-       .env("MBS_SLANT_R", req.slant_r)
-       .env("MBS_GROW_RIGHT", if req.grow_right { "1" } else { "0" })
-       .env("MBS_CAPSULE_CX", req.capsule_cx.to_string())
-       .env("MBS_CAPSULE_W", req.capsule_w.to_string());
+    cmd.env(
+        "MBS_TOOLTIP_W",
+        req.tooltip_w.max(req.capsule_w as u32).to_string(),
+    )
+    .env("MBS_TOOLTIP_H", req.tooltip_h.to_string())
+    .env("MBS_TOOLTIP_DROP_MS", req.drop_ms.to_string())
+    .env("MBS_TOOLTIP_EXPAND_MS", req.expand_ms.to_string())
+    .env("MBS_SCREEN_W", req.screen_w.to_string())
+    .env("MBS_SLANT_L", req.slant_l)
+    .env("MBS_SLANT_R", req.slant_r)
+    .env("MBS_GROW_RIGHT", if req.grow_right { "1" } else { "0" })
+    .env("MBS_CAPSULE_CX", req.capsule_cx.to_string())
+    .env("MBS_CAPSULE_W", req.capsule_w.to_string());
 
     eprintln!(
         "[spawn] id={:?} w={} h={} cx={} cap_w={:.1} sw={} L={} R={} grow_right={} out={:?}",
-        req.id, req.tooltip_w, req.tooltip_h, req.capsule_cx, req.capsule_w,
-        req.screen_w, req.slant_l, req.slant_r, req.grow_right, req.output
+        req.id,
+        req.tooltip_w,
+        req.tooltip_h,
+        req.capsule_cx,
+        req.capsule_w,
+        req.screen_w,
+        req.slant_l,
+        req.slant_r,
+        req.grow_right,
+        req.output
     );
 
     cmd.spawn()
@@ -76,11 +90,7 @@ pub fn spawn(req: &SpawnRequest) -> io::Result<Child> {
 ///      reload settings itself.
 ///   2. Otherwise, derive height from current telemetry content size
 ///      (weather forecast line count, CPU/GPU/RAM process count, etc.).
-pub fn compute_height(
-    id: &str,
-    settings: &ShellSettings,
-    telemetry: &UnifiedTelemetry,
-) -> u32 {
+pub fn compute_height(id: &str, settings: &ShellSettings, telemetry: &UnifiedTelemetry) -> u32 {
     // User-dragged override wins.
     if let Some((w, h)) = settings.tooltip_sizes.get(id) {
         eprintln!(
@@ -94,7 +104,9 @@ pub fn compute_height(
     let bar_h = settings.bar_height;
     let content_h: u32 = match id {
         "weather" => {
-            let lines = telemetry.weather.as_ref()
+            let lines = telemetry
+                .weather
+                .as_ref()
                 .map(|w| w.tooltip_lines.len().min(15) as u32)
                 .unwrap_or(1);
             lines * 24 + 40
@@ -102,9 +114,13 @@ pub fn compute_height(
         "calendar" => {
             use chrono::Datelike;
             let now = chrono::Local::now();
-            let first = chrono::NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
-                .unwrap_or_default();
-            let (ny, nm) = if now.month() == 12 { (now.year() + 1, 1) } else { (now.year(), now.month() + 1) };
+            let first =
+                chrono::NaiveDate::from_ymd_opt(now.year(), now.month(), 1).unwrap_or_default();
+            let (ny, nm) = if now.month() == 12 {
+                (now.year() + 1, 1)
+            } else {
+                (now.year(), now.month() + 1)
+            };
             let next = chrono::NaiveDate::from_ymd_opt(ny, nm, 1).unwrap_or_default();
             let days = next.signed_duration_since(first).num_days() as u32;
             let offset = first.weekday().num_days_from_sunday();
@@ -122,6 +138,9 @@ pub fn compute_height(
         _ => 400,
     };
     let total = content_h + bar_h + 20;
-    eprintln!("[compute-h] id={} DEFAULT content_h={} bar_h={} total={} (no override)", id, content_h, bar_h, total);
+    eprintln!(
+        "[compute-h] id={} DEFAULT content_h={} bar_h={} total={} (no override)",
+        id, content_h, bar_h, total
+    );
     total
 }

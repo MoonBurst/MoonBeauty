@@ -70,7 +70,10 @@ impl ClockBackend {
                 })
                 .collect();
 
-            WorldZoneColumn { title, zones: rendered }
+            WorldZoneColumn {
+                title,
+                zones: rendered,
+            }
         };
 
         vec![
@@ -83,7 +86,11 @@ impl ClockBackend {
     pub fn compute_calendar(year: i32, month: u32) -> CalendarViewData {
         let now = Local::now();
         let y = if year > 0 { year } else { now.year() };
-        let m = if (1..=12).contains(&month) { month } else { now.month() };
+        let m = if (1..=12).contains(&month) {
+            month
+        } else {
+            now.month()
+        };
 
         let first_day = NaiveDate::from_ymd_opt(y, m, 1).unwrap_or_default();
         let first_day_offset = first_day.weekday().num_days_from_sunday() as usize;

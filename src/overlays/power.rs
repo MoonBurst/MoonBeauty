@@ -39,21 +39,19 @@ impl PowerOverlay {
 
     pub fn update(&mut self, message: PowerMessage) {
         match message {
-            PowerMessage::Select(act) => {
-                match act {
-                    PowerAction::Lock | PowerAction::Sleep => {
+            PowerMessage::Select(act) => match act {
+                PowerAction::Lock | PowerAction::Sleep => {
+                    Self::execute(act);
+                }
+                PowerAction::Logout | PowerAction::Reboot | PowerAction::Shutdown => {
+                    if self.confirming == Some(act) {
                         Self::execute(act);
-                    }
-                    PowerAction::Logout | PowerAction::Reboot | PowerAction::Shutdown => {
-                        if self.confirming == Some(act) {
-                            Self::execute(act);
-                            self.confirming = None;
-                        } else {
-                            self.confirming = Some(act);
-                        }
+                        self.confirming = None;
+                    } else {
+                        self.confirming = Some(act);
                     }
                 }
-            }
+            },
             PowerMessage::Confirm(act) => {
                 Self::execute(act);
                 self.confirming = None;
@@ -81,11 +79,17 @@ impl PowerOverlay {
                 }
                 PowerAction::Logout => {
                     if std::env::var("HYPRLAND_INSTANCE_SIGNATURE").is_ok() {
-                        let _ = Command::new("hyprctl").args(["dispatch", "exit"]).status().await;
+                        let _ = Command::new("hyprctl")
+                            .args(["dispatch", "exit"])
+                            .status()
+                            .await;
                     } else if std::env::var("SWAYSOCK").is_ok() {
                         let _ = Command::new("swaymsg").arg("exit").status().await;
                     } else {
-                        let _ = Command::new("loginctl").args(["terminate-session", "self"]).status().await;
+                        let _ = Command::new("loginctl")
+                            .args(["terminate-session", "self"])
+                            .status()
+                            .await;
                     }
                 }
             }
@@ -94,11 +98,36 @@ impl PowerOverlay {
 
     pub fn view<'a>(&'a self, theme: &ShellTheme) -> Element<'a, PowerMessage> {
         let actions = [
-            (PowerAction::Lock, "🔒", "Lock Session", "Lock display with PAM authentication"),
-            (PowerAction::Sleep, "🌙", "Sleep", "Suspend system into standby"),
-            (PowerAction::Logout, "🚪", "Log Out", "Exit current desktop compositor"),
-            (PowerAction::Reboot, "🔄", "Reboot", "Restart the computer and OS"),
-            (PowerAction::Shutdown, "⏻", "Power Off", "Safely shut down power"),
+            (
+                PowerAction::Lock,
+                "🔒",
+                "Lock Session",
+                "Lock display with PAM authentication",
+            ),
+            (
+                PowerAction::Sleep,
+                "🌙",
+                "Sleep",
+                "Suspend system into standby",
+            ),
+            (
+                PowerAction::Logout,
+                "🚪",
+                "Log Out",
+                "Exit current desktop compositor",
+            ),
+            (
+                PowerAction::Reboot,
+                "🔄",
+                "Reboot",
+                "Restart the computer and OS",
+            ),
+            (
+                PowerAction::Shutdown,
+                "⏻",
+                "Power Off",
+                "Safely shut down power",
+            ),
         ];
 
         let mut list_col = column![].spacing(10);
@@ -110,14 +139,23 @@ impl PowerOverlay {
                 title.to_string()
             };
 
-            let title_col = if is_confirming { theme.danger } else { theme.text };
+            let title_col = if is_confirming {
+                theme.danger
+            } else {
+                theme.text
+            };
 
             let row_item = button(
                 row![
                     text(icon).size(26),
                     column![
-                        text(display_title).size((theme.font_size_overlay) as f32).bold().color(title_col),
-                        text(desc).size((theme.font_size_normal - 3) as f32).color(theme.muted),
+                        text(display_title)
+                            .size((theme.font_size_overlay) as f32)
+                            .bold()
+                            .color(title_col),
+                        text(desc)
+                            .size((theme.font_size_normal - 3) as f32)
+                            .color(theme.muted),
                     ]
                     .spacing(2),
                 ]
@@ -159,6 +197,9 @@ impl PowerOverlay {
 
         let card = Stack::new().push(card_bg.view()).push(card_content);
 
-        container(card).center_x(Length::Fill).center_y(Length::Fill).into()
+        container(card)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .into()
     }
 }

@@ -15,13 +15,10 @@ pub fn spawn(tx: Sender<AnnotatorCommand>) {
         let _ = std::fs::remove_file(&path);
         let listener = match UnixListener::bind(&path) {
             Ok(l) => {
-                let _ = std::fs::set_permissions(
-                    &path,
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        std::fs::Permissions::from_mode(0o600)
-                    },
-                );
+                let _ = std::fs::set_permissions(&path, {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::Permissions::from_mode(0o600)
+                });
                 eprintln!("[annotator-ipc] listening on {:?}", path);
                 l
             }

@@ -68,7 +68,6 @@ pub struct ProcessItem {
     pub is_highlight: bool,
 }
 
-
 fn sys_state() -> &'static Mutex<System> {
     static SYS: OnceLock<Mutex<System>> = OnceLock::new();
     SYS.get_or_init(|| Mutex::new(System::new()))
@@ -81,7 +80,9 @@ fn read_cpu_temp() -> u32 {
         if let Ok(raw) = fs::read_to_string(&path) {
             if let Ok(v) = raw.trim().parse::<u32>() {
                 let t = if v > 1000 { v / 1000 } else { v };
-                if t > 0 { return t; }
+                if t > 0 {
+                    return t;
+                }
             }
         }
     }
@@ -90,7 +91,8 @@ fn read_cpu_temp() -> u32 {
         for entry in entries.flatten() {
             let dir = entry.path();
             let name = fs::read_to_string(dir.join("name"))
-                .map(|s| s.trim().to_string()).unwrap_or_default();
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
             if name == "k10temp" || name == "coretemp" || name == "zenpower" {
                 if let Ok(raw) = fs::read_to_string(dir.join("temp1_input")) {
                     if let Ok(v) = raw.trim().parse::<u32>() {
@@ -116,7 +118,6 @@ impl Default for SystemCollector {
     }
 }
 
-
 fn short_gpu_name(full: &str) -> String {
     let mut s = full.to_string();
     for p in ["Radeon ", "GeForce ", "AMD ", "NVIDIA "] {
@@ -124,7 +125,9 @@ fn short_gpu_name(full: &str) -> String {
             s = s[p.len()..].to_string();
         }
     }
-    for suf in [" XTX", " XT", " GRE", " Ti", " SUPER", " Super", " Laptop", " Mobile", " M"] {
+    for suf in [
+        " XTX", " XT", " GRE", " Ti", " SUPER", " Super", " Laptop", " Mobile", " M",
+    ] {
         if s.ends_with(suf) {
             s = s[..s.len() - suf.len()].to_string();
         }
@@ -143,61 +146,82 @@ impl SystemCollector {
     }
 
     pub async fn collect_cpu() -> CpuMetrics {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    static FIRST_CALL: AtomicBool = AtomicBool::new(true);
-    let is_first = FIRST_CALL.swap(false, Ordering::Relaxed);
-    let temp_c = read_cpu_temp();
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static FIRST_CALL: AtomicBool = AtomicBool::new(true);
+        let is_first = FIRST_CALL.swap(false, Ordering::Relaxed);
+        let temp_c = read_cpu_temp();
 
-    tokio::task::spawn_blocking(move || {
-        let mut sys = sys_state().lock().unwrap();
+        tokio::task::spawn_blocking(move || {
+            let mut sys = sys_state().lock().unwrap();
 
-        // Cheap: per-core CPU usage (reads /proc/stat, ~1-2ms)
-        sys.refresh_cpu_usage();
+            // Cheap: per-core CPU usage (reads /proc/stat, ~1-2ms)
+            sys.refresh_cpu_usage();
 
-        // Expensive: full process list. On a 250+ process system this reads
-        // ~1500 files per call. Throttle to 15s — the aggregate usage number
-        // is what matters every poll; the per-process breakdown is only
-        // surfaced in tooltips, which are fine with 15s freshness.
-        let should_refresh_procs = {
-            use std::sync::Mutex;
-            use std::time::Instant;
-            static LAST: Mutex<Option<Instant>> = Mutex::new(None);
-            let mut g = LAST.lock().unwrap();
-            let refresh = g.map(|t| t.elapsed().as_secs() >= 15).unwrap_or(true);
-            if refresh { *g = Some(Instant::now()); }
-            refresh
-        };
-        if should_refresh_procs || is_first {
-            if is_first {
-                std::thread::sleep(std::time::Duration::from_millis(250));
-                sys.refresh_cpu_usage();
+            // Expensive: full process list. On a 250+ process system this reads
+            // ~1500 files per call. Throttle to 15s — the aggregate usage number
+            // is what matters every poll; the per-process breakdown is only
+            // surfaced in tooltips, which are fine with 15s freshness.
+            let should_refresh_procs = {
+                use std::sync::Mutex;
+                use std::time::Instant;
+                static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+                let mut g = LAST.lock().unwrap();
+                let refresh = g.map(|t| t.elapsed().as_secs() >= 15).unwrap_or(true);
+                if refresh {
+                    *g = Some(Instant::now());
+                }
+                refresh
+            };
+            if should_refresh_procs || is_first {
+                if is_first {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                    sys.refresh_cpu_usage();
+                }
+                sys.refresh_processes(ProcessesToUpdate::All);
             }
-            sys.refresh_processes(ProcessesToUpdate::All);
-        }
 
-        let usage_pct = sys.global_cpu_usage().round().clamp(0.0, 100.0) as u8;
+            let usage_pct = sys.global_cpu_usage().round().clamp(0.0, 100.0) as u8;
 
-        let mut procs: Vec<(u32, String, f32)> = sys.processes()
-            .iter()
-            .map(|(pid, p)| {
-                (pid.as_u32(), p.name().to_string_lossy().to_string(), p.cpu_usage())
-            })
-            .collect();
-        procs.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+            let mut procs: Vec<(u32, String, f32)> = sys
+                .processes()
+                .iter()
+                .map(|(pid, p)| {
+                    (
+                        pid.as_u32(),
+                        p.name().to_string_lossy().to_string(),
+                        p.cpu_usage(),
+                    )
+                })
+                .collect();
+            procs.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
-        let top_procs = procs.into_iter().take(15).map(|(pid, name, pct)| ProcessItem {
-            pid,
-            name,
-            metric: format!("{:.1}%", pct),
-            is_highlight: false,
-        }).collect();
+            let top_procs = procs
+                .into_iter()
+                .take(15)
+                .map(|(pid, name, pct)| ProcessItem {
+                    pid,
+                    name,
+                    metric: format!("{:.1}%", pct),
+                    is_highlight: false,
+                })
+                .collect();
 
-        CpuMetrics { usage_pct, temp_c, top_procs }
-    }).await.unwrap_or_else(|e| {
-        eprintln!("[cpu] sysinfo task failed: {:?}", e);
-        CpuMetrics { usage_pct: 0, temp_c, top_procs: Vec::new() }
-    })
-}
+            CpuMetrics {
+                usage_pct,
+                temp_c,
+                top_procs,
+            }
+        })
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("[cpu] sysinfo task failed: {:?}", e);
+            CpuMetrics {
+                usage_pct: 0,
+                temp_c,
+                top_procs: Vec::new(),
+            }
+        })
+    }
 
     pub async fn collect_gpu(card_id: &str, is_nvidia: bool, nv_index: u32) -> GpuMetrics {
         if is_nvidia {
@@ -262,7 +286,9 @@ impl SystemCollector {
                         }
                     }
                 }
-                if temp_c > 0 && power_w > 0 { break; }
+                if temp_c > 0 && power_w > 0 {
+                    break;
+                }
             }
         }
 
@@ -301,66 +327,86 @@ impl SystemCollector {
     }
 
     pub async fn collect_ram() -> RamMetrics {
-    tokio::task::spawn_blocking(|| {
-        let mut sys = sys_state().lock().unwrap();
-        sys.refresh_memory();
+        tokio::task::spawn_blocking(|| {
+            let mut sys = sys_state().lock().unwrap();
+            sys.refresh_memory();
 
-        // Same 15s throttle as collect_cpu — the process list is the
-        // expensive part. refresh_memory() (which reads /proc/meminfo) is
-        // cheap and stays at poll rate.
-        let should_refresh_procs = {
-            use std::sync::Mutex;
-            use std::time::Instant;
-            static LAST: Mutex<Option<Instant>> = Mutex::new(None);
-            let mut g = LAST.lock().unwrap();
-            let refresh = g.map(|t| t.elapsed().as_secs() >= 15).unwrap_or(true);
-            if refresh { *g = Some(Instant::now()); }
-            refresh
-        };
-        if should_refresh_procs {
-            sys.refresh_processes(ProcessesToUpdate::All);
-        }
+            // Same 15s throttle as collect_cpu — the process list is the
+            // expensive part. refresh_memory() (which reads /proc/meminfo) is
+            // cheap and stays at poll rate.
+            let should_refresh_procs = {
+                use std::sync::Mutex;
+                use std::time::Instant;
+                static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+                let mut g = LAST.lock().unwrap();
+                let refresh = g.map(|t| t.elapsed().as_secs() >= 15).unwrap_or(true);
+                if refresh {
+                    *g = Some(Instant::now());
+                }
+                refresh
+            };
+            if should_refresh_procs {
+                sys.refresh_processes(ProcessesToUpdate::All);
+            }
 
-        let total_gib = sys.total_memory() as f32 / (1024.0 * 1024.0 * 1024.0);
-        let avail_gib = sys.available_memory() as f32 / (1024.0 * 1024.0 * 1024.0);
+            let total_gib = sys.total_memory() as f32 / (1024.0 * 1024.0 * 1024.0);
+            let avail_gib = sys.available_memory() as f32 / (1024.0 * 1024.0 * 1024.0);
 
-        // zram stats — sysinfo doesn't expose these
-        let zram_orig = fs::read_to_string("/sys/block/zram0/orig_data_size")
-            .ok().and_then(|s| s.trim().parse::<f32>().ok()).unwrap_or(0.0);
-        let zram_comp = fs::read_to_string("/sys/block/zram0/compr_data_size")
-            .ok().and_then(|s| s.trim().parse::<f32>().ok()).unwrap_or(0.0);
+            // zram stats — sysinfo doesn't expose these
+            let zram_orig = fs::read_to_string("/sys/block/zram0/orig_data_size")
+                .ok()
+                .and_then(|s| s.trim().parse::<f32>().ok())
+                .unwrap_or(0.0);
+            let zram_comp = fs::read_to_string("/sys/block/zram0/compr_data_size")
+                .ok()
+                .and_then(|s| s.trim().parse::<f32>().ok())
+                .unwrap_or(0.0);
 
-        let (zram_ratio, zram_saved_gib) = if zram_comp > 0.0 && zram_orig > 0.0 {
-            (zram_orig / zram_comp, (zram_orig - zram_comp) / (1024.0 * 1024.0 * 1024.0))
-        } else {
-            (1.0, 0.0)
-        };
+            let (zram_ratio, zram_saved_gib) = if zram_comp > 0.0 && zram_orig > 0.0 {
+                (
+                    zram_orig / zram_comp,
+                    (zram_orig - zram_comp) / (1024.0 * 1024.0 * 1024.0),
+                )
+            } else {
+                (1.0, 0.0)
+            };
 
-        let mut procs: Vec<(u32, String, u64)> = sys.processes()
-            .iter()
-            .map(|(pid, p)| {
-                (pid.as_u32(), p.name().to_string_lossy().to_string(), p.memory())
-            })
-            .collect();
-        procs.sort_by(|a, b| b.2.cmp(&a.2));
+            let mut procs: Vec<(u32, String, u64)> = sys
+                .processes()
+                .iter()
+                .map(|(pid, p)| {
+                    (
+                        pid.as_u32(),
+                        p.name().to_string_lossy().to_string(),
+                        p.memory(),
+                    )
+                })
+                .collect();
+            procs.sort_by(|a, b| b.2.cmp(&a.2));
 
-        let top_procs = procs.into_iter().take(15).map(|(pid, name, bytes)| ProcessItem {
-            pid,
-            name,
-            metric: format!("{} MiB", bytes / (1024 * 1024)),
-            is_highlight: false,
-        }).collect();
+            let top_procs = procs
+                .into_iter()
+                .take(15)
+                .map(|(pid, name, bytes)| ProcessItem {
+                    pid,
+                    name,
+                    metric: format!("{} MiB", bytes / (1024 * 1024)),
+                    is_highlight: false,
+                })
+                .collect();
 
-        RamMetrics {
-            total_gib,
-            available_gib: avail_gib,
-            effective_avail_gib: avail_gib + zram_saved_gib,
-            zram_ratio,
-            zram_saved_gib,
-            top_procs,
-        }
-    }).await.unwrap_or_default()
-}
+            RamMetrics {
+                total_gib,
+                available_gib: avail_gib,
+                effective_avail_gib: avail_gib + zram_saved_gib,
+                zram_ratio,
+                zram_saved_gib,
+                top_procs,
+            }
+        })
+        .await
+        .unwrap_or_default()
+    }
 
     pub fn collect_battery() -> BatteryMetrics {
         let ps = Path::new("/sys/class/power_supply");
@@ -424,8 +470,14 @@ impl SystemCollector {
         // Prefer a non-loopback interface with data
         let mut chosen: Option<(String, u64, u64)> = None;
         for (name, data) in networks.iter() {
-            if name == "lo" { continue; }
-            chosen = Some((name.clone(), data.total_received(), data.total_transmitted()));
+            if name == "lo" {
+                continue;
+            }
+            chosen = Some((
+                name.clone(),
+                data.total_received(),
+                data.total_transmitted(),
+            ));
             break;
         }
 
@@ -461,7 +513,10 @@ impl SystemCollector {
         }
 
         let now = std::time::Instant::now();
-        let dt = now.duration_since(self.prev_net_time).as_secs_f32().max(0.1);
+        let dt = now
+            .duration_since(self.prev_net_time)
+            .as_secs_f32()
+            .max(0.1);
         let rx_rate = (chosen_rx.saturating_sub(self.prev_rx_bytes) as f32 / dt) * 8.0;
         let tx_rate = (chosen_tx.saturating_sub(self.prev_tx_bytes) as f32 / dt) * 8.0;
 
@@ -469,16 +524,23 @@ impl SystemCollector {
         self.prev_tx_bytes = chosen_tx;
         self.prev_net_time = now;
 
-        let hw_type = if chosen_iface.starts_with("wl") { "WiFi" }
-            else if chosen_iface.starts_with("ww") { "Cellular" }
-            else if chosen_iface.starts_with("wg") { "WireGuard" }
-            else { "Ethernet" };
+        let hw_type = if chosen_iface.starts_with("wl") {
+            "WiFi"
+        } else if chosen_iface.starts_with("ww") {
+            "Cellular"
+        } else if chosen_iface.starts_with("wg") {
+            "WireGuard"
+        } else {
+            "Ethernet"
+        };
 
         // Lightweight TCP ping
         let mut ping_str = "OFFLINE".to_string();
         if let Ok(addr) = "1.1.1.1:80".parse() {
             let t0 = std::time::Instant::now();
-            if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(400)).is_ok() {
+            if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(400))
+                .is_ok()
+            {
                 ping_str = format!("{}ms", t0.elapsed().as_millis());
             }
         }
@@ -523,18 +585,23 @@ impl SystemCollector {
 
         for line in text.lines().skip(1) {
             if let Some(idx) = line.find("pid=") {
-                let rest = &line[idx+4..];
+                let rest = &line[idx + 4..];
                 if let Some(end) = rest.find(',') {
                     if let Ok(pid) = rest[..end].parse::<u32>() {
                         if seen.insert(pid) {
                             let mut name = "unknown".to_string();
                             if let Some(u_idx) = line.find("users:((\"") {
-                                let n_rest = &line[u_idx+9..];
+                                let n_rest = &line[u_idx + 9..];
                                 if let Some(n_end) = n_rest.find("\"") {
                                     name = n_rest[..n_end].to_string();
                                 }
                             }
-                            procs.push(ProcessItem { pid, name, metric: "active".into(), is_highlight: false });
+                            procs.push(ProcessItem {
+                                pid,
+                                name,
+                                metric: "active".into(),
+                                is_highlight: false,
+                            });
                         }
                     }
                 }
@@ -567,11 +634,13 @@ impl SystemCollector {
                 "Refusing to terminate PID <= 1",
             ));
         }
-        Command::new("kill").args(["-9", &pid.to_string()]).status().await?;
+        Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .status()
+            .await?;
         Ok(())
     }
 }
-
 
 impl SystemCollector {
     /// Enumerate all GPUs on the system (NVIDIA via nvidia-smi, others via /sys/class/drm).
@@ -607,10 +676,7 @@ impl SystemCollector {
 
                     // Precompute nv_idx from the current state of gpus
                     // (borrow ends before we mutate gpus below).
-                    let nv_idx: u32 = gpus
-                        .iter()
-                        .filter(|g| g.is_nvidia)
-                        .count() as u32;
+                    let nv_idx: u32 = gpus.iter().filter(|g| g.is_nvidia).count() as u32;
 
                     let card_id = find_drm_card_for_pci(&pci_addr).unwrap_or_else(|| {
                         if is_nv {
@@ -620,8 +686,10 @@ impl SystemCollector {
                         }
                     });
 
-                    let name = short_gpu_name(&pci_id_to_name_from_addr(&pci_addr)
-                        .unwrap_or_else(|| clean_gpu_name(device)));
+                    let name = short_gpu_name(
+                        &pci_id_to_name_from_addr(&pci_addr)
+                            .unwrap_or_else(|| clean_gpu_name(device)),
+                    );
 
                     gpus.push(GpuInfo {
                         card_id,
@@ -666,10 +734,11 @@ impl SystemCollector {
         // is heavy I/O — on a busy system that's 200+ fdinfo reads per
         // hardware poll (every 2s by default). The GPU process list barely
         // changes on a 2s cadence, so 15s is a huge accuracy-preserving win.
+        use std::collections::HashMap;
         use std::sync::{Mutex, OnceLock};
         use std::time::Instant;
-        use std::collections::HashMap;
-        static CACHE: OnceLock<Mutex<HashMap<String, (Instant, Vec<ProcessItem>)>>> = OnceLock::new();
+        static CACHE: OnceLock<Mutex<HashMap<String, (Instant, Vec<ProcessItem>)>>> =
+            OnceLock::new();
         let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 
         {
@@ -698,7 +767,8 @@ impl SystemCollector {
                     .ok()
                     .and_then(|s| {
                         s.lines().find_map(|l| {
-                            l.strip_prefix("PCI_SLOT_NAME=").map(|v| v.trim().to_string())
+                            l.strip_prefix("PCI_SLOT_NAME=")
+                                .map(|v| v.trim().to_string())
                         })
                     })
             });
@@ -767,10 +837,7 @@ impl SystemCollector {
                 }
                 // Match by PCI address. Some kernels prefix with "0000:" and some
                 // don't — accept both directions of ends_with.
-                if pdev != pci_addr
-                    && !pdev.ends_with(&pci_addr)
-                    && !pci_addr.ends_with(&pdev)
-                {
+                if pdev != pci_addr && !pdev.ends_with(&pci_addr) && !pci_addr.ends_with(&pdev) {
                     continue;
                 }
                 if let Some(c) = cid {
@@ -848,11 +915,7 @@ impl SystemCollector {
             let Ok(pid) = parts[0].parse::<u32>() else {
                 continue;
             };
-            let name = parts[1]
-                .rsplit('/')
-                .next()
-                .unwrap_or(parts[1])
-                .to_string();
+            let name = parts[1].rsplit('/').next().unwrap_or(parts[1]).to_string();
             let mem_mib = parts[2].parse::<u64>().unwrap_or(0);
             procs.push(ProcessItem {
                 pid,
@@ -899,7 +962,6 @@ fn clean_gpu_name(raw: &str) -> String {
     }
     t.to_string()
 }
-
 
 // ── GPU name cache ──────────────────────────────────────────────────
 // Cache the lspci-resolved model names so we only spawn lspci once per
@@ -950,10 +1012,8 @@ fn find_drm_card_for_pci(pci_addr: &str) -> Option<String> {
 /// Look up a card's PCI_ID via its DRM node, then map through pci_id_to_name.
 fn pci_id_to_name_from_addr(pci_addr: &str) -> Option<String> {
     let card_id = find_drm_card_for_pci(pci_addr)?;
-    let uevent = std::fs::read_to_string(
-        format!("/sys/class/drm/{}/device/uevent", card_id),
-    )
-    .ok()?;
+    let uevent =
+        std::fs::read_to_string(format!("/sys/class/drm/{}/device/uevent", card_id)).ok()?;
     let pci_id = uevent
         .lines()
         .find_map(|l| l.strip_prefix("PCI_ID="))?

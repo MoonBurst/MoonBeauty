@@ -34,10 +34,22 @@ pub fn read_state_file(path: &std::path::Path) -> (String, i32, i32, i32, i32) {
     };
     let mut it = content.lines();
     let state = it.next().unwrap_or("idle").trim().to_string();
-    let sx = it.next().and_then(|s| s.trim().parse::<i32>().ok()).unwrap_or(0);
-    let sy = it.next().and_then(|s| s.trim().parse::<i32>().ok()).unwrap_or(0);
-    let cx = it.next().and_then(|s| s.trim().parse::<i32>().ok()).unwrap_or(0);
-    let cy = it.next().and_then(|s| s.trim().parse::<i32>().ok()).unwrap_or(0);
+    let sx = it
+        .next()
+        .and_then(|s| s.trim().parse::<i32>().ok())
+        .unwrap_or(0);
+    let sy = it
+        .next()
+        .and_then(|s| s.trim().parse::<i32>().ok())
+        .unwrap_or(0);
+    let cx = it
+        .next()
+        .and_then(|s| s.trim().parse::<i32>().ok())
+        .unwrap_or(0);
+    let cy = it
+        .next()
+        .and_then(|s| s.trim().parse::<i32>().ok())
+        .unwrap_or(0);
     (state, sx, sy, cx, cy)
 }
 
@@ -46,8 +58,11 @@ pub fn write_state_file(path: &std::path::Path, state: &str, sx: i32, sy: i32, c
     {
         use std::os::unix::fs::OpenOptionsExt;
         if let Ok(mut f) = std::fs::OpenOptions::new()
-            .write(true).create(true).truncate(true)
-            .mode(0o600).open(&tmp)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&tmp)
         {
             let _ = write!(f, "{}\n{}\n{}\n{}\n{}\n", state, sx, sy, cx, cy);
             let _ = f.sync_all();
@@ -79,9 +94,6 @@ impl Default for FragmentApp {
 }
 
 impl FragmentApp {
-
-    
-
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Tick => {
@@ -175,13 +187,16 @@ impl FragmentApp {
         iced::Subscription::batch([
             iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
             iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event else { return None; };
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event
+                else {
+                    return None;
+                };
                 match key {
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
-                    Some(Message::Escape)
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
+                        Some(Message::Escape)
+                    }
+                    _ => None,
                 }
-                _ => None,
-            }
             }),
         ])
     }
@@ -202,15 +217,12 @@ impl Program<Message> for FragmentCanvas {
         cursor: iced::mouse::Cursor,
     ) -> Option<iced::widget::Action<Message>> {
         use iced::mouse;
-        
 
         // Use unclamped cursor position so we get motion events even when the
         // cursor leaves this surface (which happens during a Wayland implicit
         // grab when dragging from one monitor to another).
         match event {
-            iced::Event::Mouse(mouse::Event::ButtonPressed(
-                mouse::Button::Left,
-            )) => {
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(p) = cursor.position() {
                     return Some(iced::widget::Action::publish(Message::Press(p)));
                 }
@@ -220,9 +232,7 @@ impl Program<Message> for FragmentCanvas {
                     return Some(iced::widget::Action::publish(Message::Drag(p)));
                 }
             }
-            iced::Event::Mouse(mouse::Event::ButtonReleased(
-                mouse::Button::Left,
-            )) => {
+            iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 if let Some(p) = cursor.position() {
                     return Some(iced::widget::Action::publish(Message::Release(p)));
                 }
@@ -282,7 +292,7 @@ impl Program<Message> for FragmentCanvas {
                     frame.fill_rectangle(Point::new(sx, ey - b), Size::new(w, b), border);
                     frame.fill_rectangle(Point::new(sx, sy), Size::new(b, h), border);
                     frame.fill_rectangle(Point::new(ex - b, sy), Size::new(b, h), border);
-                    
+
                     // Live Dimensions HUD
                     let dim_text = format!("{} x {}", w as u32, h as u32);
                     frame.fill_text(iced::widget::canvas::Text {
@@ -320,7 +330,7 @@ pub fn run(
         is_initiator: false,
         render_rect: None,
     };
-    
+
     // layer_settings is passed via the Settings struct, not a trait method
     let layer = LayerShellSettings {
         size: Some((0, 0)),

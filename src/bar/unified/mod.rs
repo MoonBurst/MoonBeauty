@@ -7,12 +7,12 @@
 //! - `checks` : check_unified_items, toggle_item, UnifiedItemStatus
 //!              (declarative health checks from settings.unified_items)
 
-pub mod podman;
-pub mod telemetry;
 pub mod borg;
 pub mod checks;
+pub mod podman;
+pub mod telemetry;
 
-pub use podman::{PodmanBackend, PodmanStatus, WatcherDetails, ContainerInfo};
 pub use borg::{BorgBackend, BorgStatus};
-pub use checks::{UnifiedItemStatus, check_unified_items, toggle_item};
+pub use checks::{check_unified_items, toggle_item, UnifiedItemStatus};
+pub use podman::{ContainerInfo, PodmanBackend, PodmanStatus, WatcherDetails};
 pub use telemetry::UnifiedTelemetry;

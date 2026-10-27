@@ -37,7 +37,10 @@ impl NotifServer {
         _expire_timeout: i32,
     ) -> u32 {
         let id = next_id();
-        eprintln!("[notif-raw] app={:?} summary={:?} body={:?}", app_name, summary, body);
+        eprintln!(
+            "[notif-raw] app={:?} summary={:?} body={:?}",
+            app_name, summary, body
+        );
         let is_urgent = hints
             .get("urgency")
             .and_then(|v| u8::try_from(v).ok())
@@ -51,7 +54,13 @@ impl NotifServer {
                 _ => None,
             });
         let _ = self.tx.send(IncomingNotification {
-            id, app_name, summary, body, is_urgent, desktop_entry, actions,
+            id,
+            app_name,
+            summary,
+            body,
+            is_urgent,
+            desktop_entry,
+            actions,
         });
         id
     }
@@ -85,27 +94,33 @@ pub fn emit_action_invoked(id: u32, key: &str) {
         let Ok(rt) = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-        else { return; };
+        else {
+            return;
+        };
         rt.block_on(async move {
             let body = (id, key_owned.clone());
-            let r = conn.emit_signal(
-                None::<&str>,
-                "/org/freedesktop/Notifications",
-                "org.freedesktop.Notifications",
-                "ActionInvoked",
-                &body,
-            ).await;
+            let r = conn
+                .emit_signal(
+                    None::<&str>,
+                    "/org/freedesktop/Notifications",
+                    "org.freedesktop.Notifications",
+                    "ActionInvoked",
+                    &body,
+                )
+                .await;
             match r {
                 Ok(_) => eprintln!("[action-invoked] sent id={} key={:?}", id, key_owned),
                 Err(e) => eprintln!("[action-invoked] emit failed: {e}"),
             }
-            let _ = conn.emit_signal(
-                None::<&str>,
-                "/org/freedesktop/Notifications",
-                "org.freedesktop.Notifications",
-                "NotificationClosed",
-                &(id, 2u32),
-            ).await;
+            let _ = conn
+                .emit_signal(
+                    None::<&str>,
+                    "/org/freedesktop/Notifications",
+                    "org.freedesktop.Notifications",
+                    "NotificationClosed",
+                    &(id, 2u32),
+                )
+                .await;
         });
     });
 }
@@ -117,7 +132,10 @@ pub fn spawn(tx: Sender<IncomingNotification>) {
             .build()
         {
             Ok(r) => r,
-            Err(e) => { eprintln!("[notif_dbus] rt build: {e}"); return; }
+            Err(e) => {
+                eprintln!("[notif_dbus] rt build: {e}");
+                return;
+            }
         };
         rt.block_on(async move {
             let server = NotifServer { tx };

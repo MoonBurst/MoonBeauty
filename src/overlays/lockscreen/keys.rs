@@ -12,7 +12,7 @@ pub fn resolve_lock_key(event: iced::Event) -> Option<iced::keyboard::Key> {
     else {
         return None;
     };
-    use iced::keyboard::{Key, key::Named};
+    use iced::keyboard::{key::Named, Key};
 
     // 1. Named keys first (control chars would be rejected by text filter).
     if let Key::Named(named) = &modified_key {
@@ -66,7 +66,10 @@ mod tests {
     fn enter_returns_named_enter_despite_control_char_text() {
         use iced::keyboard::key::Named;
         let ev = key_pressed(Key::Named(Named::Enter), Some("\r"));
-        assert!(matches!(resolve_lock_key(ev), Some(Key::Named(Named::Enter))));
+        assert!(matches!(
+            resolve_lock_key(ev),
+            Some(Key::Named(Named::Enter))
+        ));
     }
 
     /// Regression: same trap as Enter — Tab's `text` is `\t`.
@@ -81,7 +84,10 @@ mod tests {
     fn backspace_returns_named_backspace() {
         use iced::keyboard::key::Named;
         let ev = key_pressed(Key::Named(Named::Backspace), None);
-        assert!(matches!(resolve_lock_key(ev), Some(Key::Named(Named::Backspace))));
+        assert!(matches!(
+            resolve_lock_key(ev),
+            Some(Key::Named(Named::Backspace))
+        ));
     }
 
     /// Regression: `key` field ignores modifiers (Shift+P → "p"). The

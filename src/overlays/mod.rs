@@ -1,6 +1,4 @@
 pub mod amogus;
-pub mod screenshot;
-pub mod plate_watermark;
 pub mod calc;
 pub mod clipboard;
 pub mod dictionary;
@@ -11,19 +9,20 @@ pub mod lockscreen;
 pub mod notes;
 pub mod notifications;
 pub mod pass;
+pub mod plate_watermark;
 pub mod power;
 pub mod reminders;
 pub mod rng;
+pub mod screenshot;
 pub mod settings;
 pub mod size_resizer;
+pub mod system_tooltip;
 pub mod todo;
+pub mod tooltip_engine;
 pub mod unicode;
 pub mod websearch;
-pub mod system_tooltip;
-pub mod tooltip_engine;
 
 pub use amogus::{AmogusMessage, AmogusOverlay};
-pub use screenshot::{AnnotatorMessage, AnnotatorOverlay, save_annotated_image, slurp_region, grim_capture};
 pub use calc::{CalcMessage, CalculatorOverlay};
 pub use clipboard::{ClipboardMessage, ClipboardOverlay};
 pub use dictionary::{DictMessage, DictionaryOverlay};
@@ -36,10 +35,12 @@ pub use pass::{PassMessage, PassOverlay};
 pub use power::{PowerAction, PowerMessage, PowerOverlay};
 pub use reminders::{ReminderMessage, RemindersOverlay};
 pub use rng::{RngMessage, RngOverlay};
+pub use screenshot::{
+    grim_capture, save_annotated_image, slurp_region, AnnotatorMessage, AnnotatorOverlay,
+};
 pub use settings::{SettingsMessage, SettingsOverlay};
 pub use todo::{TodoMessage, TodoOverlay};
 pub use unicode::{UnicodeMessage, UnicodeOverlay};
 pub use websearch::{WebSearchMessage, WebSearchOverlay};
-
 
 pub use plate_watermark::{add_plate_watermark, reveal};

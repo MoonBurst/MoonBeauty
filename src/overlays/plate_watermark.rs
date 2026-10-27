@@ -14,11 +14,23 @@
 use std::path::PathBuf;
 
 fn magick_or_convert() -> Option<&'static str> {
-    if std::process::Command::new("magick").arg("--version").output()
-        .map(|o| o.status.success()).unwrap_or(false) { Some("magick") }
-    else if std::process::Command::new("convert").arg("--version").output()
-        .map(|o| o.status.success()).unwrap_or(false) { Some("convert") }
-    else { None }
+    if std::process::Command::new("magick")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        Some("magick")
+    } else if std::process::Command::new("convert")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        Some("convert")
+    } else {
+        None
+    }
 }
 
 fn private_dir() -> PathBuf {
@@ -47,8 +59,13 @@ fn watermark_text(text: &str) -> String {
 pub fn add_plate_watermark(bytes: &[u8], name: &str) -> Result<Vec<u8>, String> {
     let bin = magick_or_convert().ok_or("ImageMagick not installed")?;
 
-    let stamp = format!("{}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+    let stamp = format!(
+        "{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
     let dir = private_dir();
     let tmp_in = dir.join(format!("plate-in-{}.png", stamp));
     let tmp_out = dir.join(format!("plate-out-{}.png", stamp));
@@ -59,31 +76,45 @@ pub fn add_plate_watermark(bytes: &[u8], name: &str) -> Result<Vec<u8>, String> 
     let args = [
         tmp_in.to_string_lossy().into_owned(),
         "(".into(),
-            "-size".into(), "240x220".into(),
-            "xc:none".into(),
-            
-            "-fill".into(), "rgba(100, 0, 255, 0.008)".into(),
-            "-font".into(), "Liberation-Sans-Bold".into(),
-            "-pointsize".into(), "20".into(),
-            "-gravity".into(), "Center".into(),
-            "-annotate".into(), "+0+0".into(),
-            tile_text.clone(),
-            "-distort".into(), "ScaleRotateTranslate".into(), "30".into(),
-            "-write".into(), "mpr:text".into(),
-            "+delete".into(),
+        "-size".into(),
+        "240x220".into(),
+        "xc:none".into(),
+        "-fill".into(),
+        "rgba(100, 0, 255, 0.008)".into(),
+        "-font".into(),
+        "Liberation-Sans-Bold".into(),
+        "-pointsize".into(),
+        "20".into(),
+        "-gravity".into(),
+        "Center".into(),
+        "-annotate".into(),
+        "+0+0".into(),
+        tile_text.clone(),
+        "-distort".into(),
+        "ScaleRotateTranslate".into(),
+        "30".into(),
+        "-write".into(),
+        "mpr:text".into(),
+        "+delete".into(),
         ")".into(),
         "(".into(),
-            "+clone".into(),
-            "-tile".into(), "mpr:text".into(),
-            "-draw".into(), "color 0,0 reset".into(),
+        "+clone".into(),
+        "-tile".into(),
+        "mpr:text".into(),
+        "-draw".into(),
+        "color 0,0 reset".into(),
         ")".into(),
-        "-compose".into(), "Over".into(),
+        "-compose".into(),
+        "Over".into(),
         "-composite".into(),
-        "-define".into(), "png:compression-level=1".into(),
+        "-define".into(),
+        "png:compression-level=1".into(),
         tmp_out.to_string_lossy().into_owned(),
     ];
 
-    let status = std::process::Command::new(bin).args(&args).status()
+    let status = std::process::Command::new(bin)
+        .args(&args)
+        .status()
         .map_err(|e| format!("spawn {bin}: {e}"))?;
 
     let result = if status.success() {
@@ -120,10 +151,13 @@ pub fn add_plate_watermark(bytes: &[u8], name: &str) -> Result<Vec<u8>, String> 
 pub fn reveal(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let bin = magick_or_convert().ok_or("ImageMagick not installed")?;
 
-    let stamp = format!("{}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos());
+    let stamp = format!(
+        "{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
     let dir = private_dir();
     let tmp_in = dir.join(format!("reveal-in-{}.png", stamp));
     let tmp_out = dir.join(format!("REVEALED_{}.png", stamp));
@@ -133,11 +167,20 @@ pub fn reveal(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let status = std::process::Command::new(bin)
         .args([
             tmp_in.to_str().unwrap(),
-            "-channel", "B", "-separate",
-            "(", "+clone", "-blur", "0x2", ")",
-            "-compose", "Subtract", "-composite",
+            "-channel",
+            "B",
+            "-separate",
+            "(",
+            "+clone",
+            "-blur",
+            "0x2",
+            ")",
+            "-compose",
+            "Subtract",
+            "-composite",
             "-auto-level",
-            "-define", "png:compression-level=1",
+            "-define",
+            "png:compression-level=1",
             tmp_out.to_str().unwrap(),
         ])
         .status()
@@ -161,11 +204,16 @@ pub fn reveal(bytes: &[u8]) -> Result<Vec<u8>, String> {
         let n = gray.pixels().count() as f64;
         if n > 0.0 {
             let mean: f64 = gray.pixels().map(|p| p[0] as f64).sum::<f64>() / n;
-            let var: f64 = gray.pixels()
+            let var: f64 = gray
+                .pixels()
                 .map(|p| (p[0] as f64 - mean).powi(2))
-                .sum::<f64>() / n;
+                .sum::<f64>()
+                / n;
             let std_dev = var.sqrt();
-            eprintln!("[reveal] signal std_dev={:.1} (high variance = pattern present)", std_dev);
+            eprintln!(
+                "[reveal] signal std_dev={:.1} (high variance = pattern present)",
+                std_dev
+            );
         }
     }
 

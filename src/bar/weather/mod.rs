@@ -8,5 +8,5 @@
 pub mod client;
 pub mod tooltip;
 
-pub use client::{WeatherBackend, WeatherData, WeatherAlert};
+pub use client::{WeatherAlert, WeatherBackend, WeatherData};
 pub use tooltip::run as run_weather_tooltip;

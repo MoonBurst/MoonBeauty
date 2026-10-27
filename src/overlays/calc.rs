@@ -95,7 +95,9 @@ impl CalculatorOverlay {
         Self::parse_expr(&mut it)
     }
 
-    fn parse_expr<'a>(it: &mut std::iter::Peekable<std::slice::Iter<'a, String>>) -> Result<f64, ()> {
+    fn parse_expr<'a>(
+        it: &mut std::iter::Peekable<std::slice::Iter<'a, String>>,
+    ) -> Result<f64, ()> {
         let mut left = Self::parse_term(it)?;
         while let Some(&op) = it.peek() {
             if op == "+" {
@@ -111,7 +113,9 @@ impl CalculatorOverlay {
         Ok(left)
     }
 
-    fn parse_term<'a>(it: &mut std::iter::Peekable<std::slice::Iter<'a, String>>) -> Result<f64, ()> {
+    fn parse_term<'a>(
+        it: &mut std::iter::Peekable<std::slice::Iter<'a, String>>,
+    ) -> Result<f64, ()> {
         let mut left = Self::parse_factor(it)?;
         while let Some(&op) = it.peek() {
             if op == "*" {
@@ -131,7 +135,9 @@ impl CalculatorOverlay {
         Ok(left)
     }
 
-    fn parse_factor<'a>(it: &mut std::iter::Peekable<std::slice::Iter<'a, String>>) -> Result<f64, ()> {
+    fn parse_factor<'a>(
+        it: &mut std::iter::Peekable<std::slice::Iter<'a, String>>,
+    ) -> Result<f64, ()> {
         let token = it.next().ok_or(())?;
         if token == "(" {
             let val = Self::parse_expr(it)?;
@@ -148,7 +154,9 @@ impl CalculatorOverlay {
 
     fn eval_units(expr: &str) -> Option<String> {
         let parts: Vec<&str> = expr.split_whitespace().collect();
-        if parts.len() == 4 && (parts[2].eq_ignore_ascii_case("in") || parts[2].eq_ignore_ascii_case("to")) {
+        if parts.len() == 4
+            && (parts[2].eq_ignore_ascii_case("in") || parts[2].eq_ignore_ascii_case("to"))
+        {
             let val = parts[0].parse::<f64>().ok()?;
             let from = parts[1].to_lowercase();
             let to = parts[3].to_lowercase();
@@ -180,7 +188,11 @@ impl CalculatorOverlay {
             .spawn();
     }
 
-    pub fn view<'a>(&'a self, theme: &ShellTheme, settings: &ShellSettings) -> Element<'a, CalcMessage> {
+    pub fn view<'a>(
+        &'a self,
+        theme: &ShellTheme,
+        settings: &ShellSettings,
+    ) -> Element<'a, CalcMessage> {
         let (win_w, win_h) = settings.get_window_size("calc", 820, 580);
 
         let cut_f = theme.overlay_cut;
@@ -201,28 +213,32 @@ impl CalculatorOverlay {
             16.0
         };
 
-        let input = text_input("Type math or unit conversion (e.g. 50 * 12, 100 kg in lbs)...", &self.input_text)
-            .id(CALC_INPUT_ID)
-            .on_input(CalcMessage::InputChanged)
-            .on_submit(CalcMessage::CopyResult(self.result_text.clone()))
-            .padding(14)
-            .size((theme.font_size_overlay) as f32);
+        let input = text_input(
+            "Type math or unit conversion (e.g. 50 * 12, 100 kg in lbs)...",
+            &self.input_text,
+        )
+        .id(CALC_INPUT_ID)
+        .on_input(CalcMessage::InputChanged)
+        .on_submit(CalcMessage::CopyResult(self.result_text.clone()))
+        .padding(14)
+        .size((theme.font_size_overlay) as f32);
 
-        let input_row = container(input)
-            .width(Length::Fill)
-            .padding(Padding {
-                top: 0.0,
-                right: header_inset,
-                bottom: 0.0,
-                left: header_inset,
-            });
+        let input_row = container(input).width(Length::Fill).padding(Padding {
+            top: 0.0,
+            right: header_inset,
+            bottom: 0.0,
+            left: header_inset,
+        });
 
         let result_display = text(&self.result_text)
             .size((theme.font_size_overlay + 16) as f32)
             .color(theme.success);
 
         let card_bg = ShapeBox::new()
-            .shape(ShapeType::AngledHexagon { cut: cut_f, angle_deg })
+            .shape(ShapeType::AngledHexagon {
+                cut: cut_f,
+                angle_deg,
+            })
             .background(theme.background)
             .border(theme.border, theme.border_width)
             .size(Length::Fixed(win_w), Length::Fixed(win_h));
@@ -230,7 +246,7 @@ impl CalculatorOverlay {
         let header_row = container(
             text("🧮 CALCULATOR & UNIT CONVERSION")
                 .size((theme.font_size_overlay) as f32)
-                .color(theme.text)
+                .color(theme.text),
         )
         .width(Length::Fill)
         .padding(Padding {
@@ -244,7 +260,7 @@ impl CalculatorOverlay {
             text("Press [Enter] to copy result  •  [ESC] to dismiss")
                 .size(11)
                 .color(theme.muted)
-                .align_x(Alignment::Center)
+                .align_x(Alignment::Center),
         )
         .width(Length::Fill)
         .padding(Padding {
@@ -269,6 +285,9 @@ impl CalculatorOverlay {
 
         let card = Stack::new().push(card_bg.view()).push(card_content);
 
-        container(card).center_x(Length::Fill).center_y(Length::Fill).into()
+        container(card)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .into()
     }
 }

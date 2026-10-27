@@ -80,21 +80,23 @@ fn sha256_prefix(s: &str) -> String {
     format!("{:02x}{:02x}{:02x}{:02x}", r[0], r[1], r[2], r[3])
 }
 
-
 /// Locate a binary reliably even when PATH is empty. NixOS puts most tools
 /// in /run/current-system/sw/bin, wrappers in /run/wrappers/bin, and user
 /// nix profile in ~/.nix-profile/bin. Fall back to PATH last.
 fn find_bin(name: &str) -> Option<std::path::PathBuf> {
     let fallbacks: &[&str] = match name {
-        "pamtester" => &["/run/current-system/sw/bin/pamtester",
-                         "/usr/bin/pamtester", "/usr/local/bin/pamtester",
-                         "/nix/var/nix/profiles/default/bin/pamtester"],
-        "sudo"      => &["/run/wrappers/bin/sudo", "/usr/bin/sudo", "/bin/sudo"],
-        "su"        => &["/run/wrappers/bin/su", "/usr/bin/su", "/bin/su"],
-        "swaymsg"   => &["/run/current-system/sw/bin/swaymsg", "/usr/bin/swaymsg"],
-        "id"        => &["/usr/bin/id", "/bin/id"],
-        "script"    => &["/usr/bin/script", "/bin/script"],
-        "which"     => &["/usr/bin/which", "/bin/which"],
+        "pamtester" => &[
+            "/run/current-system/sw/bin/pamtester",
+            "/usr/bin/pamtester",
+            "/usr/local/bin/pamtester",
+            "/nix/var/nix/profiles/default/bin/pamtester",
+        ],
+        "sudo" => &["/run/wrappers/bin/sudo", "/usr/bin/sudo", "/bin/sudo"],
+        "su" => &["/run/wrappers/bin/su", "/usr/bin/su", "/bin/su"],
+        "swaymsg" => &["/run/current-system/sw/bin/swaymsg", "/usr/bin/swaymsg"],
+        "id" => &["/usr/bin/id", "/bin/id"],
+        "script" => &["/usr/bin/script", "/bin/script"],
+        "which" => &["/usr/bin/which", "/bin/which"],
         _ => &[],
     };
     for p in fallbacks {
@@ -130,15 +132,26 @@ impl LockCoordinator {
             // Test sudo availability
             eprintln!("── Environment ──");
             eprintln!("USER = {:?}", std::env::var("USER"));
-            match tokio::process::Command::new("which").arg("sudo").output().await {
+            match tokio::process::Command::new("which")
+                .arg("sudo")
+                .output()
+                .await
+            {
                 Ok(out) => eprintln!("sudo = {:?}", String::from_utf8_lossy(&out.stdout).trim()),
                 Err(_) => eprintln!("sudo = NOT FOUND"),
             }
-            match tokio::process::Command::new("which").arg("pamtester").output().await {
+            match tokio::process::Command::new("which")
+                .arg("pamtester")
+                .output()
+                .await
+            {
                 Ok(out) => {
                     let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                    if p.is_empty() { eprintln!("pamtester = not installed"); }
-                    else { eprintln!("pamtester = {:?}", p); }
+                    if p.is_empty() {
+                        eprintln!("pamtester = not installed");
+                    } else {
+                        eprintln!("pamtester = {:?}", p);
+                    }
                 }
                 Err(_) => eprintln!("pamtester = not installed"),
             }
@@ -152,10 +165,12 @@ impl LockCoordinator {
             let mut input = String::new();
             stdin().lock().read_line(&mut input).ok();
             let password = input.trim_end_matches(['\r', '\n']).to_string();
-            eprintln!("len={} first={:?} last={:?}",
+            eprintln!(
+                "len={} first={:?} last={:?}",
                 password.chars().count(),
                 password.chars().next(),
-                password.chars().last());
+                password.chars().last()
+            );
             eprintln!();
 
             // Run authenticate with full logging
@@ -179,12 +194,15 @@ impl LockCoordinator {
         });
         eprintln!("[lock-coord-v225] START pid={}", std::process::id());
         let pid = std::process::id();
-        let socket_path = PathBuf::from(&runtime_dir)
-            .join(format!("moon-beauty-lock-{}.sock", pid));
+        let socket_path =
+            PathBuf::from(&runtime_dir).join(format!("moon-beauty-lock-{}.sock", pid));
         let _ = std::fs::remove_file(&socket_path);
 
         if let Ok(v) = std::env::var("MBS_LOCK_DEBUG_PASS") {
-            eprintln!("[lock-coord] WARNING: MBS_LOCK_DEBUG_PASS is set (len={}); bypass armed", v.len());
+            eprintln!(
+                "[lock-coord] WARNING: MBS_LOCK_DEBUG_PASS is set (len={}); bypass armed",
+                v.len()
+            );
         }
 
         {
@@ -192,9 +210,7 @@ impl LockCoordinator {
             eprintln!("[lock-coord] user resolved via id -un → {}", u);
         }
 
-        let children: Arc<Mutex<HashMap<String, Child>>> =
-            Arc::new(Mutex::new(HashMap::new()));
-
+        let children: Arc<Mutex<HashMap<String, Child>>> = Arc::new(Mutex::new(HashMap::new()));
 
         // Startup sanity: verify sudo is on PATH
         {
@@ -215,13 +231,10 @@ impl LockCoordinator {
         eprintln!("[lock-coord-v225] binding socket at {:?}", socket_path);
         let listener = match std::os::unix::net::UnixListener::bind(&socket_path) {
             Ok(l) => {
-                let _ = std::fs::set_permissions(
-                    &socket_path,
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        std::fs::Permissions::from_mode(0o600)
-                    },
-                );
+                let _ = std::fs::set_permissions(&socket_path, {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::Permissions::from_mode(0o600)
+                });
                 eprintln!("[lock-coord-v225] socket bound OK");
                 l
             }
@@ -239,10 +252,14 @@ impl LockCoordinator {
             eprintln!("[lock-coord] no outputs — spawning single instance");
             Self::spawn_child("", &socket_path, &children);
         } else {
-            eprintln!("[lock-coord] spawning {} children for {:?}", outputs.len(), outputs);
+            eprintln!(
+                "[lock-coord] spawning {} children for {:?}",
+                outputs.len(),
+                outputs
+            );
             for output in &outputs {
                 eprintln!("[lock-coord-v225] spawning child for output={:?}", output);
-            Self::spawn_child(output, &socket_path, &children);
+                Self::spawn_child(output, &socket_path, &children);
             }
         }
 
@@ -481,13 +498,19 @@ impl LockCoordinator {
         }
     }
 
-    fn spawn_child(output: &str, socket_path: &PathBuf, children: &Arc<Mutex<HashMap<String, Child>>>) {
+    fn spawn_child(
+        output: &str,
+        socket_path: &PathBuf,
+        children: &Arc<Mutex<HashMap<String, Child>>>,
+    ) {
         if let Ok(map) = children.lock() {
             if map.contains_key(output) {
                 return;
             }
         }
-        let Ok(exe) = std::env::current_exe() else { return; };
+        let Ok(exe) = std::env::current_exe() else {
+            return;
+        };
         let mut cmd = Command::new(&exe);
         cmd.arg("--lockscreen-instance")
             .env("MBS_LOCK_SOCKET", socket_path)
@@ -499,7 +522,11 @@ impl LockCoordinator {
         }
         match cmd.spawn() {
             Ok(child) => {
-                eprintln!("[lock-coord] spawned pid={} for output={:?}", child.id(), output);
+                eprintln!(
+                    "[lock-coord] spawned pid={} for output={:?}",
+                    child.id(),
+                    output
+                );
                 if let Ok(mut map) = children.lock() {
                     map.insert(output.to_string(), child);
                 }
@@ -536,7 +563,8 @@ impl LockCoordinator {
                 } else {
                     eprintln!(
                         "[lock-coord] DEBUG BYPASS: mismatch (buf len={}, debug len={})",
-                        clean.len(), debug_pass.len()
+                        clean.len(),
+                        debug_pass.len()
                     );
                 }
             }
@@ -573,16 +601,24 @@ impl LockCoordinator {
                         let _ = stdin.write_all(pass_line.as_bytes()).await;
                         drop(stdin);
                     }
-                    match tokio::time::timeout(std::time::Duration::from_secs(5), c.wait_with_output()).await {
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        c.wait_with_output(),
+                    )
+                    .await
+                    {
                         Ok(Ok(out)) => {
                             let success = out.status.success();
                             let stderr = String::from_utf8_lossy(&out.stderr);
                             eprintln!(
                                 "[lock-coord] sudo -v exit={:?} success={} stderr={:?}",
-                                out.status.code(), success,
+                                out.status.code(),
+                                success,
                                 stderr.trim().chars().take(200).collect::<String>()
                             );
-                            if success { return true; }
+                            if success {
+                                return true;
+                            }
                         }
                         Ok(Err(e)) => eprintln!("[lock-coord] sudo wait: {}", e),
                         Err(_) => eprintln!("[lock-coord] sudo TIMEOUT"),
@@ -598,7 +634,8 @@ impl LockCoordinator {
         // ── Strategy 1: pamtester ──
         {
             let user = resolve_user();
-            let pam_bin = find_bin("pamtester").unwrap_or_else(|| std::path::PathBuf::from("pamtester"));
+            let pam_bin =
+                find_bin("pamtester").unwrap_or_else(|| std::path::PathBuf::from("pamtester"));
             eprintln!("[lock-coord] trying pamtester login {} authenticate", user);
             match tokio::process::Command::new(&pam_bin)
                 .args(["login", &user, "authenticate"])
@@ -612,16 +649,24 @@ impl LockCoordinator {
                         let _ = stdin.write_all(pass_line.as_bytes()).await;
                         drop(stdin);
                     }
-                    match tokio::time::timeout(std::time::Duration::from_secs(5), c.wait_with_output()).await {
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        c.wait_with_output(),
+                    )
+                    .await
+                    {
                         Ok(Ok(out)) => {
                             let success = out.status.success();
                             let err = String::from_utf8_lossy(&out.stderr);
                             eprintln!(
                                 "[lock-coord] pamtester exit={:?} success={} stderr={:?}",
-                                out.status.code(), success,
+                                out.status.code(),
+                                success,
                                 err.trim().chars().take(200).collect::<String>()
                             );
-                            if success { return true; }
+                            if success {
+                                return true;
+                            }
                         }
                         Ok(Err(e)) => eprintln!("[lock-coord] pamtester wait: {}", e),
                         Err(_) => eprintln!("[lock-coord] pamtester TIMEOUT"),
@@ -636,7 +681,8 @@ impl LockCoordinator {
 
         // ── Strategy 2: sudo via script(1) PTY ──
         {
-            let script_bin = find_bin("script").unwrap_or_else(|| std::path::PathBuf::from("script"));
+            let script_bin =
+                find_bin("script").unwrap_or_else(|| std::path::PathBuf::from("script"));
             eprintln!("[lock-coord] trying sudo via script(1)");
             match tokio::process::Command::new(&script_bin)
                 .args(["-q", "-e", "-c", "sudo -k -v", "/dev/null"])
@@ -650,11 +696,22 @@ impl LockCoordinator {
                         let _ = stdin.write_all(pass_line.as_bytes()).await;
                         drop(stdin);
                     }
-                    match tokio::time::timeout(std::time::Duration::from_secs(5), c.wait_with_output()).await {
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        c.wait_with_output(),
+                    )
+                    .await
+                    {
                         Ok(Ok(out)) => {
                             let success = out.status.success();
-                            eprintln!("[lock-coord] script+sudo exit={:?} success={}", out.status.code(), success);
-                            if success { return true; }
+                            eprintln!(
+                                "[lock-coord] script+sudo exit={:?} success={}",
+                                out.status.code(),
+                                success
+                            );
+                            if success {
+                                return true;
+                            }
                         }
                         Ok(Err(e)) => eprintln!("[lock-coord] script wait: {}", e),
                         Err(_) => eprintln!("[lock-coord] script+sudo TIMEOUT"),
@@ -669,7 +726,13 @@ impl LockCoordinator {
             let user = resolve_user();
             eprintln!("[lock-coord] trying su via script(1)");
             match tokio::process::Command::new("script")
-                .args(["-q", "-e", "-c", &format!("su -c true {}", user), "/dev/null"])
+                .args([
+                    "-q",
+                    "-e",
+                    "-c",
+                    &format!("su -c true {}", user),
+                    "/dev/null",
+                ])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped())
@@ -680,10 +743,19 @@ impl LockCoordinator {
                         let _ = stdin.write_all(pass_line.as_bytes()).await;
                         drop(stdin);
                     }
-                    match tokio::time::timeout(std::time::Duration::from_secs(5), c.wait_with_output()).await {
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        c.wait_with_output(),
+                    )
+                    .await
+                    {
                         Ok(Ok(out)) => {
                             let success = out.status.success();
-                            eprintln!("[lock-coord] su-script exit={:?} success={}", out.status.code(), success);
+                            eprintln!(
+                                "[lock-coord] su-script exit={:?} success={}",
+                                out.status.code(),
+                                success
+                            );
                             return success;
                         }
                         Ok(Err(e)) => eprintln!("[lock-coord] su-script wait: {}", e),
@@ -704,14 +776,18 @@ impl LockCoordinator {
             .args(["-t", "get_outputs", "-r"])
             .output()
             .ok();
-        let Some(out) = out else { return Vec::new(); };
+        let Some(out) = out else {
+            return Vec::new();
+        };
         if !out.status.success() {
             return Vec::new();
         }
         let Ok(v) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else {
             return Vec::new();
         };
-        let Some(arr) = v.as_array() else { return Vec::new(); };
+        let Some(arr) = v.as_array() else {
+            return Vec::new();
+        };
         arr.iter()
             .filter(|o| o.get("active").and_then(|a| a.as_bool()) != Some(false))
             .filter_map(|o| o.get("name").and_then(|n| n.as_str()).map(String::from))

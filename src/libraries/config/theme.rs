@@ -39,22 +39,54 @@ pub struct Base16Palette {
     pub base0f: String,
 }
 
-fn default_base00() -> String { "#0f0f0f".to_string() }
-fn default_base01() -> String { "#0f0f0f".to_string() }
-fn default_base02() -> String { "#1a1a1a".to_string() }
-fn default_base03() -> String { "#003399".to_string() }
-fn default_base04() -> String { "#4d4e93".to_string() }
-fn default_base05() -> String { "#f7f700".to_string() }
-fn default_base06() -> String { "#ebdbb2".to_string() }
-fn default_base07() -> String { "#cccccc".to_string() }
-fn default_base08() -> String { "#ff0000".to_string() }
-fn default_base09() -> String { "#fe8019".to_string() }
-fn default_base0a() -> String { "#fabd2f".to_string() }
-fn default_base0b() -> String { "#545454".to_string() }
-fn default_base0c() -> String { "#04f100".to_string() }
-fn default_base0d() -> String { "#003399".to_string() }
-fn default_base0e() -> String { "#675ddb".to_string() }
-fn default_base0f() -> String { "#ff8019".to_string() }
+fn default_base00() -> String {
+    "#0f0f0f".to_string()
+}
+fn default_base01() -> String {
+    "#0f0f0f".to_string()
+}
+fn default_base02() -> String {
+    "#1a1a1a".to_string()
+}
+fn default_base03() -> String {
+    "#003399".to_string()
+}
+fn default_base04() -> String {
+    "#4d4e93".to_string()
+}
+fn default_base05() -> String {
+    "#f7f700".to_string()
+}
+fn default_base06() -> String {
+    "#ebdbb2".to_string()
+}
+fn default_base07() -> String {
+    "#cccccc".to_string()
+}
+fn default_base08() -> String {
+    "#ff0000".to_string()
+}
+fn default_base09() -> String {
+    "#fe8019".to_string()
+}
+fn default_base0a() -> String {
+    "#fabd2f".to_string()
+}
+fn default_base0b() -> String {
+    "#545454".to_string()
+}
+fn default_base0c() -> String {
+    "#04f100".to_string()
+}
+fn default_base0d() -> String {
+    "#003399".to_string()
+}
+fn default_base0e() -> String {
+    "#675ddb".to_string()
+}
+fn default_base0f() -> String {
+    "#ff8019".to_string()
+}
 
 impl Default for Base16Palette {
     fn default() -> Self {

@@ -98,7 +98,14 @@ impl<Message> canvas::Program<Message> for ShapeBox {
         bounds: Rectangle,
         _cursor: Cursor,
     ) -> Option<iced::widget::Action<Message>> {
-        let key = (bounds, self.shape, self.background, self.border_color, self.border_width, self.slant_width);
+        let key = (
+            bounds,
+            self.shape,
+            self.background,
+            self.border_color,
+            self.border_width,
+            self.slant_width,
+        );
         if *state != Some(key) {
             *state = Some(key);
             return Some(iced::widget::Action::request_redraw());
@@ -138,10 +145,26 @@ impl<Message> canvas::Program<Message> for ShapeBox {
             }
             ShapeType::Slant { left, right } => {
                 let sw = self.slant_width.min(w / 2.0);
-                let x1 = if left == SlantSide::Right { sw + half } else { half };
-                let x2 = if left == SlantSide::Left { sw + half } else { half };
-                let x3 = if right == SlantSide::Left { w - sw - half } else { w - half };
-                let x4 = if right == SlantSide::Right { w - sw - half } else { w - half };
+                let x1 = if left == SlantSide::Right {
+                    sw + half
+                } else {
+                    half
+                };
+                let x2 = if left == SlantSide::Left {
+                    sw + half
+                } else {
+                    half
+                };
+                let x3 = if right == SlantSide::Left {
+                    w - sw - half
+                } else {
+                    w - half
+                };
+                let x4 = if right == SlantSide::Right {
+                    w - sw - half
+                } else {
+                    w - half
+                };
 
                 Path::new(|builder| {
                     builder.move_to(Point::new(x1, half));

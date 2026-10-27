@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::process::Command;
-use zbus::Connection;
 use zbus::zvariant::OwnedValue;
+use zbus::Connection;
 
 #[derive(Debug, Clone, Default)]
 pub struct MprisTrack {
@@ -54,8 +54,7 @@ impl MprisBackend {
 
         // Prefer a player that's currently Playing
         for name in &mpris_names {
-            if let Ok(proxy) =
-                zbus::Proxy::new(&conn, name.as_str(), MPRIS_PATH, MPRIS_IFACE).await
+            if let Ok(proxy) = zbus::Proxy::new(&conn, name.as_str(), MPRIS_PATH, MPRIS_IFACE).await
             {
                 if let Ok(status) = proxy.get_property::<String>("PlaybackStatus").await {
                     if status == "Playing" {
@@ -98,8 +97,7 @@ impl MprisBackend {
             .await
             .ok()?;
 
-        let metadata: HashMap<String, OwnedValue> =
-            proxy.get_property("Metadata").await.ok()?;
+        let metadata: HashMap<String, OwnedValue> = proxy.get_property("Metadata").await.ok()?;
 
         let get_str = |key: &str| -> Option<String> {
             metadata.get(key).and_then(|v| match &**v {
@@ -184,8 +182,7 @@ impl MprisBackend {
         let Some((conn, bus_name)) = Self::get_active_player().await else {
             return;
         };
-        let Ok(proxy) =
-            zbus::Proxy::new(&conn, bus_name.as_str(), MPRIS_PATH, MPRIS_IFACE).await
+        let Ok(proxy) = zbus::Proxy::new(&conn, bus_name.as_str(), MPRIS_PATH, MPRIS_IFACE).await
         else {
             return;
         };
@@ -208,36 +205,30 @@ impl MprisBackend {
         let Some((conn, bus_name)) = Self::get_active_player().await else {
             return;
         };
-        let Ok(proxy) =
-            zbus::Proxy::new(&conn, bus_name.as_str(), MPRIS_PATH, MPRIS_IFACE).await
+        let Ok(proxy) = zbus::Proxy::new(&conn, bus_name.as_str(), MPRIS_PATH, MPRIS_IFACE).await
         else {
             return;
         };
         // Most players ignore the TrackId argument for SetPosition and just
         // seek within the current track. NoTrack is the safe sentinel.
-        let Ok(track_id) = zbus::zvariant::ObjectPath::try_from(
-            "/org/mpris/MediaPlayer2/TrackList/NoTrack",
-        ) else {
+        let Ok(track_id) =
+            zbus::zvariant::ObjectPath::try_from("/org/mpris/MediaPlayer2/TrackList/NoTrack")
+        else {
             return;
         };
         let pos_us = (sec * 1_000_000.0) as i64;
-        let _ = proxy
-            .call_method("SetPosition", &(track_id, pos_us))
-            .await;
+        let _ = proxy.call_method("SetPosition", &(track_id, pos_us)).await;
     }
 
     pub async fn set_volume(vol_pct: u8) {
         let Some((conn, bus_name)) = Self::get_active_player().await else {
             return;
         };
-        let Ok(proxy) =
-            zbus::Proxy::new(&conn, bus_name.as_str(), MPRIS_PATH, MPRIS_IFACE).await
+        let Ok(proxy) = zbus::Proxy::new(&conn, bus_name.as_str(), MPRIS_PATH, MPRIS_IFACE).await
         else {
             return;
         };
-        let _ = proxy
-            .set_property("Volume", (vol_pct as f64) / 100.0)
-            .await;
+        let _ = proxy.set_property("Volume", (vol_pct as f64) / 100.0).await;
     }
 
     pub async fn open_track_folder(url_opt: Option<&str>) {

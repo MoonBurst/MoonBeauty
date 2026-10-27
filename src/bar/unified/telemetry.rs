@@ -10,8 +10,8 @@
 //! `use crate::bar::…` for every relocated type, creating a backend → bar
 //! dependency that this move eliminates.
 
-use crate::bar::weather::WeatherData;
 use crate::bar::unified::{BorgStatus, PodmanStatus};
+use crate::bar::weather::WeatherData;
 use crate::libraries::backend::audio::AudioStatus;
 use crate::libraries::backend::mpris::MprisTrack;
 use crate::libraries::backend::system::{

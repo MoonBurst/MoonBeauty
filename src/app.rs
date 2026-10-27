@@ -16,13 +16,12 @@
 //!   - helpers        (10f)
 //!   - split app.rs into app/{mod,update,view,...} submodules (10g)
 
-
-use moon_beauty_shell::libraries::backend::*;
+use moon_beauty_shell::bar::unified::UnifiedTelemetry;
 use moon_beauty_shell::bar::TopBarMessage;
+use moon_beauty_shell::libraries::backend::*;
 use moon_beauty_shell::libraries::config::{ShellSettings, ShellTheme};
 use moon_beauty_shell::libraries::ipc::{IpcCommand, OverlayTarget};
 use moon_beauty_shell::overlays::*;
-use moon_beauty_shell::bar::unified::UnifiedTelemetry;
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -31,13 +30,23 @@ pub enum Message {
     TickWeather,
     TickEmailSync,
     EmailSynced,
-    EmailSyncedWithDiff(Vec<moon_beauty_shell::libraries::backend::email_client::NativeEnvelope>, Vec<moon_beauty_shell::libraries::backend::email_client::NativeEnvelope>),
+    EmailSyncedWithDiff(
+        Vec<moon_beauty_shell::libraries::backend::email_client::NativeEnvelope>,
+        Vec<moon_beauty_shell::libraries::backend::email_client::NativeEnvelope>,
+    ),
     FocusComposeField,
     ComposeTabPressed(bool),
     WeatherLoaded(Option<moon_beauty_shell::bar::weather::WeatherData>),
     TickClock,
     TickToasts,
-    MetricsCollected(CpuMetrics, RamMetrics, GpuMetrics, AudioStatus, AudioStatus, Option<MprisTrack>),
+    MetricsCollected(
+        CpuMetrics,
+        RamMetrics,
+        GpuMetrics,
+        AudioStatus,
+        AudioStatus,
+        Option<MprisTrack>,
+    ),
     IpcReceived(IpcCommand),
     PollIpc,
     PollNotifs,
@@ -90,8 +99,7 @@ impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message
     type Error = Message;
     fn try_into(
         self,
-    ) -> Result<iced_layershell::actions::LayershellCustomActionWithId, Self::Error>
-    {
+    ) -> Result<iced_layershell::actions::LayershellCustomActionWithId, Self::Error> {
         match self {
             Message::ResizeNotifSurface(w, h) => {
                 Ok(iced_layershell::actions::LayershellCustomActionWithId::new(
@@ -127,7 +135,9 @@ pub struct MoonBeautyShellApp {
     pub standalone_child: Option<(OverlayTarget, std::process::Child)>,
     pub ipc_rx: std::sync::mpsc::Receiver<IpcCommand>,
     pub is_notif_surface: bool,
-    pub notif_rx: Option<std::sync::mpsc::Receiver<moon_beauty_shell::overlays::notifications::IncomingNotification>>,
+    pub notif_rx: Option<
+        std::sync::mpsc::Receiver<moon_beauty_shell::overlays::notifications::IncomingNotification>,
+    >,
     pub settings_json_mtime: Option<std::time::SystemTime>,
     pub window_w: f32,
     pub notif_screen_at_startup: String,

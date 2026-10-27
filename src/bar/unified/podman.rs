@@ -1,5 +1,5 @@
-use bollard::Docker;
 use bollard::container::ListContainersOptions;
+use bollard::Docker;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
@@ -31,7 +31,6 @@ pub struct PodmanStatus {
     pub summary_label: String,
 }
 
-
 /// Connect to ALL available container engine sockets. Both rootless and
 /// rootful podman can hold different containers, and users often mix them.
 fn connect_engines() -> Vec<Docker> {
@@ -56,10 +55,10 @@ fn connect_engines() -> Vec<Docker> {
         paths.push(format!("{}/podman/podman.sock", rt));
         paths.push(format!("{}/docker.sock", rt));
     }
-    
+
     // 2. Proxy socket (if user set it up)
     paths.push("/run/podman/podman-user.sock".into());
-    
+
     // 3. Rootful fallbacks
     paths.push("/run/podman/podman.sock".into());
     paths.push("/var/run/docker.sock".into());
@@ -79,7 +78,7 @@ fn connect_engines() -> Vec<Docker> {
             crate::dbg_log!("[bollard] no socket at {}", path);
         }
     }
-    
+
     if engines.is_empty() {
         crate::dbg_log!("[bollard] no accessible sockets found");
     }
@@ -119,7 +118,9 @@ impl PodmanBackend {
                             .and_then(|n| n.first())
                             .map(|n| n.trim_start_matches('/').to_string())
                             .unwrap_or_default();
-                        if name.is_empty() { continue; }
+                        if name.is_empty() {
+                            continue;
+                        }
                         if seen_names.insert(name.clone()) {
                             container_to_engine.insert(name, engine_idx);
                             containers_raw.push(c);
@@ -140,7 +141,9 @@ impl PodmanBackend {
         let mut any_limited = false;
 
         for c in containers_raw {
-            let name = c.names.as_ref()
+            let name = c
+                .names
+                .as_ref()
                 .and_then(|n| n.first())
                 .map(|n| n.trim_start_matches('/').to_string())
                 .unwrap_or_default();
@@ -148,7 +151,8 @@ impl PodmanBackend {
             let state = c.state.unwrap_or_else(|| "".into()).to_lowercase();
             let is_running = state == "running" || status_raw.to_lowercase().starts_with("up");
 
-            let is_watcher = name.contains("twitch") || name.contains("miner") || name.contains("berry");
+            let is_watcher =
+                name.contains("twitch") || name.contains("miner") || name.contains("berry");
             let mut watcher_details = WatcherDetails {
                 name: name.clone(),
                 is_running,
@@ -163,7 +167,9 @@ impl PodmanBackend {
                 watcher_details.drops = drops;
                 watcher_details.game = game;
                 watcher_details.is_limited = limited;
-                if limited { any_limited = true; }
+                if limited {
+                    any_limited = true;
+                }
                 watchers.push(watcher_details);
             }
 
@@ -179,11 +185,18 @@ impl PodmanBackend {
 
         let summary_label = if any_limited {
             "Miner: Limited!".to_string()
-        } else if let Some(w) = watchers.iter().find(|w| w.is_running && !w.streamer.is_empty()) {
+        } else if let Some(w) = watchers
+            .iter()
+            .find(|w| w.is_running && !w.streamer.is_empty())
+        {
             format!("📺 {}", w.streamer)
         } else {
             let active_count = containers.iter().filter(|c| c.is_running).count();
-            if active_count > 0 { format!("{} Active", active_count) } else { "Idle".into() }
+            if active_count > 0 {
+                format!("{} Active", active_count)
+            } else {
+                "Idle".into()
+            }
         };
 
         PodmanStatus {
@@ -214,14 +227,24 @@ impl PodmanBackend {
         let mut streamer = String::new();
         let mut drops = String::new();
         let mut game = String::new();
-        let is_limited = logs.contains("429") || logs.contains("rate limit") || logs.contains("too many requests");
+        let is_limited = logs.contains("429")
+            || logs.contains("rate limit")
+            || logs.contains("too many requests");
 
         for line in logs.lines().rev() {
             if streamer.is_empty() {
                 if let Some(pos) = line.find("Watching:") {
-                    streamer = line[pos + 9..].split_whitespace().next().unwrap_or("").to_string();
+                    streamer = line[pos + 9..]
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("")
+                        .to_string();
                 } else if let Some(pos) = line.find("Channel:") {
-                    streamer = line[pos + 8..].split_whitespace().next().unwrap_or("").to_string();
+                    streamer = line[pos + 8..]
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("")
+                        .to_string();
                 }
             }
             if drops.is_empty() && line.contains("drop") {
@@ -237,7 +260,9 @@ impl PodmanBackend {
                     }
                 }
             }
-            if !streamer.is_empty() && !drops.is_empty() { break; }
+            if !streamer.is_empty() && !drops.is_empty() {
+                break;
+            }
         }
 
         (streamer, drops, game, is_limited)
@@ -245,11 +270,17 @@ impl PodmanBackend {
 
     fn determine_purpose(name: &str, img: &str) -> String {
         let low = format!("{} {}", name, img).to_lowercase();
-        if low.contains("flaresolverr") { "Cloudflare Proxy (:8191)".into() }
-        else if low.contains("twitch") || low.contains("miner") { "Twitch Drops Watcher".into() }
-        else if low.contains("jellyfin") { "Media Server (:8096)".into() }
-        else if low.contains("vaultwarden") { "Bitwarden Vault".into() }
-        else { "Background Service".into() }
+        if low.contains("flaresolverr") {
+            "Cloudflare Proxy (:8191)".into()
+        } else if low.contains("twitch") || low.contains("miner") {
+            "Twitch Drops Watcher".into()
+        } else if low.contains("jellyfin") {
+            "Media Server (:8096)".into()
+        } else if low.contains("vaultwarden") {
+            "Bitwarden Vault".into()
+        } else {
+            "Background Service".into()
+        }
     }
 
     pub async fn restart(container: &str) {

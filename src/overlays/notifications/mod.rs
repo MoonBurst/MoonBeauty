@@ -8,14 +8,12 @@
 //! - (implicit) re-exports: overlays/mod.rs pulls NotifMessage + NotificationOverlay
 //!   from here for the main dispatcher
 
-pub mod ui;
 pub mod dbus;
+pub mod ui;
 
+pub use dbus::{emit_action_invoked, spawn, IncomingNotification};
 pub use ui::{
-    NotificationOverlay, NotificationToast, NotifMessage,
-    dnd_active, toggle_dnd,
-    held_notifs_count, take_held_notifs,
-    load_held_notifs, save_held_notifs,
-    write_active_count, read_active_count,
+    dnd_active, held_notifs_count, load_held_notifs, read_active_count, save_held_notifs,
+    take_held_notifs, toggle_dnd, write_active_count, NotifMessage, NotificationOverlay,
+    NotificationToast,
 };
-pub use dbus::{spawn, emit_action_invoked, IncomingNotification};

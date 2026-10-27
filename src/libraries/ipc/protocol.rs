@@ -103,7 +103,9 @@ pub fn get_socket_path() -> PathBuf {
     PathBuf::from(runtime_dir).join("moon-beauty-shell.sock")
 }
 
-pub async fn send_client_command(cmd: IpcCommand) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn send_client_command(
+    cmd: IpcCommand,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let path = get_socket_path();
     let mut stream = UnixStream::connect(path).await?;
     let encoded = serde_json::to_vec(&cmd)?;
@@ -128,17 +130,16 @@ impl IpcServer {
         let listener = UnixListener::bind(&path)?;
         // Defense in depth: XDG_RUNTIME_DIR is 0700, but explicitly chmod
         // the socket to 0600 in case the dir mode ever regresses.
-        let _ = std::fs::set_permissions(
-            &path,
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::Permissions::from_mode(0o600)
-            },
-        );
+        let _ = std::fs::set_permissions(&path, {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::Permissions::from_mode(0o600)
+        });
         Ok(Self { listener })
     }
 
-    pub async fn accept(&self) -> Result<(UnixStream, IpcCommand), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn accept(
+        &self,
+    ) -> Result<(UnixStream, IpcCommand), Box<dyn std::error::Error + Send + Sync>> {
         let (mut stream, _) = self.listener.accept().await?;
         let mut buffer = Vec::new();
         stream.read_to_end(&mut buffer).await?;
@@ -146,7 +147,6 @@ impl IpcServer {
         Ok((stream, command))
     }
 }
-
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum AnnotatorCommand {
@@ -172,7 +172,10 @@ pub fn send_annotator_show(
     use std::os::unix::net::UnixStream;
     let sock_path = get_annotator_socket_path();
     let mut stream = UnixStream::connect(sock_path)?;
-    let cmd = AnnotatorCommand::Show { path, watermark_cli };
+    let cmd = AnnotatorCommand::Show {
+        path,
+        watermark_cli,
+    };
     let json = serde_json::to_vec(&cmd)?;
     stream.write_all(&json)?;
     stream.shutdown(std::net::Shutdown::Write)?;

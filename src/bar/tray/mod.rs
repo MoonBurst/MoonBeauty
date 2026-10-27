@@ -9,13 +9,11 @@
 //! Both `popup` and `context` are standalone layer-shell processes spawned
 //! from `main.rs` when the bar's tray capsule is clicked.
 
-pub mod watcher;
-pub mod popup;
 pub mod context;
+pub mod popup;
+pub mod watcher;
 
 pub use watcher::{
-    TrayItem, TrayMenuItem,
-    fetch_tray_items, activate_tray_item,
-    get_menu_tree, trigger_menu_item,
-    spawn as spawn_tray_watcher,
+    activate_tray_item, fetch_tray_items, get_menu_tree, spawn as spawn_tray_watcher,
+    trigger_menu_item, TrayItem, TrayMenuItem,
 };

@@ -7,7 +7,7 @@
 
 use super::settings::SettingsMessage;
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke, Text};
-use iced::{Color, Element, Length, Point, Rectangle, Size, Theme, mouse};
+use iced::{mouse, Color, Element, Length, Point, Rectangle, Size, Theme};
 
 pub struct SizeResizer {
     pub id: String,
@@ -38,7 +38,10 @@ impl SizeResizer {
     pub fn view(self) -> Element<'static, SettingsMessage> {
         let w = self.display_w;
         let h = self.display_h;
-        Canvas::new(self).width(Length::Fixed(w)).height(Length::Fixed(h)).into()
+        Canvas::new(self)
+            .width(Length::Fixed(w))
+            .height(Length::Fixed(h))
+            .into()
     }
 }
 
@@ -81,12 +84,13 @@ impl canvas::Program<SettingsMessage> for SizeResizer {
                 }
             }
             iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
-                if state.dragging => {
-                    state.dragging = false;
-                    return Some(iced::widget::Action::publish(SettingsMessage::SizeCommit {
-                        id: self.id.clone(),
-                    }));
-                }
+                if state.dragging =>
+            {
+                state.dragging = false;
+                return Some(iced::widget::Action::publish(SettingsMessage::SizeCommit {
+                    id: self.id.clone(),
+                }));
+            }
             _ => {}
         }
         None
@@ -129,7 +133,10 @@ impl canvas::Program<SettingsMessage> for SizeResizer {
         let handle_r = 6.0;
         let circle = Path::circle(Point::new(handle_x, handle_y), handle_r);
         frame.fill(&circle, self.fg);
-        frame.stroke(&circle, Stroke::default().with_color(self.bg).with_width(2.0));
+        frame.stroke(
+            &circle,
+            Stroke::default().with_color(self.bg).with_width(2.0),
+        );
 
         // W × H — center of box, high-contrast
         let label = format!("{} × {}", self.w, self.h);
@@ -144,11 +151,18 @@ impl canvas::Program<SettingsMessage> for SizeResizer {
         });
 
         // Hint label bottom-right
-        let hint = if state.dragging { "drag…" } else { "drag to resize" };
+        let hint = if state.dragging {
+            "drag…"
+        } else {
+            "drag to resize"
+        };
         frame.fill_text(Text {
             content: hint.to_string(),
             position: Point::new(w - 4.0, h - 2.0),
-            color: Color { a: 0.55, ..self.muted },
+            color: Color {
+                a: 0.55,
+                ..self.muted
+            },
             size: iced::Pixels(9.0),
             align_x: iced::alignment::Horizontal::Right.into(),
             align_y: iced::alignment::Vertical::Bottom,

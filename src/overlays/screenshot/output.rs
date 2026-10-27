@@ -19,15 +19,24 @@ pub fn focused_output() -> Option<String> {
         .map(String::from)
 }
 
-
 pub fn list_all_outputs() -> Vec<(String, i32, i32, u32, u32)> {
     let out = Command::new("swaymsg")
         .args(["-t", "get_outputs", "-r"])
         .output()
         .ok()
-        .and_then(|o| if o.status.success() { String::from_utf8(o.stdout).ok() } else { None });
-    let Some(text) = out else { return Vec::new(); };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { return Vec::new(); };
+        .and_then(|o| {
+            if o.status.success() {
+                String::from_utf8(o.stdout).ok()
+            } else {
+                None
+            }
+        });
+    let Some(text) = out else {
+        return Vec::new();
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Vec::new();
+    };
     v.as_array()
         .map(|arr| {
             arr.iter()

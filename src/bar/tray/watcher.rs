@@ -27,7 +27,10 @@ impl TrayWatcher {
         // Some clients (ayatana-style, e.g. Steam) send just the object path.
         // Fall back to the sender's unique bus name so the item is reachable.
         let entry = if service.starts_with('/') {
-            let sender = hdr.sender().map(|s| s.as_str().to_string()).unwrap_or_default();
+            let sender = hdr
+                .sender()
+                .map(|s| s.as_str().to_string())
+                .unwrap_or_default();
             format!("{}{}", sender, service)
         } else {
             normalize_service(&service)
@@ -50,10 +53,14 @@ impl TrayWatcher {
     }
 
     #[zbus(property)]
-    fn is_status_notifier_host_registered(&self) -> bool { true }
+    fn is_status_notifier_host_registered(&self) -> bool {
+        true
+    }
 
     #[zbus(property)]
-    fn protocol_version(&self) -> i32 { 0 }
+    fn protocol_version(&self) -> i32 {
+        0
+    }
 }
 
 fn normalize_service(s: &str) -> String {
@@ -75,10 +82,15 @@ pub fn spawn() {
             .build()
         {
             Ok(r) => r,
-            Err(e) => { eprintln!("[tray-watcher] rt build: {e}"); return; }
+            Err(e) => {
+                eprintln!("[tray-watcher] rt build: {e}");
+                return;
+            }
         };
         rt.block_on(async move {
-            let watcher = TrayWatcher { items: Arc::new(Mutex::new(HashSet::new())) };
+            let watcher = TrayWatcher {
+                items: Arc::new(Mutex::new(HashSet::new())),
+            };
             let conn = zbus::connection::Builder::session()
                 .and_then(|b| b.name("org.kde.StatusNotifierWatcher"))
                 .and_then(|b| b.serve_at("/StatusNotifierWatcher", watcher))
@@ -114,38 +126,70 @@ pub struct TrayItem {
 pub async fn fetch_tray_items() -> Vec<TrayItem> {
     let conn = match zbus::Connection::session().await {
         Ok(c) => c,
-        Err(e) => { crate::dbg_log!("[tray-fetch] session bus: {e}"); return Vec::new(); }
+        Err(e) => {
+            crate::dbg_log!("[tray-fetch] session bus: {e}");
+            return Vec::new();
+        }
     };
     let watcher = match zbus::Proxy::new(
         &conn,
         "org.kde.StatusNotifierWatcher",
         "/StatusNotifierWatcher",
         "org.kde.StatusNotifierWatcher",
-    ).await {
+    )
+    .await
+    {
         Ok(p) => p,
-        Err(e) => { crate::dbg_log!("[tray-fetch] watcher proxy: {e}"); return Vec::new(); }
+        Err(e) => {
+            crate::dbg_log!("[tray-fetch] watcher proxy: {e}");
+            return Vec::new();
+        }
     };
     let raw_items: Vec<String> = match watcher.get_property("RegisteredStatusNotifierItems").await {
         Ok(v) => v,
-        Err(e) => { crate::dbg_log!("[tray-fetch] RegisteredStatusNotifierItems: {e}"); return Vec::new(); }
+        Err(e) => {
+            crate::dbg_log!("[tray-fetch] RegisteredStatusNotifierItems: {e}");
+            return Vec::new();
+        }
     };
 
     let mut out = Vec::new();
     for raw in raw_items {
-        let Some((bus, path)) = parse_registered(&raw) else { continue };
-        let proxy = match zbus::Proxy::new(&conn, bus.as_str(), path.as_str(), "org.kde.StatusNotifierItem").await {
+        let Some((bus, path)) = parse_registered(&raw) else {
+            continue;
+        };
+        let proxy = match zbus::Proxy::new(
+            &conn,
+            bus.as_str(),
+            path.as_str(),
+            "org.kde.StatusNotifierItem",
+        )
+        .await
+        {
             Ok(p) => p,
-            Err(e) => { crate::dbg_log!("[tray-fetch] {} proxy: {e}", raw); continue; }
+            Err(e) => {
+                crate::dbg_log!("[tray-fetch] {} proxy: {e}", raw);
+                continue;
+            }
         };
         let id: String = proxy.get_property("Id").await.unwrap_or_default();
         let title: String = proxy.get_property("Title").await.unwrap_or_default();
         let status: String = proxy.get_property("Status").await.unwrap_or_default();
-        if status.eq_ignore_ascii_case("Passive") { continue; }
+        if status.eq_ignore_ascii_case("Passive") {
+            continue;
+        }
 
         let icon_name: String = proxy.get_property("IconName").await.unwrap_or_default();
-        let mut icon_path = if !icon_name.is_empty() { resolve_icon(&icon_name) } else { None };
+        let mut icon_path = if !icon_name.is_empty() {
+            resolve_icon(&icon_name)
+        } else {
+            None
+        };
         if icon_path.is_none() {
-            if let Ok(pixmaps) = proxy.get_property::<Vec<(i32, i32, Vec<u8>)>>("IconPixmap").await {
+            if let Ok(pixmaps) = proxy
+                .get_property::<Vec<(i32, i32, Vec<u8>)>>("IconPixmap")
+                .await
+            {
                 if let Some((w, h, data)) = pixmaps.into_iter().max_by_key(|(w, h, _)| (*w, *h)) {
                     icon_path = save_pixmap(&id, w.max(0) as u32, h.max(0) as u32, &data);
                 }
@@ -168,11 +212,17 @@ pub async fn fetch_tray_items() -> Vec<TrayItem> {
             Err(_) => String::new(),
         };
         crate::dbg_log!("[tray-fetch] item: {} path: {:?}", title, icon_path);
-        out.push(TrayItem { bus, path, id, title, icon_path, tooltip });
+        out.push(TrayItem {
+            bus,
+            path,
+            id,
+            title,
+            icon_path,
+            tooltip,
+        });
     }
     out
 }
-
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TrayMenuItem {
@@ -184,22 +234,42 @@ pub struct TrayMenuItem {
 
 pub async fn get_menu_tree(bus: &str, path: &str) -> Option<(String, Vec<TrayMenuItem>)> {
     let conn = zbus::Connection::session().await.ok()?;
-    let proxy = zbus::Proxy::new(&conn, bus, path, "org.kde.StatusNotifierItem").await.ok()?;
-    
+    let proxy = zbus::Proxy::new(&conn, bus, path, "org.kde.StatusNotifierItem")
+        .await
+        .ok()?;
+
     // Menu property is ObjectPath, not String.
     let menu_obj: zbus::zvariant::OwnedObjectPath = proxy.get_property("Menu").await.ok()?;
     let menu_path: String = menu_obj.as_str().to_string();
-    if menu_path.is_empty() { return None; }
-    
-    let menu_proxy = zbus::Proxy::new(&conn, bus, menu_path.as_str(), "com.canonical.dbusmenu").await.ok()?;
-    let reply = menu_proxy.call_method("GetLayout", &(0i32, -1i32, vec!["label", "enabled", "visible"])).await.ok()?;
-    
-    type RawItem = (i32, std::collections::HashMap<String, zbus::zvariant::OwnedValue>, Vec<zbus::zvariant::OwnedValue>);
+    if menu_path.is_empty() {
+        return None;
+    }
+
+    let menu_proxy = zbus::Proxy::new(&conn, bus, menu_path.as_str(), "com.canonical.dbusmenu")
+        .await
+        .ok()?;
+    let reply = menu_proxy
+        .call_method(
+            "GetLayout",
+            &(0i32, -1i32, vec!["label", "enabled", "visible"]),
+        )
+        .await
+        .ok()?;
+
+    type RawItem = (
+        i32,
+        std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
+        Vec<zbus::zvariant::OwnedValue>,
+    );
     let (_rev, layout): (u32, RawItem) = reply.body().deserialize().ok()?;
-    
-    fn parse_item(id: i32, props: std::collections::HashMap<String, zbus::zvariant::OwnedValue>, children: Vec<zbus::zvariant::OwnedValue>) -> Vec<TrayMenuItem> {
+
+    fn parse_item(
+        id: i32,
+        props: std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
+        children: Vec<zbus::zvariant::OwnedValue>,
+    ) -> Vec<TrayMenuItem> {
         let mut items = Vec::new();
-        
+
         let label = match props.get("label").map(|v| &**v) {
             Some(zbus::zvariant::Value::Str(s)) => s.as_str().to_string(),
             _ => String::new(),
@@ -213,13 +283,23 @@ pub async fn get_menu_tree(bus: &str, path: &str) -> Option<(String, Vec<TrayMen
             _ => true,
         };
         let label_clean = label.replace('_', "");
-        
+
         if label_clean == "-" {
-            items.push(TrayMenuItem { id: -1, label: "-".into(), enabled: false, visible: true });
+            items.push(TrayMenuItem {
+                id: -1,
+                label: "-".into(),
+                enabled: false,
+                visible: true,
+            });
         } else if !label_clean.is_empty() {
-            items.push(TrayMenuItem { id, label: label_clean, enabled, visible });
+            items.push(TrayMenuItem {
+                id,
+                label: label_clean,
+                enabled,
+                visible,
+            });
         }
-        
+
         for c in children {
             let val: zbus::zvariant::Value = c.into();
             if let Ok((cid, cprops, ckids)) = val.downcast::<RawItem>() {
@@ -228,32 +308,46 @@ pub async fn get_menu_tree(bus: &str, path: &str) -> Option<(String, Vec<TrayMen
         }
         items
     }
-    
+
     let items = parse_item(layout.0, layout.1, layout.2);
     eprintln!("[tray-menu] found {} items", items.len());
     Some((menu_path, items))
 }
 
-
-pub async fn trigger_menu_item(bus: &str, menu_path: &str, id: i32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn trigger_menu_item(
+    bus: &str,
+    menu_path: &str,
+    id: i32,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let conn = zbus::Connection::session().await?;
     let proxy = zbus::Proxy::new(&conn, bus, menu_path, "com.canonical.dbusmenu").await?;
-    proxy.call_method("Event", &(id, "clicked", zbus::zvariant::Value::from(0i32), 0u32)).await?;
+    proxy
+        .call_method(
+            "Event",
+            &(id, "clicked", zbus::zvariant::Value::from(0i32), 0u32),
+        )
+        .await?;
     Ok(())
 }
 
-pub async fn activate_tray_item(bus: &str, path: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn activate_tray_item(
+    bus: &str,
+    path: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let conn = zbus::Connection::session().await?;
     let proxy = zbus::Proxy::new(&conn, bus, path, "org.kde.StatusNotifierItem").await?;
     proxy.call_method("Activate", &(0i32, 0i32)).await?;
     Ok(())
 }
 
-
 fn parse_registered(s: &str) -> Option<(String, String)> {
     if let Some(idx) = s.find('/') {
         let (bus, path) = (&s[..idx], &s[idx..]);
-        if bus.is_empty() { None } else { Some((bus.to_string(), path.to_string())) }
+        if bus.is_empty() {
+            None
+        } else {
+            Some((bus.to_string(), path.to_string()))
+        }
     } else if !s.is_empty() {
         Some((s.to_string(), "/StatusNotifierItem".to_string()))
     } else {
@@ -294,7 +388,9 @@ fn parse_registered(s: &str) -> Option<(String, String)> {
 ///     falling back to `id` and then `tooltip`).
 fn resolve_icon(icon_name: &str) -> Option<String> {
     use std::path::Path;
-    if icon_name.is_empty() { return None; }
+    if icon_name.is_empty() {
+        return None;
+    }
 
     // Cache directory. Content-hashed filenames below ensure iced's
     // internal image-handle cache invalidates whenever the bytes change.
@@ -306,21 +402,33 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
 
     let safe_name: String = icon_name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
 
     // Fast path: if a previously-normalized version is already cached, reuse.
     // Files are named "icon-<safe>.<ext>" — we check all possible extensions.
     for ext in ["png", "svg", "xpm"] {
         let cached = runtime_dir.join(format!("icon-{}.{}", safe_name, ext));
-        if cached.exists() && std::fs::metadata(&cached).map(|m| m.len() > 0).unwrap_or(false) {
+        if cached.exists()
+            && std::fs::metadata(&cached)
+                .map(|m| m.len() > 0)
+                .unwrap_or(false)
+        {
             return Some(cached.to_string_lossy().into_owned());
         }
     }
 
     // Locate the source file
     let source: std::path::PathBuf = if icon_name.starts_with('/') {
-        if !Path::new(icon_name).exists() { return None; }
+        if !Path::new(icon_name).exists() {
+            return None;
+        }
         std::path::PathBuf::from(icon_name)
     } else {
         let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
@@ -332,23 +440,35 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
             home.join(".local/share/flatpak/exports/share/icons/hicolor"),
             home.join(".nix-profile/share/icons/hicolor"),
         ];
-        let sizes = ["48x48", "64x64", "128x128", "256x256", "512x512", "scalable", "symbolic"];
+        let sizes = [
+            "48x48", "64x64", "128x128", "256x256", "512x512", "scalable", "symbolic",
+        ];
         let exts = ["png", "svg", "xpm"];
 
         let mut found: Option<std::path::PathBuf> = None;
         'search: for root in &roots {
             for size in &sizes {
                 for ext in &exts {
-                    let candidate = root.join(size).join("apps").join(format!("{}.{}", icon_name, ext));
-                    if candidate.exists() { found = Some(candidate); break 'search; }
+                    let candidate = root
+                        .join(size)
+                        .join("apps")
+                        .join(format!("{}.{}", icon_name, ext));
+                    if candidate.exists() {
+                        found = Some(candidate);
+                        break 'search;
+                    }
                 }
             }
         }
         if found.is_none() {
             'search2: for pix in ["/run/current-system/sw/share/pixmaps", "/usr/share/pixmaps"] {
                 for ext in &exts {
-                    let candidate = std::path::PathBuf::from(pix).join(format!("{}.{}", icon_name, ext));
-                    if candidate.exists() { found = Some(candidate); break 'search2; }
+                    let candidate =
+                        std::path::PathBuf::from(pix).join(format!("{}.{}", icon_name, ext));
+                    if candidate.exists() {
+                        found = Some(candidate);
+                        break 'search2;
+                    }
                 }
             }
         }
@@ -384,16 +504,25 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
         Some(final_path.to_string_lossy().into_owned())
     };
 
-
     // ImageMagick availability check (cached once per call for simplicity;
     // it's cheap — just which())
-    let magick = if std::process::Command::new("magick").arg("--version").output()
-        .map(|o| o.status.success()).unwrap_or(false)
-    { Some("magick") }
-    else if std::process::Command::new("convert").arg("--version").output()
-        .map(|o| o.status.success()).unwrap_or(false)
-    { Some("convert") }
-    else { None };
+    let magick = if std::process::Command::new("magick")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        Some("magick")
+    } else if std::process::Command::new("convert")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        Some("convert")
+    } else {
+        None
+    };
 
     // ── SVG path: no re-encode, just copy ──────────────────────────
     if is_svg_src {
@@ -426,7 +555,10 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
         }
     }
 
-    eprintln!("[tray-icon] {} `image` crate failed to decode; falling back to magick", icon_name);
+    eprintln!(
+        "[tray-icon] {} `image` crate failed to decode; falling back to magick",
+        icon_name
+    );
 
     if let Some(bin) = magick {
         let _ = std::fs::remove_file(&base_dest);
@@ -439,16 +571,32 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
             .output();
         match output {
             Ok(out) if out.status.success() => {
-                if base_dest.exists() && std::fs::metadata(&base_dest).map(|m| m.len() > 0).unwrap_or(false) {
+                if base_dest.exists()
+                    && std::fs::metadata(&base_dest)
+                        .map(|m| m.len() > 0)
+                        .unwrap_or(false)
+                {
                     return hash_and_finalize(&base_dest);
                 }
-                eprintln!("[tray-icon] {} magick produced empty output. stderr: {}", icon_name, String::from_utf8_lossy(&out.stderr).trim());
+                eprintln!(
+                    "[tray-icon] {} magick produced empty output. stderr: {}",
+                    icon_name,
+                    String::from_utf8_lossy(&out.stderr).trim()
+                );
             }
-            Ok(out) => eprintln!("[tray-icon] {} magick exited {:?}. stderr: {}", icon_name, out.status.code(), String::from_utf8_lossy(&out.stderr).trim()),
+            Ok(out) => eprintln!(
+                "[tray-icon] {} magick exited {:?}. stderr: {}",
+                icon_name,
+                out.status.code(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
             Err(e) => eprintln!("[tray-icon] {} magick spawn: {}", icon_name, e),
         }
     } else {
-        eprintln!("[tray-icon] {} no ImageMagick; copying raw (may not render)", icon_name);
+        eprintln!(
+            "[tray-icon] {} no ImageMagick; copying raw (may not render)",
+            icon_name
+        );
     }
 
     // Fallback: raw copy (may fail to render, but at least icon_path exists)
@@ -459,8 +607,12 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
 }
 
 fn save_pixmap(id: &str, w: u32, h: u32, data: &[u8]) -> Option<String> {
-    if w == 0 || h == 0 { return None; }
-    if data.len() != (w as usize * h as usize * 4) { return None; }
+    if w == 0 || h == 0 {
+        return None;
+    }
+    if data.len() != (w as usize * h as usize * 4) {
+        return None;
+    }
     let mut rgba = Vec::with_capacity(data.len());
     // SNI IconPixmap is ARGB32 network order: [A, R, G, B]
     for chunk in data.as_chunks::<4>().0 {
@@ -470,7 +622,10 @@ fn save_pixmap(id: &str, w: u32, h: u32, data: &[u8]) -> Option<String> {
         rgba.push(chunk[0]);
     }
     let img: image::RgbaImage = image::ImageBuffer::from_raw(w, h, rgba)?;
-    let safe: String = id.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
+    let safe: String = id
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect();
     let icon_dir = std::env::var("XDG_RUNTIME_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::env::temp_dir())

@@ -28,7 +28,10 @@ pub enum ClipboardMessage {
     WipeAll,
     RunOcr(u64),
     Reloaded(Vec<ClipItem>),
-    PreviewLoaded { text: String, image_path: Option<String> },
+    PreviewLoaded {
+        text: String,
+        image_path: Option<String>,
+    },
     Dismiss,
 }
 
@@ -48,8 +51,14 @@ impl Default for ClipboardOverlay {
 
 impl ClipboardOverlay {
     pub fn filtered_ids(&self) -> Vec<u64> {
-        self.entries.iter()
-            .filter(|e| self.search_query.is_empty() || e.text.to_lowercase().contains(&self.search_query.to_lowercase()))
+        self.entries
+            .iter()
+            .filter(|e| {
+                self.search_query.is_empty()
+                    || e.text
+                        .to_lowercase()
+                        .contains(&self.search_query.to_lowercase())
+            })
             .map(|e| e.id)
             .collect()
     }
@@ -68,7 +77,7 @@ impl ClipboardOverlay {
         let cache_dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
         let map_path = cache_dir.join("mbs-clip-names.txt");
         let mut name_map = std::collections::HashMap::new();
-        
+
         if let Ok(map_content) = std::fs::read_to_string(&map_path) {
             for line in map_content.lines() {
                 if let Some((id_str, name)) = line.split_once('\t') {
@@ -90,7 +99,8 @@ impl ClipboardOverlay {
         for line in raw.lines() {
             if let Some((id_str, content)) = line.split_once('\t') {
                 if let Ok(id) = id_str.trim().parse::<u64>() {
-                    let is_image = content.contains("[[ binary data") || content.contains("binary data");
+                    let is_image =
+                        content.contains("[[ binary data") || content.contains("binary data");
                     let thumb_path = if is_image {
                         let thumb = tmp_dir.join(format!("mbs-clip-thumb-{}.png", id));
                         let decode = Command::new("cliphist")
@@ -101,11 +111,15 @@ impl ClipboardOverlay {
                             Ok(d) if !d.stdout.is_empty() => {
                                 if std::fs::write(&thumb, &d.stdout).is_ok() {
                                     Some(thumb.to_string_lossy().into_owned())
-                                } else { None }
+                                } else {
+                                    None
+                                }
                             }
                             _ => None,
                         }
-                    } else { None };
+                    } else {
+                        None
+                    };
 
                     // Use mapped filename if it exists
                     let text_val = if is_image {
@@ -140,7 +154,9 @@ impl ClipboardOverlay {
             Ok(o) => o,
             Err(_) => return (String::new(), None),
         };
-        if out.stdout.is_empty() { return (String::new(), None); }
+        if out.stdout.is_empty() {
+            return (String::new(), None);
+        }
         if out.stdout.len() > 8 * 1024 * 1024 {
             return ("[entry too large to preview]".into(), None);
         }
@@ -164,15 +180,23 @@ impl ClipboardOverlay {
             .await
         {
             Ok(d) => d,
-            Err(e) => { eprintln!("[clipboard] cliphist decode failed: {e}"); return; }
+            Err(e) => {
+                eprintln!("[clipboard] cliphist decode failed: {e}");
+                return;
+            }
         };
-        if decode.stdout.is_empty() { return; }
+        if decode.stdout.is_empty() {
+            return;
+        }
         let mut child = match Command::new("wl-copy")
             .stdin(std::process::Stdio::piped())
             .spawn()
         {
             Ok(c) => c,
-            Err(e) => { eprintln!("[clipboard] wl-copy spawn failed: {e}"); return; }
+            Err(e) => {
+                eprintln!("[clipboard] wl-copy spawn failed: {e}");
+                return;
+            }
         };
         if let Some(mut stdin) = child.stdin.take() {
             use tokio::io::AsyncWriteExt;
@@ -223,8 +247,16 @@ impl ClipboardOverlay {
         String::new()
     }
 
-    pub fn view<'a>(&'a self, theme: &'a ShellTheme, settings: &ShellSettings) -> Element<'a, ClipboardMessage> {
-        let is_image_selected = self.selected_id.and_then(|id| self.entries.iter().find(|e| e.id == id)).map(|e| e.is_image).unwrap_or(false);
+    pub fn view<'a>(
+        &'a self,
+        theme: &'a ShellTheme,
+        settings: &ShellSettings,
+    ) -> Element<'a, ClipboardMessage> {
+        let is_image_selected = self
+            .selected_id
+            .and_then(|id| self.entries.iter().find(|e| e.id == id))
+            .map(|e| e.is_image)
+            .unwrap_or(false);
 
         let (win_w, win_h) = settings.get_window_size("clipboard", 1000, 700);
         let cut = theme.overlay_cut as u16;
@@ -260,7 +292,12 @@ impl ClipboardOverlay {
         // Header
         let search_input = text_input("Search clipboard...", &self.search_query)
             .on_input(ClipboardMessage::SearchChanged)
-            .padding(Padding { top: 12.0, right: 24.0, bottom: 12.0, left: 24.0 })
+            .padding(Padding {
+                top: 12.0,
+                right: 24.0,
+                bottom: 12.0,
+                left: 24.0,
+            })
             .size((theme.font_size_overlay) as f32)
             .width(Length::Fill)
             .style(move |_t, _s| text_input::Style {
@@ -278,16 +315,17 @@ impl ClipboardOverlay {
             .border(theme.border, theme.control_border_width)
             .size(Length::Fill, Length::Fixed(48.0));
 
-        let search_bar = container(
-            Stack::new()
-                .push(search_bg.view())
-                .push(search_input)
-        ).height(Length::Fixed(48.0));
+        let search_bar = container(Stack::new().push(search_bg.view()).push(search_input))
+            .height(Length::Fixed(48.0));
 
         let wipe_btn = button(
-            container(text("Wipe All").size((theme.font_size_overlay) as f32).color(theme.danger))
-                .center_y(Length::Fill)
-                .center_x(Length::Fill)
+            container(
+                text("Wipe All")
+                    .size((theme.font_size_overlay) as f32)
+                    .color(theme.danger),
+            )
+            .center_y(Length::Fill)
+            .center_x(Length::Fill),
         )
         .on_press(ClipboardMessage::WipeAll)
         .height(Length::Fixed(48.0))
@@ -305,12 +343,18 @@ impl ClipboardOverlay {
             .size(Length::Fixed(100.0), Length::Fixed(48.0));
 
         let ocr_btn = button(
-            container(text("OCR").size((theme.font_size_overlay) as f32).color(if is_image_selected { theme.text } else { theme.muted }))
-                .center_y(Length::Fill)
-                .center_x(Length::Fill)
+            container(text("OCR").size((theme.font_size_overlay) as f32).color(
+                if is_image_selected {
+                    theme.text
+                } else {
+                    theme.muted
+                },
+            ))
+            .center_y(Length::Fill)
+            .center_x(Length::Fill),
         )
         .on_press_maybe(Some(ClipboardMessage::RunOcr(
-            self.selected_id.unwrap_or(0)
+            self.selected_id.unwrap_or(0),
         )))
         .height(Length::Fixed(48.0))
         .width(Length::Fixed(80.0))
@@ -323,31 +367,46 @@ impl ClipboardOverlay {
         let ocr_bg = ShapeBox::new()
             .shape(ShapeType::Hexagon { cut })
             .background(theme.background)
-            .border(if is_image_selected { theme.text } else { theme.border }, theme.control_border_width)
+            .border(
+                if is_image_selected {
+                    theme.text
+                } else {
+                    theme.border
+                },
+                theme.control_border_width,
+            )
             .size(Length::Fixed(80.0), Length::Fixed(48.0));
 
-        let ocr_bar = container(
-            Stack::new()
-                .push(ocr_bg.view())
-                .push(ocr_btn)
-        ).height(Length::Fixed(48.0)).width(Length::Fixed(80.0));
+        let ocr_bar = container(Stack::new().push(ocr_bg.view()).push(ocr_btn))
+            .height(Length::Fixed(48.0))
+            .width(Length::Fixed(80.0));
 
-        let wipe_bar = container(
-            Stack::new()
-                .push(wipe_bg.view())
-                .push(wipe_btn)
-        ).height(Length::Fixed(48.0)).width(Length::Fixed(100.0));
+        let wipe_bar = container(Stack::new().push(wipe_bg.view()).push(wipe_btn))
+            .height(Length::Fixed(48.0))
+            .width(Length::Fixed(100.0));
 
         let input_row = container(
-            row![search_bar, ocr_bar, wipe_bar].spacing(12).align_y(Alignment::Center)
+            row![search_bar, ocr_bar, wipe_bar]
+                .spacing(12)
+                .align_y(Alignment::Center),
         )
         .width(Length::Fill)
-        .padding(Padding { top: 0.0, right: search_inward, bottom: 0.0, left: search_inward });
+        .padding(Padding {
+            top: 0.0,
+            right: search_inward,
+            bottom: 0.0,
+            left: search_inward,
+        });
 
         // Left Pane (List)
         let mut list_col = column![].spacing(8);
         for item in &self.entries {
-            if !self.search_query.is_empty() && !item.text.to_lowercase().contains(&self.search_query.to_lowercase()) {
+            if !self.search_query.is_empty()
+                && !item
+                    .text
+                    .to_lowercase()
+                    .contains(&self.search_query.to_lowercase())
+            {
                 continue;
             }
             let is_sel = self.selected_id == Some(item.id);
@@ -355,7 +414,7 @@ impl ClipboardOverlay {
             let text_color = if is_sel { theme.text } else { theme.text }; // Keep text normal
 
             let raw_text = item.text.lines().next().unwrap_or("").to_string();
-            
+
             let display_text = if raw_text.chars().count() > 30 {
                 let truncated: String = raw_text.chars().take(30).collect();
                 format!("{}...", truncated)
@@ -369,20 +428,29 @@ impl ClipboardOverlay {
                     iced::widget::image(iced::widget::image::Handle::from_path(thumb.clone()))
                         .width(Length::Fixed(40.0))
                         .height(Length::Fixed(40.0))
-                        .content_fit(iced::ContentFit::Contain)
+                        .content_fit(iced::ContentFit::Contain),
                 );
             } else {
                 item_row = item_row.push(text("■").size(10).color(theme.muted));
             }
-            
+
             // Force the text to stay strictly within the box
-            let text_container = container(text(display_text).size((theme.font_size_overlay) as f32).color(text_color))
-                .width(Length::Fill)
-                .clip(true);
+            let text_container = container(
+                text(display_text)
+                    .size((theme.font_size_overlay) as f32)
+                    .color(text_color),
+            )
+            .width(Length::Fill)
+            .clip(true);
             item_row = item_row.push(text_container);
 
             let btn_content = container(item_row)
-                .padding(Padding { top: 0.0, right: 24.0, bottom: 0.0, left: 24.0 })
+                .padding(Padding {
+                    top: 0.0,
+                    right: 24.0,
+                    bottom: 0.0,
+                    left: 24.0,
+                })
                 .width(Length::Fill)
                 .height(Length::Fixed(56.0))
                 .align_y(Alignment::Center);
@@ -393,25 +461,24 @@ impl ClipboardOverlay {
                 .border(border_color, theme.control_border_width)
                 .size(Length::Fill, Length::Fixed(56.0));
 
-            let item_btn = button(
-                Stack::new()
-                    .push(item_bg.view())
-                    .push(btn_content)
-            )
-            .on_press(ClipboardMessage::SelectEntry(item.id))
-            .width(Length::Fill)
-            .height(Length::Fixed(56.0))
-            .style(move |_t, _s| button::Style {
-                background: Some(iced::Background::Color(Color::TRANSPARENT)),
-                border: iced::Border::default(),
-                ..Default::default()
-            });
+            let item_btn = button(Stack::new().push(item_bg.view()).push(btn_content))
+                .on_press(ClipboardMessage::SelectEntry(item.id))
+                .width(Length::Fill)
+                .height(Length::Fixed(56.0))
+                .style(move |_t, _s| button::Style {
+                    background: Some(iced::Background::Color(Color::TRANSPARENT)),
+                    border: iced::Border::default(),
+                    ..Default::default()
+                });
 
             list_col = list_col.push(item_btn);
         }
 
         let left_pane = container(
-            scrollable(list_col).id(iced::widget::Id::new("clip_list")).width(Length::Fill).height(Length::Fill)
+            scrollable(list_col)
+                .id(iced::widget::Id::new("clip_list"))
+                .width(Length::Fill)
+                .height(Length::Fill),
         )
         .width(Length::FillPortion(1))
         .height(Length::Fill)
@@ -426,18 +493,29 @@ impl ClipboardOverlay {
         // Right Pane (Preview)
         // Dynamic padding based on the chamfer cut to prevent spilling out of the octagon
         let inner_pad = cut_f + 4.0; // Tight padding: just enough to clear the chamfer
-        let inner_padding = Padding { top: inner_pad, right: inner_pad, bottom: inner_pad, left: inner_pad };
+        let inner_padding = Padding {
+            top: inner_pad,
+            right: inner_pad,
+            bottom: inner_pad,
+            left: inner_pad,
+        };
 
-        let preview_content: Element<'a, ClipboardMessage> = if let Some(img_path) = &self.preview_image_path {
+        let preview_content: Element<'a, ClipboardMessage> = if let Some(img_path) =
+            &self.preview_image_path
+        {
             container(
                 container(
                     iced::widget::image(iced::widget::image::Handle::from_path(img_path.clone()))
                         .width(Length::Fill)
-                        .content_fit(iced::ContentFit::Contain)
+                        .content_fit(iced::ContentFit::Contain),
                 )
                 .padding(inner_padding)
-                .center_x(Length::Fill).center_y(Length::Fill).width(Length::Fill).height(Length::Fill)
-            ).into()
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .width(Length::Fill)
+                .height(Length::Fill),
+            )
+            .into()
         } else if !self.preview_text.is_empty() {
             container(
                 scrollable(
@@ -446,17 +524,28 @@ impl ClipboardOverlay {
                             .size((theme.font_size_overlay) as f32)
                             .font(iced::Font::MONOSPACE)
                             .color(theme.text)
-                            .wrapping(iced::widget::text::Wrapping::WordOrGlyph)
-                    ).width(Length::Fill)
-                ).width(Length::Fill).height(Length::Fill)
-            ).padding(inner_padding).width(Length::Fill).height(Length::Fill).into()
-        } else {
-            container(text("Select an entry to preview").size((theme.font_size_overlay) as f32).color(theme.muted))
-                .center_x(Length::Fill)
-                .center_y(Length::Fill)
+                            .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+                    )
+                    .width(Length::Fill),
+                )
                 .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
+                .height(Length::Fill),
+            )
+            .padding(inner_padding)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+        } else {
+            container(
+                text("Select an entry to preview")
+                    .size((theme.font_size_overlay) as f32)
+                    .color(theme.muted),
+            )
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
         };
 
         let right_bg = ShapeBox::new()
@@ -466,22 +555,26 @@ impl ClipboardOverlay {
             .size(Length::Fill, Length::Fill);
 
         // Wrap the Stack in a container with .clip(true) so the text inside the right pane doesn't bleed out
-        let right_pane = container(
-            Stack::new()
-                .push(right_bg.view())
-                .push(preview_content)
-        )
-        .width(Length::FillPortion(2))
-        .clip(true)
-        .height(Length::Fill)
-        .clip(true);
+        let right_pane = container(Stack::new().push(right_bg.view()).push(preview_content))
+            .width(Length::FillPortion(2))
+            .clip(true)
+            .height(Length::Fill)
+            .clip(true);
 
         let content = column![
             input_row,
-            row![left_pane, right_pane].spacing(16).height(Length::Fill).width(Length::Fill)
+            row![left_pane, right_pane]
+                .spacing(16)
+                .height(Length::Fill)
+                .width(Length::Fill)
         ]
         .spacing(16)
-        .padding(Padding { top: pad_top, right: 0.0, bottom: pad_bottom, left: 0.0 })
+        .padding(Padding {
+            top: pad_top,
+            right: 0.0,
+            bottom: pad_bottom,
+            left: 0.0,
+        })
         .width(Length::Fixed(win_w))
         .height(Length::Fixed(win_h));
 
@@ -491,15 +584,11 @@ impl ClipboardOverlay {
             .border(theme.border, theme.control_border_width)
             .size(Length::Fixed(win_w), Length::Fixed(win_h));
 
-        container(
-            Stack::new()
-                .push(bg_shape.view())
-                .push(content)
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
-        .into()
+        container(Stack::new().push(bg_shape.view()).push(content))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .into()
     }
 }

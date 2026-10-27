@@ -9,12 +9,11 @@
 
 pub mod annotator;
 pub mod capture;
-pub mod output;
 pub mod fragment;
 pub mod ipc;
+pub mod output;
 
 pub use annotator::{
-    AnnotatorMessage, AnnotatorOverlay,
-    save_annotated_image, slurp_region, grim_capture,
+    grim_capture, save_annotated_image, slurp_region, AnnotatorMessage, AnnotatorOverlay,
 };
 pub use ipc::spawn as spawn_annotator_ipc;

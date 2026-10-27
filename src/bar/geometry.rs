@@ -32,14 +32,22 @@ pub fn capsule_actual_width(id: &str) -> f32 {
 
 pub fn row_width(items: &[&String], sp: f32, settings: &ShellSettings) -> f32 {
     let n = items.len();
-    items.iter().enumerate().map(|(i, id)| {
-        let w = if id.as_str() == "tray" {
-            settings.tray_width as f32
-        } else {
-            capsule_actual_width(id.as_str())
-        };
-        if i + 1 < n { w + sp } else { w }
-    }).sum()
+    items
+        .iter()
+        .enumerate()
+        .map(|(i, id)| {
+            let w = if id.as_str() == "tray" {
+                settings.tray_width as f32
+            } else {
+                capsule_actual_width(id.as_str())
+            };
+            if i + 1 < n {
+                w + sp
+            } else {
+                w
+            }
+        })
+        .sum()
 }
 
 pub fn capsule_center_x(s: &ShellSettings, sw: u32, target: &str) -> i32 {
@@ -53,14 +61,20 @@ pub fn capsule_center_x(s: &ShellSettings, sw: u32, target: &str) -> i32 {
     let right_items: Vec<&String> = s.bar_right.iter().filter(|id| visible(id)).collect();
 
     let w_of = |id: &str| -> f32 {
-        if id == "tray" { s.tray_width as f32 } else { capsule_actual_width(id) }
+        if id == "tray" {
+            s.tray_width as f32
+        } else {
+            capsule_actual_width(id)
+        }
     };
 
     // 1. bar_left
     let mut x = pad;
     for (i, id) in left_items.iter().enumerate() {
         let w = w_of(id.as_str());
-        if id.as_str() == target { return (x + w / 2.0) as i32; }
+        if id.as_str() == target {
+            return (x + w / 2.0) as i32;
+        }
         x += w + if i + 1 < left_items.len() { sp } else { 0.0 };
     }
 
@@ -73,7 +87,9 @@ pub fn capsule_center_x(s: &ShellSettings, sw: u32, target: &str) -> i32 {
     let mut x = pad + left_w + fill_w;
     for (i, id) in center_items.iter().enumerate() {
         let w = w_of(id.as_str());
-        if id.as_str() == target { return (x + w / 2.0) as i32; }
+        if id.as_str() == target {
+            return (x + w / 2.0) as i32;
+        }
         x += w + if i + 1 < center_items.len() { sp } else { 0.0 };
     }
 
@@ -81,7 +97,9 @@ pub fn capsule_center_x(s: &ShellSettings, sw: u32, target: &str) -> i32 {
     let mut x = pad + avail - right_w;
     for (i, id) in right_items.iter().enumerate() {
         let w = w_of(id.as_str());
-        if id.as_str() == target { return (x + w / 2.0) as i32; }
+        if id.as_str() == target {
+            return (x + w / 2.0) as i32;
+        }
         x += w + if i + 1 < right_items.len() { sp } else { 0.0 };
     }
 

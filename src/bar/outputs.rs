@@ -2,8 +2,12 @@
 
 pub fn resolve_primary_output() -> Option<String> {
     let out = std::process::Command::new("swaymsg")
-        .args(["-t", "get_outputs", "-r"]).output().ok()?;
-    if !out.status.success() { return None; }
+        .args(["-t", "get_outputs", "-r"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
     let arr = v.as_array()?;
     // Prefer "primary"
@@ -27,7 +31,8 @@ pub fn resolve_primary_output() -> Option<String> {
 
 pub fn get_screen_width_for(output: Option<&str>) -> u32 {
     if let Ok(o) = std::process::Command::new("swaymsg")
-        .args(["-t", "get_outputs", "-r"]).output()
+        .args(["-t", "get_outputs", "-r"])
+        .output()
     {
         if o.status.success() {
             if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&o.stdout) {
@@ -35,7 +40,11 @@ pub fn get_screen_width_for(output: Option<&str>) -> u32 {
                     if let Some(name) = output {
                         for out in arr {
                             if out.get("name").and_then(|n| n.as_str()) == Some(name) {
-                                if let Some(w) = out.get("rect").and_then(|r| r.get("width")).and_then(|w| w.as_u64()) {
+                                if let Some(w) = out
+                                    .get("rect")
+                                    .and_then(|r| r.get("width"))
+                                    .and_then(|w| w.as_u64())
+                                {
                                     return if w > 0 { w as u32 } else { 1920 };
                                 }
                             }
@@ -43,7 +52,11 @@ pub fn get_screen_width_for(output: Option<&str>) -> u32 {
                     }
                     for out in arr {
                         if out.get("focused").and_then(|f| f.as_bool()) == Some(true) {
-                            if let Some(w) = out.get("rect").and_then(|r| r.get("width")).and_then(|w| w.as_u64()) {
+                            if let Some(w) = out
+                                .get("rect")
+                                .and_then(|r| r.get("width"))
+                                .and_then(|w| w.as_u64())
+                            {
                                 return if w > 0 { w as u32 } else { 1920 };
                             }
                         }

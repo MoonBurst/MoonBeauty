@@ -25,7 +25,9 @@ impl Default for WebSearchOverlay {
 
 impl WebSearchOverlay {
     pub fn new() -> Self {
-        Self { query: String::new() }
+        Self {
+            query: String::new(),
+        }
     }
 
     pub fn update(&mut self, message: WebSearchMessage) {
@@ -45,11 +47,17 @@ impl WebSearchOverlay {
         } else if let Some(stripped) = q.strip_prefix("!d ").or_else(|| q.strip_prefix("!ddg ")) {
             ("https://duckduckgo.com/?q=", stripped)
         } else if let Some(stripped) = q.strip_prefix("!w ").or_else(|| q.strip_prefix("!wiki ")) {
-            ("https://en.wikipedia.org/wiki/Special:Search?search=", stripped)
+            (
+                "https://en.wikipedia.org/wiki/Special:Search?search=",
+                stripped,
+            )
         } else if let Some(stripped) = q.strip_prefix("!gh ") {
             ("https://github.com/search?q=", stripped)
         } else if let Some(stripped) = q.strip_prefix("!nix ") {
-            ("https://search.nixos.org/packages?channel=unstable&query=", stripped)
+            (
+                "https://search.nixos.org/packages?channel=unstable&query=",
+                stripped,
+            )
         } else {
             ("https://www.startpage.com/sp/search?query=", q)
         };
@@ -122,6 +130,9 @@ impl WebSearchOverlay {
 
         let card = Stack::new().push(card_bg.view()).push(card_content);
 
-        container(card).center_x(Length::Fill).center_y(Length::Fill).into()
+        container(card)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .into()
     }
 }

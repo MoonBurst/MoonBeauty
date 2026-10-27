@@ -1,14 +1,34 @@
 use iced::widget::canvas::{self, Frame, Geometry, Path, Stroke};
 use iced::{Color, Element, Length, Point, Rectangle, Size, Theme};
 
-pub struct Anim { pub w: f32, pub h: f32, pub slant: f32, pub cut: f32, pub opacity: f32 }
+pub struct Anim {
+    pub w: f32,
+    pub h: f32,
+    pub slant: f32,
+    pub cut: f32,
+    pub opacity: f32,
+}
 
 #[inline]
-fn smoothstep(t: f32) -> f32 { let t = t.clamp(0.0, 1.0); t * t * (3.0 - 2.0 * t) }
+fn smoothstep(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
 
-pub fn compute(elapsed_ms: f32, cap_w: f32, final_w: f32, h_end: f32,
-               slant_base: f32, bar_h: f32, drop_ms: f32, expand_ms: f32) -> Anim {
-    let pause_ms: f32 = std::env::var("MBS_TOOLTIP_PAUSE_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+pub fn compute(
+    elapsed_ms: f32,
+    cap_w: f32,
+    final_w: f32,
+    h_end: f32,
+    slant_base: f32,
+    bar_h: f32,
+    drop_ms: f32,
+    expand_ms: f32,
+) -> Anim {
+    let pause_ms: f32 = std::env::var("MBS_TOOLTIP_PAUSE_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.0);
     let bar_h = bar_h.max(1.0);
     let slant_at = |h: f32| slant_base * (h / bar_h);
     let cap_core = (cap_w - slant_base).max(1.0);
@@ -26,11 +46,24 @@ pub fn compute(elapsed_ms: f32, cap_w: f32, final_w: f32, h_end: f32,
     let o_t = ((elapsed_ms - o_start) / opacity_ms).clamp(0.0, 1.0);
     let opacity = o_t * (2.0 - o_t);
     let cut = (w.min(h) * 0.15).max(0.0);
-    Anim { w, h, slant: slant_h, cut, opacity }
+    Anim {
+        w,
+        h,
+        slant: slant_h,
+        cut,
+        opacity,
+    }
 }
 
-pub fn compute_close(elapsed_ms: f32, cap_w: f32, final_w: f32, h_end: f32,
-                     slant_base: f32, bar_h: f32, base_ms: f32) -> Anim {
+pub fn compute_close(
+    elapsed_ms: f32,
+    cap_w: f32,
+    final_w: f32,
+    h_end: f32,
+    slant_base: f32,
+    bar_h: f32,
+    base_ms: f32,
+) -> Anim {
     let bar_h = bar_h.max(1.0);
     let slant_at = |h: f32| slant_base * (h / bar_h);
     let cap_core = (cap_w - slant_base).max(1.0);
@@ -50,12 +83,23 @@ pub fn compute_close(elapsed_ms: f32, cap_w: f32, final_w: f32, h_end: f32,
     let slant_h = slant_at(h);
     let w_final = core + slant_h;
     let cut = (w_final.min(h) * 0.15).max(0.0);
-    Anim { w: w_final, h, slant: slant_h, cut, opacity }
+    Anim {
+        w: w_final,
+        h,
+        slant: slant_h,
+        cut,
+        opacity,
+    }
 }
 
 pub struct ParallelogramBg {
-    pub w: f32, pub h: f32, pub slant: f32, pub slant_right: bool,
-    pub background: Color, pub border_color: Color, pub border_width: f32,
+    pub w: f32,
+    pub h: f32,
+    pub slant: f32,
+    pub slant_right: bool,
+    pub background: Color,
+    pub border_color: Color,
+    pub border_width: f32,
     /// Per-frame counter. Iced 0.14's reactive renderer skips repaints
     /// when the widget tree is identical. Bumping this every view() call
     /// changes the hidden marker text, forcing the tree to diff and the
@@ -66,13 +110,21 @@ pub struct ParallelogramBg {
 
 impl ParallelogramBg {
     pub fn view<Message: 'static>(self) -> Element<'static, Message> {
-        let w = self.w; let h = self.h;
+        let w = self.w;
+        let h = self.h;
         let inner = TooltipBg {
-            w: self.w, h: self.h, slant: self.slant, slant_right: self.slant_right,
-            background: self.background, border_color: self.border_color, border_width: self.border_width,
+            w: self.w,
+            h: self.h,
+            slant: self.slant,
+            slant_right: self.slant_right,
+            background: self.background,
+            border_color: self.border_color,
+            border_width: self.border_width,
         };
-        let canvas_el: Element<'static, Message> =
-            canvas::Canvas::new(inner).width(Length::Fixed(w)).height(Length::Fixed(h)).into();
+        let canvas_el: Element<'static, Message> = canvas::Canvas::new(inner)
+            .width(Length::Fixed(w))
+            .height(Length::Fixed(h))
+            .into();
         // V228: force tree diff. Iced 0.14 skips repaints when widget trees are
         // identical (reactive rendering). Bumping a hidden text widget's content
         // every frame invalidates the enclosing Stack, forcing the canvas below
@@ -94,8 +146,13 @@ impl ParallelogramBg {
 }
 
 pub struct TooltipBg {
-    pub w: f32, pub h: f32, pub slant: f32, pub slant_right: bool,
-    pub background: Color, pub border_color: Color, pub border_width: f32,
+    pub w: f32,
+    pub h: f32,
+    pub slant: f32,
+    pub slant_right: bool,
+    pub background: Color,
+    pub border_color: Color,
+    pub border_width: f32,
 }
 
 impl<Message> canvas::Program<Message> for TooltipBg {
@@ -117,8 +174,14 @@ impl<Message> canvas::Program<Message> for TooltipBg {
         }
         None
     }
-    fn draw(&self, _s: &Self::State, renderer: &iced::Renderer, _t: &Theme,
-            bounds: Rectangle, _c: iced::mouse::Cursor) -> Vec<Geometry> {
+    fn draw(
+        &self,
+        _s: &Self::State,
+        renderer: &iced::Renderer,
+        _t: &Theme,
+        bounds: Rectangle,
+        _c: iced::mouse::Cursor,
+    ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         if std::env::var_os("MBS_TICK_DIAG").is_some() {
             use std::sync::{Mutex, OnceLock};
@@ -147,13 +210,25 @@ impl<Message> canvas::Program<Message> for TooltipBg {
 
         // Fill path — bottom at h - border_inset, not self.h.
         let path = if self.slant_right {
-            Path::new(|b| { b.move_to(Point::new(sl + half, half)); b.line_to(Point::new(w - half, half));
-                b.line_to(Point::new(w - sl - half, h - border_inset)); b.line_to(Point::new(half, h - border_inset)); b.close(); })
+            Path::new(|b| {
+                b.move_to(Point::new(sl + half, half));
+                b.line_to(Point::new(w - half, half));
+                b.line_to(Point::new(w - sl - half, h - border_inset));
+                b.line_to(Point::new(half, h - border_inset));
+                b.close();
+            })
         } else {
-            Path::new(|b| { b.move_to(Point::new(half, half)); b.line_to(Point::new(w - sl - half, half));
-                b.line_to(Point::new(w - half, h - border_inset)); b.line_to(Point::new(sl + half, h - border_inset)); b.close(); })
+            Path::new(|b| {
+                b.move_to(Point::new(half, half));
+                b.line_to(Point::new(w - sl - half, half));
+                b.line_to(Point::new(w - half, h - border_inset));
+                b.line_to(Point::new(sl + half, h - border_inset));
+                b.close();
+            })
         };
-        if self.background.a > 0.0 { frame.fill(&path, self.background); }
+        if self.background.a > 0.0 {
+            frame.fill(&path, self.background);
+        }
 
         if bw > 0.0 && self.border_color.a > 0.0 {
             // Parallelogram corner x-coords:
@@ -182,15 +257,29 @@ impl<Message> canvas::Program<Message> for TooltipBg {
             );
 
             // Diagonal sides — stroked, connecting the corners above
-            let stroke = Stroke::default().with_color(self.border_color).with_width(bw);
+            let stroke = Stroke::default()
+                .with_color(self.border_color)
+                .with_width(bw);
             if self.slant_right {
-                let left_edge = Path::new(|b| { b.move_to(Point::new(sl + half, half)); b.line_to(Point::new(half, h - border_inset)); });
-                let right_edge = Path::new(|b| { b.move_to(Point::new(w - half, half)); b.line_to(Point::new(w - sl - half, h - border_inset)); });
+                let left_edge = Path::new(|b| {
+                    b.move_to(Point::new(sl + half, half));
+                    b.line_to(Point::new(half, h - border_inset));
+                });
+                let right_edge = Path::new(|b| {
+                    b.move_to(Point::new(w - half, half));
+                    b.line_to(Point::new(w - sl - half, h - border_inset));
+                });
                 frame.stroke(&left_edge, stroke);
                 frame.stroke(&right_edge, stroke);
             } else {
-                let left_edge = Path::new(|b| { b.move_to(Point::new(half, half)); b.line_to(Point::new(sl + half, h - border_inset)); });
-                let right_edge = Path::new(|b| { b.move_to(Point::new(w - sl - half, half)); b.line_to(Point::new(w - half, h - border_inset)); });
+                let left_edge = Path::new(|b| {
+                    b.move_to(Point::new(half, half));
+                    b.line_to(Point::new(sl + half, h - border_inset));
+                });
+                let right_edge = Path::new(|b| {
+                    b.move_to(Point::new(w - sl - half, half));
+                    b.line_to(Point::new(w - half, h - border_inset));
+                });
                 frame.stroke(&left_edge, stroke);
                 frame.stroke(&right_edge, stroke);
             }
@@ -249,14 +338,16 @@ pub fn detect_refresh_hz() -> u32 {
             }
         }
         if let Ok(out) = std::process::Command::new("swaymsg")
-            .args(["-t", "get_outputs", "-r"]).output()
+            .args(["-t", "get_outputs", "-r"])
+            .output()
         {
             if out.status.success() {
                 if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
                     if let Some(arr) = v.as_array() {
                         for o in arr {
                             if o.get("focused").and_then(|f| f.as_bool()) == Some(true) {
-                                if let Some(hz) = o.get("current_mode")
+                                if let Some(hz) = o
+                                    .get("current_mode")
                                     .and_then(|m| m.get("refresh"))
                                     .and_then(|r| r.as_u64())
                                 {
@@ -269,7 +360,8 @@ pub fn detect_refresh_hz() -> u32 {
                             }
                         }
                         for o in arr {
-                            if let Some(hz) = o.get("current_mode")
+                            if let Some(hz) = o
+                                .get("current_mode")
                                 .and_then(|m| m.get("refresh"))
                                 .and_then(|r| r.as_u64())
                             {
@@ -289,27 +381,36 @@ pub fn detect_refresh_hz() -> u32 {
     })
 }
 
-
 // ── OctagonBg: same animation cadence as ParallelogramBg but with 8
 // equal corner cuts (diamond-cornered rectangle). Used by the clock
 // tooltip — it's the keystone bar module and deserves a distinct shape.
 
 pub struct OctagonBg {
-    pub w: f32, pub h: f32, pub cut: f32,
-    pub background: Color, pub border_color: Color, pub border_width: f32,
+    pub w: f32,
+    pub h: f32,
+    pub cut: f32,
+    pub background: Color,
+    pub border_color: Color,
+    pub border_width: f32,
     pub frame: u64,
 }
 
 impl OctagonBg {
     pub fn view<Message: 'static>(self) -> Element<'static, Message> {
-        let w = self.w; let h = self.h;
+        let w = self.w;
+        let h = self.h;
         let inner = OctagonCanvas {
-            w: self.w, h: self.h, cut: self.cut,
-            background: self.background, border_color: self.border_color,
+            w: self.w,
+            h: self.h,
+            cut: self.cut,
+            background: self.background,
+            border_color: self.border_color,
             border_width: self.border_width,
         };
-        let canvas_el: Element<'static, Message> =
-            canvas::Canvas::new(inner).width(Length::Fixed(w)).height(Length::Fixed(h)).into();
+        let canvas_el: Element<'static, Message> = canvas::Canvas::new(inner)
+            .width(Length::Fixed(w))
+            .height(Length::Fixed(h))
+            .into();
         let marker_w = (self.frame % 2) as f32;
         let marker_el: Element<'static, Message> = iced::widget::Space::new()
             .width(Length::Fixed(marker_w))
@@ -323,8 +424,12 @@ impl OctagonBg {
 }
 
 pub struct OctagonCanvas {
-    pub w: f32, pub h: f32, pub cut: f32,
-    pub background: Color, pub border_color: Color, pub border_width: f32,
+    pub w: f32,
+    pub h: f32,
+    pub cut: f32,
+    pub background: Color,
+    pub border_color: Color,
+    pub border_width: f32,
 }
 
 impl<Message> canvas::Program<Message> for OctagonCanvas {
@@ -347,8 +452,12 @@ impl<Message> canvas::Program<Message> for OctagonCanvas {
     }
 
     fn draw(
-        &self, _s: &Self::State, renderer: &iced::Renderer, _t: &Theme,
-        bounds: Rectangle, _c: iced::mouse::Cursor,
+        &self,
+        _s: &Self::State,
+        renderer: &iced::Renderer,
+        _t: &Theme,
+        bounds: Rectangle,
+        _c: iced::mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
         let w = bounds.width;
@@ -381,7 +490,9 @@ impl<Message> canvas::Program<Message> for OctagonCanvas {
         if self.border_width > 0.0 && self.border_color.a > 0.0 {
             frame.stroke(
                 &path,
-                Stroke::default().with_color(self.border_color).with_width(self.border_width),
+                Stroke::default()
+                    .with_color(self.border_color)
+                    .with_width(self.border_width),
             );
         }
 

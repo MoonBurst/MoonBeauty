@@ -83,7 +83,11 @@ impl TodoOverlay {
         if db.categories.is_empty() {
             db.categories.push("Inbox".into());
         }
-        let active_category = db.categories.first().cloned().unwrap_or_else(|| "Inbox".into());
+        let active_category = db
+            .categories
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "Inbox".into());
 
         Self {
             db,
@@ -96,7 +100,9 @@ impl TodoOverlay {
     }
 
     fn visible_task_ids(&self) -> Vec<u64> {
-        self.db.todos.iter()
+        self.db
+            .todos
+            .iter()
             .filter(|t| t.category == self.active_category)
             .filter(|t| match self.filter {
                 TodoFilter::All => true,
@@ -110,7 +116,7 @@ impl TodoOverlay {
     fn storage_path() -> PathBuf {
         let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
         let mbs = base.join("moon-beauty-shell").join("todos.json");
-        let qs  = base.join("quickshell").join("todos.json");
+        let qs = base.join("quickshell").join("todos.json");
         // One-time migration: user's pre-migration todos lived at
         // ~/.local/share/quickshell/todos.json (Quickshell convention).
         // Copy them to the moon-beauty path on first launch so existing
@@ -167,7 +173,13 @@ impl TodoOverlay {
             }
             TodoMessage::AddCategory(name) => {
                 let clean = name.trim();
-                if !clean.is_empty() && !self.db.categories.iter().any(|c| c.eq_ignore_ascii_case(clean)) {
+                if !clean.is_empty()
+                    && !self
+                        .db
+                        .categories
+                        .iter()
+                        .any(|c| c.eq_ignore_ascii_case(clean))
+                {
                     self.db.categories.push(clean.to_string());
                     self.active_category = clean.to_string();
                     self.save();
@@ -202,12 +214,12 @@ impl TodoOverlay {
                 // click another category) to type 'e' as normal.
                 let first_char_e = self.new_task_text.is_empty()
                     && txt.chars().count() == 1
-                    && txt.chars().next()
+                    && txt
+                        .chars()
+                        .next()
                         .map(|c| c.eq_ignore_ascii_case(&'e'))
                         .unwrap_or(false);
-                if first_char_e
-                    && self.selected_task_id.is_some()
-                    && self.editing_task_id.is_none()
+                if first_char_e && self.selected_task_id.is_some() && self.editing_task_id.is_none()
                 {
                     if let Some(id) = self.selected_task_id {
                         if let Some(t) = self.db.todos.iter().find(|t| t.id == id) {
@@ -280,19 +292,33 @@ impl TodoOverlay {
                 self.save();
             }
             TodoMessage::CategoryPrev => {
-                if !self.new_task_text.is_empty() { return; }
+                if !self.new_task_text.is_empty() {
+                    return;
+                }
                 let n = self.db.categories.len();
                 if n > 0 {
-                    if let Some(idx) = self.db.categories.iter().position(|c| c == &self.active_category) {
+                    if let Some(idx) = self
+                        .db
+                        .categories
+                        .iter()
+                        .position(|c| c == &self.active_category)
+                    {
                         self.active_category = self.db.categories[(idx + n - 1) % n].clone();
                     }
                 }
             }
             TodoMessage::CategoryNext => {
-                if !self.new_task_text.is_empty() { return; }
+                if !self.new_task_text.is_empty() {
+                    return;
+                }
                 let n = self.db.categories.len();
                 if n > 0 {
-                    if let Some(idx) = self.db.categories.iter().position(|c| c == &self.active_category) {
+                    if let Some(idx) = self
+                        .db
+                        .categories
+                        .iter()
+                        .position(|c| c == &self.active_category)
+                    {
                         self.active_category = self.db.categories[(idx + 1) % n].clone();
                     }
                 }
@@ -310,10 +336,14 @@ impl TodoOverlay {
                     TodoFilter::Active => TodoFilter::Completed,
                     TodoFilter::Completed => TodoFilter::All,
                 };
-            }TodoMessage::TaskSelectPrev => {
+            }
+            TodoMessage::TaskSelectPrev => {
                 let visible = self.visible_task_ids();
-                if visible.is_empty() { return; }
-                let cur = self.selected_task_id
+                if visible.is_empty() {
+                    return;
+                }
+                let cur = self
+                    .selected_task_id
                     .and_then(|id| visible.iter().position(|v| *v == id));
                 self.selected_task_id = Some(match cur {
                     Some(0) | None => visible[visible.len() - 1],
@@ -321,11 +351,18 @@ impl TodoOverlay {
                 });
             }
             TodoMessage::TaskSelectNext => {
-                if !self.new_task_text.is_empty() { return; }
-                if self.editing_task_id.is_some() { return; }
+                if !self.new_task_text.is_empty() {
+                    return;
+                }
+                if self.editing_task_id.is_some() {
+                    return;
+                }
                 let visible = self.visible_task_ids();
-                if visible.is_empty() { return; }
-                let cur = self.selected_task_id
+                if visible.is_empty() {
+                    return;
+                }
+                let cur = self
+                    .selected_task_id
                     .and_then(|id| visible.iter().position(|v| *v == id));
                 self.selected_task_id = Some(match cur {
                     None => visible[0],
@@ -333,7 +370,9 @@ impl TodoOverlay {
                 });
             }
             TodoMessage::ToggleSelected => {
-                if !self.new_task_text.is_empty() { return; }
+                if !self.new_task_text.is_empty() {
+                    return;
+                }
                 if let Some(id) = self.selected_task_id {
                     if let Some(t) = self.db.todos.iter_mut().find(|t| t.id == id) {
                         t.completed = !t.completed;
@@ -348,8 +387,13 @@ impl TodoOverlay {
                 // Guard: if input has text, Delete means "delete char
                 // before/after cursor", NOT "delete selected task".
                 // text_input handles the char; we no-op.
-                if !self.new_task_text.is_empty() { return; }
-                eprintln!("[todo] DeleteSelected fired (sel={:?})", self.selected_task_id);
+                if !self.new_task_text.is_empty() {
+                    return;
+                }
+                eprintln!(
+                    "[todo] DeleteSelected fired (sel={:?})",
+                    self.selected_task_id
+                );
                 if let Some(id) = self.selected_task_id {
                     self.db.todos.retain(|t| t.id != id);
                     if self.editing_task_id == Some(id) {
@@ -384,7 +428,11 @@ impl TodoOverlay {
         }
     }
 
-    pub fn view<'a>(&'a self, theme: &'a ShellTheme, settings: &crate::libraries::config::settings::ShellSettings) -> Element<'a, TodoMessage> {
+    pub fn view<'a>(
+        &'a self,
+        theme: &'a ShellTheme,
+        settings: &crate::libraries::config::settings::ShellSettings,
+    ) -> Element<'a, TodoMessage> {
         {
             use std::sync::OnceLock;
             static ONCE: OnceLock<()> = OnceLock::new();
@@ -439,26 +487,38 @@ impl TodoOverlay {
             let is_done = item.completed;
 
             let is_editing = self.editing_task_id == Some(id);
-                        let row_item = row![
+            let row_item = row![
                 checkbox(is_done).on_toggle(move |_| TodoMessage::ToggleTask(id)),
                 text(&item.task)
                     .size(theme.font_size_overlay as f32)
                     .color(if is_done { theme.muted } else { theme.text })
                     .width(Length::Fill),
-                button(text("✎").size(theme.font_size_overlay as f32).color(if is_editing { theme.success } else { theme.text }))
-                    .on_press(TodoMessage::EditTask(id))
-                    .padding(4)
-                    .style(|_t, _s| button::Style {
-                        background: None,
-                        ..Default::default()
-                    }),
-                button(text("✕").size(theme.font_size_overlay as f32).color(theme.danger))
-                    .on_press(TodoMessage::DeleteTask(id))
-                    .padding(4)
-                    .style(|_t, _s| button::Style {
-                        background: None,
-                        ..Default::default()
-                    }),
+                button(
+                    text("✎")
+                        .size(theme.font_size_overlay as f32)
+                        .color(if is_editing {
+                            theme.success
+                        } else {
+                            theme.text
+                        })
+                )
+                .on_press(TodoMessage::EditTask(id))
+                .padding(4)
+                .style(|_t, _s| button::Style {
+                    background: None,
+                    ..Default::default()
+                }),
+                button(
+                    text("✕")
+                        .size(theme.font_size_overlay as f32)
+                        .color(theme.danger)
+                )
+                .on_press(TodoMessage::DeleteTask(id))
+                .padding(4)
+                .style(|_t, _s| button::Style {
+                    background: None,
+                    ..Default::default()
+                }),
             ]
             .spacing(16)
             .align_y(Alignment::Center);
@@ -471,9 +531,23 @@ impl TodoOverlay {
                 Some(iced::Background::Color(theme.background))
             } else if is_sel {
                 Some(iced::Background::Color(theme.surface_alt))
-            } else { None };
-            let border_col = if is_editing { theme.success } else if is_sel { theme.text } else { theme.border };
-            let border_w = if is_editing { theme.control_border_width * 1.5 } else if is_sel { theme.control_border_width } else { 0.0 };
+            } else {
+                None
+            };
+            let border_col = if is_editing {
+                theme.success
+            } else if is_sel {
+                theme.text
+            } else {
+                theme.border
+            };
+            let border_w = if is_editing {
+                theme.control_border_width * 1.5
+            } else if is_sel {
+                theme.control_border_width
+            } else {
+                0.0
+            };
             // Wrap the styled row in an outer container with horizontal
             // margin, so the highlight never touches the octagon edges.
             list_col = list_col.push(
@@ -489,24 +563,65 @@ impl TodoOverlay {
                                 radius: 4.0.into(),
                             },
                             ..Default::default()
-                        })
+                        }),
                 )
                 .width(Length::Fill)
-                .padding(Padding { top: 0.0, bottom: 0.0, left: 8.0, right: 8.0 })
+                .padding(Padding {
+                    top: 0.0,
+                    bottom: 0.0,
+                    left: 8.0,
+                    right: 8.0,
+                }),
             );
         }
 
         let filter_row = row![
-            text("Filter:").size((theme.font_size_normal) as f32).bold().color(theme.text),
-            button(text("All").size((theme.font_size_overlay as f32) * 0.85).color(if self.filter == TodoFilter::All { theme.success } else { theme.text }))
-                .on_press(TodoMessage::FilterChanged(TodoFilter::All))
-                .style(|_t, _s| button::Style { background: None, ..Default::default() }),
-            button(text("Active").size((theme.font_size_overlay as f32) * 0.85).color(if self.filter == TodoFilter::Active { theme.success } else { theme.text }))
-                .on_press(TodoMessage::FilterChanged(TodoFilter::Active))
-                .style(|_t, _s| button::Style { background: None, ..Default::default() }),
-            button(text("Completed").size((theme.font_size_overlay as f32) * 0.85).color(if self.filter == TodoFilter::Completed { theme.success } else { theme.text }))
-                .on_press(TodoMessage::FilterChanged(TodoFilter::Completed))
-                .style(|_t, _s| button::Style { background: None, ..Default::default() }),
+            text("Filter:")
+                .size((theme.font_size_normal) as f32)
+                .bold()
+                .color(theme.text),
+            button(
+                text("All")
+                    .size((theme.font_size_overlay as f32) * 0.85)
+                    .color(if self.filter == TodoFilter::All {
+                        theme.success
+                    } else {
+                        theme.text
+                    })
+            )
+            .on_press(TodoMessage::FilterChanged(TodoFilter::All))
+            .style(|_t, _s| button::Style {
+                background: None,
+                ..Default::default()
+            }),
+            button(
+                text("Active")
+                    .size((theme.font_size_overlay as f32) * 0.85)
+                    .color(if self.filter == TodoFilter::Active {
+                        theme.success
+                    } else {
+                        theme.text
+                    })
+            )
+            .on_press(TodoMessage::FilterChanged(TodoFilter::Active))
+            .style(|_t, _s| button::Style {
+                background: None,
+                ..Default::default()
+            }),
+            button(
+                text("Completed")
+                    .size((theme.font_size_overlay as f32) * 0.85)
+                    .color(if self.filter == TodoFilter::Completed {
+                        theme.success
+                    } else {
+                        theme.text
+                    })
+            )
+            .on_press(TodoMessage::FilterChanged(TodoFilter::Completed))
+            .style(|_t, _s| button::Style {
+                background: None,
+                ..Default::default()
+            }),
         ]
         .spacing(12)
         .align_y(Alignment::Center);
@@ -528,27 +643,33 @@ impl TodoOverlay {
         let pad_bottom = 20.0_f32;
         let header_inset = if dy > pad_top {
             (dx * (1.0 - (pad_top / dy))).max(0.0) + 16.0
-        } else { 16.0 };
+        } else {
+            16.0
+        };
         let footer_inset = if dy > pad_bottom {
             (dx * (1.0 - (pad_bottom / dy))).max(0.0) + 16.0
-        } else { 16.0 };
+        } else {
+            16.0
+        };
         let body_inset = header_inset.min(footer_inset) + 4.0;
         eprintln!(
             "[todo-size] win={}x{} cut={} angle={} header_inset={:.1} body_inset={:.1} footer_inset={:.1}",
             win_w, win_h, cut_f, angle_deg, header_inset, body_inset, footer_inset
         );
         let card_bg = ShapeBox::new()
-            .shape(ShapeType::AngledHexagon { cut: cut_f, angle_deg })
+            .shape(ShapeType::AngledHexagon {
+                cut: cut_f,
+                angle_deg,
+            })
             .background(theme.background)
             .border(theme.border, theme.border_width)
             .size(Length::Fixed(win_w), Length::Fixed(win_h));
 
         // Per-row containers get independent horizontal insets so content
-// clears the octagon diagonals at top and bottom.
+        // clears the octagon diagonals at top and bottom.
         let header_row = container(
             row![
                 text("✅ TASK BOARD")
-        
                     .size(theme.font_size_overlay as f32)
                     .color(theme.text),
                 scrollable(cat_row).width(Length::Fill),
@@ -557,40 +678,59 @@ impl TodoOverlay {
             .align_y(Alignment::Center),
         )
         .width(Length::Fill)
-        .padding(Padding { top: 0.0, right: header_inset, bottom: 0.0, left: header_inset });
+        .padding(Padding {
+            top: 0.0,
+            right: header_inset,
+            bottom: 0.0,
+            left: header_inset,
+        });
 
-        let input_row = container(input)
-        
-            .width(Length::Fill)
-            .padding(Padding { top: 0.0, right: body_inset, bottom: 0.0, left: body_inset });
+        let input_row = container(input).width(Length::Fill).padding(Padding {
+            top: 0.0,
+            right: body_inset,
+            bottom: 0.0,
+            left: body_inset,
+        });
 
         let list_container = container(
             scrollable(list_col)
-        
                 .id(iced::widget::Id::new("todo_list"))
                 .height(Length::Fill),
         )
         .width(Length::Fill)
         .height(Length::Fill)
-        .padding(Padding { top: 0.0, right: body_inset, bottom: 0.0, left: body_inset });
+        .padding(Padding {
+            top: 0.0,
+            right: body_inset,
+            bottom: 0.0,
+            left: body_inset,
+        });
 
-        let filter_container = container(filter_row)
-        
-            .width(Length::Fill)
-            .padding(Padding { top: 0.0, right: footer_inset, bottom: 0.0, left: footer_inset });
+        let filter_container = container(filter_row).width(Length::Fill).padding(Padding {
+            top: 0.0,
+            right: footer_inset,
+            bottom: 0.0,
+            left: footer_inset,
+        });
 
         let card_content = container(
             column![header_row, input_row, list_container, filter_container]
                 .spacing(14)
-                .padding(Padding { top: pad_top, right: 0.0, bottom: pad_bottom, left: 0.0 }),
+                .padding(Padding {
+                    top: pad_top,
+                    right: 0.0,
+                    bottom: pad_bottom,
+                    left: 0.0,
+                }),
         )
         .width(Length::Fixed(win_w))
-        .height(Length::Fixed(win_h))
-        
-        ;
+        .height(Length::Fixed(win_h));
 
         let card = Stack::new().push(card_bg.view()).push(card_content);
 
-        container(card).center_x(Length::Fill).center_y(Length::Fill).into()
+        container(card)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .into()
     }
 }
