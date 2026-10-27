@@ -4,7 +4,6 @@ pub mod email_client;
 pub mod borg;
 pub mod clock;
 pub mod mpris;
-pub mod notif_dbus;
 pub mod podman_twitch;
 pub mod system;
 pub mod tray_watcher;

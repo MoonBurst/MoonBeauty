@@ -911,7 +911,7 @@ pub struct MoonBeautyShellApp {
     standalone_child: Option<(OverlayTarget, std::process::Child)>,
     ipc_rx: std::sync::mpsc::Receiver<IpcCommand>,
     is_notif_surface: bool,
-    notif_rx: Option<std::sync::mpsc::Receiver<moon_beauty_shell::libraries::backend::notif_dbus::IncomingNotification>>,
+    notif_rx: Option<std::sync::mpsc::Receiver<moon_beauty_shell::overlays::notifications::IncomingNotification>>,
     settings_json_mtime: Option<std::time::SystemTime>,
     window_w: f32,
     notif_screen_at_startup: String,
@@ -1147,7 +1147,7 @@ impl MoonBeautyShellApp {
 
         let notif_rx = if is_notif_surface {
             let (tx, rx) = std::sync::mpsc::channel();
-            moon_beauty_shell::libraries::backend::notif_dbus::spawn(tx);
+            moon_beauty_shell::overlays::notifications::spawn(tx);
             moon_beauty_shell::libraries::backend::tray_watcher::spawn();
             Some(rx)
         } else {
@@ -1451,7 +1451,7 @@ impl MoonBeautyShellApp {
                                     let nid = t.id;
                                     self.notifs.update(NotifMessage::DismissToast(t.id));
                                     std::thread::spawn(move || {
-                                        moon_beauty_shell::libraries::backend::notif_dbus::emit_action_invoked(nid, "default");
+                                        moon_beauty_shell::overlays::notifications::emit_action_invoked(nid, "default");
                                         std::thread::sleep(std::time::Duration::from_millis(200));
                                         let matches = notification_candidates(&app, entry.as_deref());
                                         if !is_app_focused(&matches) {
@@ -3080,7 +3080,7 @@ impl MoonBeautyShellApp {
                         let nid = t.id;
                         self.notifs.update(NotifMessage::DismissToast(id));
                         std::thread::spawn(move || {
-                            moon_beauty_shell::libraries::backend::notif_dbus::emit_action_invoked(nid, "default");
+                            moon_beauty_shell::overlays::notifications::emit_action_invoked(nid, "default");
                             std::thread::sleep(std::time::Duration::from_millis(200));
                             let matches = notification_candidates(&app, entry.as_deref());
                             if !is_app_focused(&matches) {
