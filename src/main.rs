@@ -1870,7 +1870,7 @@ impl MoonBeautyShellApp {
                             }
 
                             // 2. DROPDOWN TOOLTIPS (CPU, GPU, RAM, Tray)
-                            if matches!(id.as_str(), "weather" | "cpu" | "gpu" | "ram" | "calendar" | "music" | "unified" | "net" | "custom") {
+                            if matches!(id.as_str(), "weather" | "cpu" | "gpu" | "ram" | "calendar" | "music" | "unified" | "net" | "custom" | "clock") {
                                 // Toggle off if already open
                                 let running = self.weather_tooltip_child.as_mut()
                                     .and_then(|c| c.try_wait().ok())
@@ -1901,7 +1901,7 @@ impl MoonBeautyShellApp {
 
                                 if id == "weather" {
                                     cmd.arg("--weather-tooltip");
-                                } else if matches!(id.as_str(), "calendar" | "music" | "unified" | "net" | "custom") {
+                                } else if matches!(id.as_str(), "calendar" | "music" | "unified" | "net" | "custom" | "clock") {
                                     cmd.arg("--info-tooltip").env("MBS_INFO_MODE", &id);
                                 } else {
                                     cmd.arg("--sys-tooltip").env("MBS_SYS_TARGET", &id);
@@ -1981,8 +1981,6 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
 
                             // 2. FULLSCREEN / STANDALONE OVERLAYS (Settings, History, Power)
                             let mapped: Option<OverlayTarget> = match id.as_str() {
-                                "calendar" | "clock" => Some(OverlayTarget::Settings),
-                                "unified" | "net" => Some(OverlayTarget::Settings),
                                 "notify" => Some(OverlayTarget::NotificationsHistory),
                                 "battery" => Some(OverlayTarget::Power),
                                 _ => OverlayTarget::from_str(&id),
@@ -3904,6 +3902,7 @@ fn compute_tooltip_height(id: &str, app: &MoonBeautyShellApp) -> u32 {
         "music" => 400,
         "unified" => 400,
         "custom" => 300,
+        "clock" => 320,
         _ => 400,
     };
     let total = content_h + bar_h + 20;
