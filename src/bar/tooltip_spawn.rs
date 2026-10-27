@@ -66,19 +66,31 @@ pub fn spawn(req: &SpawnRequest) -> io::Result<Child> {
     cmd.spawn()
 }
 
-/// Compute the popup height for a given tooltip id, based on current
-/// telemetry data sizes.
+/// Compute the popup height for a given tooltip id.
 ///
-/// NOTE: This function returns hardcoded per-id heights and does NOT
-/// consult `settings.tooltip_sizes`. That's why the per-tooltip override
-/// in Settings → Bar Layout → drag-to-resize doesn't apply — the value
-/// saved by the resizer is ignored at spawn time. Preserved as-is during
-/// the refactor; fix separately.
+/// Priority:
+///   1. If `settings.tooltip_sizes` contains an entry for this id, return
+///      its height. This is the value produced by dragging the resize box
+///      in Settings → Bar Layout. Consulted here at spawn time because
+///      the popup process reads only MBS_TOOLTIP_H from env and does not
+///      reload settings itself.
+///   2. Otherwise, derive height from current telemetry content size
+///      (weather forecast line count, CPU/GPU/RAM process count, etc.).
 pub fn compute_height(
     id: &str,
     settings: &ShellSettings,
     telemetry: &UnifiedTelemetry,
 ) -> u32 {
+    // User-dragged override wins.
+    if let Some((w, h)) = settings.tooltip_sizes.get(id) {
+        eprintln!(
+            "[compute-h] id={} EXPLICIT OVERRIDE {}x{} (from tooltip_sizes)",
+            id, w, h
+        );
+        return *h;
+    }
+
+    // No override: derive from content.
     let bar_h = settings.bar_height;
     let content_h: u32 = match id {
         "weather" => {
@@ -110,6 +122,6 @@ pub fn compute_height(
         _ => 400,
     };
     let total = content_h + bar_h + 20;
-    eprintln!("[compute-h] id={} content_h={} bar_h={} total={}", id, content_h, bar_h, total);
+    eprintln!("[compute-h] id={} DEFAULT content_h={} bar_h={} total={} (no override)", id, content_h, bar_h, total);
     total
 }
