@@ -1297,12 +1297,17 @@ impl MoonBeautyShellApp {
                         let _ = std::fs::remove_file(&cmd_path);
                         match cmd.trim() {
                             "dismiss" => {
-                                if let Some(first) = self.notifs.active_toasts.first().cloned() {
-                                    self.notifs.update(NotifMessage::DismissToast(first.id));
+                                // Target newest — after the view_toasts z-order
+                                // fix, the newest toast is on top of z-order and
+                                // is the one the user sees. Dismissing .first()
+                                // (oldest) would hide a toast they weren't looking
+                                // at, making the whole command feel like a no-op.
+                                if let Some(last) = self.notifs.active_toasts.first().cloned() {
+                                    self.notifs.update(NotifMessage::DismissToast(last.id));
                                 }
                             }
                             "activate-latest" => {
-                                if let Some(t) = self.notifs.active_toasts.last().cloned() {
+                                if let Some(t) = self.notifs.active_toasts.first().cloned() {
                                     let app = t.app_name.clone();
                                     let entry = t.desktop_entry.clone();
                                     let nid = t.id;
@@ -1625,8 +1630,18 @@ impl MoonBeautyShellApp {
                     self.active_overlay = None;
                 }
                 IpcCommand::DismissLatestNotif => {
-                    if let Some(first) = self.notifs.active_toasts.first().cloned() {
-                        self.notifs.update(NotifMessage::DismissToast(first.id));
+                    // Bar's active_toasts is empty — the notif-surface
+                    // process owns the actual toast stack. Route through the
+                    // same file-based command channel that --dismiss-notif
+                    // already uses. Without this routing, DismissLatestNotif
+                    // was a guaranteed no-op (Vec::first() on an empty Vec).
+                    let runtime = std::env::var("XDG_RUNTIME_DIR")
+                        .unwrap_or_else(|_| format!("/tmp/user-{}", std::process::id()));
+                    let cmd_path = std::path::PathBuf::from(runtime)
+                        .join("moon-beauty-shell-notif-cmd");
+                    match std::fs::write(&cmd_path, b"dismiss") {
+                        Ok(_) => eprintln!("[ipc] DismissLatestNotif -> notif-surface"),
+                        Err(e) => eprintln!("[ipc] DismissLatestNotif write failed: {e}"),
                     }
                 }
                 IpcCommand::JumpToLatestNotif => {

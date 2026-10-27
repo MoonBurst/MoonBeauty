@@ -1004,6 +1004,14 @@ impl NotificationOverlay {
         + 100.0;
         let strip_margin = settings.notif_margin_x as f32;
 
+        // Iterate forward: oldest pushed first (bottom z-order), newest
+        // pushed last (top z-order). Combined with y_pos below
+        // (i=0 → lowest on screen, i=N-1 → highest), the newest toast
+        // ends up at the visual top AND the highest z-order. Standard
+        // notification-stack layout: newest fully readable on top,
+        // older ones tucked behind/below. Clicking overlap hits the
+        // newest toast, and hotkeys targeting .last() correctly resolve
+        // to what's visually accessible.
         for (i, toast) in ordered.into_iter().rev() {
             let id = toast.id;
             let border_c = hex_to_color(&toast.border_color);
