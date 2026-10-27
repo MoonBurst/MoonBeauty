@@ -117,10 +117,6 @@ impl<Message> canvas::Program<Message> for TooltipBg {
     fn draw(&self, _s: &Self::State, renderer: &iced::Renderer, _t: &Theme,
             bounds: Rectangle, _c: iced::mouse::Cursor) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        // MBS_TICK_DIAG: opt-in per-frame timing. Set the env var on
-        // the parent bar process; tooltips inherit it. Useful for
-        // distinguishing jitter (variable dt) from consistent fps
-        // shortfall (constant dt, compositor dropping frames).
         if std::env::var_os("MBS_TICK_DIAG").is_some() {
             use std::sync::{Mutex, OnceLock};
             static LAST: OnceLock<Mutex<Option<std::time::Instant>>> = OnceLock::new();
@@ -133,31 +129,68 @@ impl<Message> canvas::Program<Message> for TooltipBg {
             }
             *g = Some(now);
         }
-        let half = self.border_width / 2.0;
-        let w = self.w; let h = self.h; let sl = self.slant;
+
+        // Use bounds, not self.w/self.h. When the parent clips the canvas
+        // (e.g., a fixed-height container), bounds is smaller than self.h
+        // and self.w. Drawing at self.w/self.h would overshoot the visible area.
+        let bw = self.border_width;
+        let half = bw / 2.0;
+        let w = bounds.width;
+        let h = bounds.height;
+        // Scale slant so slope matches when the canvas is clipped shorter.
+        let sl = self.slant * (h / self.h.max(1.0));
+        // Keep the bottom border + fill safely inside the visible canvas.
+        let border_inset = bw.max(4.0);
+
+        // Fill path — bottom at h - border_inset, not self.h.
         let path = if self.slant_right {
             Path::new(|b| { b.move_to(Point::new(sl + half, half)); b.line_to(Point::new(w - half, half));
-                b.line_to(Point::new(w - sl - half, h - half - 1.0)); b.line_to(Point::new(half, h - half - 1.0)); b.close(); })
+                b.line_to(Point::new(w - sl - half, h - border_inset)); b.line_to(Point::new(half, h - border_inset)); b.close(); })
         } else {
             Path::new(|b| { b.move_to(Point::new(half, half)); b.line_to(Point::new(w - sl - half, half));
-                b.line_to(Point::new(w - half, h - half - 1.0)); b.line_to(Point::new(sl + half, h - half - 1.0)); b.close(); })
+                b.line_to(Point::new(w - half, h - border_inset)); b.line_to(Point::new(sl + half, h - border_inset)); b.close(); })
         };
         if self.background.a > 0.0 { frame.fill(&path, self.background); }
-        if self.border_width > 0.0 && self.border_color.a > 0.0 {
-            let bw = self.border_width;
-            // Top + bottom borders as FILLED rectangles (never clipped, no AA blend)
-            frame.fill_rectangle(Point::new(half, half), Size::new(w - bw, bw), self.border_color);
-            frame.fill_rectangle(Point::new(half, h - bw - half), Size::new(w - bw, bw), self.border_color);
-            // Slanted edges as stroked diagonals
-            let slant_stroke = Stroke::default().with_color(self.border_color).with_width(bw);
-            let slant_path = if self.slant_right {
-                Path::new(|b| { b.move_to(Point::new(sl + half, half)); b.line_to(Point::new(half, h - half));
-                    b.move_to(Point::new(w - half, half)); b.line_to(Point::new(w - sl - half, h - half)); })
+
+        if bw > 0.0 && self.border_color.a > 0.0 {
+            // Parallelogram corner x-coords:
+            //   slant_right=true  (\ \): top-left=sl+half, top-right=w-half, bot-left=half, bot-right=w-sl-half
+            //   slant_right=false (/ /): top-left=half, top-right=w-sl-half, bot-left=sl+half, bot-right=w-half
+            let (top_left_x, top_right_x, bot_left_x, bot_right_x) = if self.slant_right {
+                (sl + half, w - half, half, w - sl - half)
             } else {
-                Path::new(|b| { b.move_to(Point::new(half, half)); b.line_to(Point::new(sl + half, h - half));
-                    b.move_to(Point::new(w - sl - half, half)); b.line_to(Point::new(w - half, h - half)); })
+                (half, w - sl - half, sl + half, w - half)
             };
-            frame.stroke(&slant_path, slant_stroke);
+
+            // Top border — spans the parallelogram's top edge exactly
+            let top_w = (top_right_x - top_left_x).max(1.0);
+            frame.fill_rectangle(
+                Point::new(top_left_x, half),
+                Size::new(top_w, bw),
+                self.border_color,
+            );
+
+            // Bottom border — spans the parallelogram's bottom edge exactly
+            let bot_w = (bot_right_x - bot_left_x).max(1.0);
+            frame.fill_rectangle(
+                Point::new(bot_left_x, h - border_inset - bw),
+                Size::new(bot_w, bw),
+                self.border_color,
+            );
+
+            // Diagonal sides — stroked, connecting the corners above
+            let stroke = Stroke::default().with_color(self.border_color).with_width(bw);
+            if self.slant_right {
+                let left_edge = Path::new(|b| { b.move_to(Point::new(sl + half, half)); b.line_to(Point::new(half, h - border_inset)); });
+                let right_edge = Path::new(|b| { b.move_to(Point::new(w - half, half)); b.line_to(Point::new(w - sl - half, h - border_inset)); });
+                frame.stroke(&left_edge, stroke);
+                frame.stroke(&right_edge, stroke);
+            } else {
+                let left_edge = Path::new(|b| { b.move_to(Point::new(half, half)); b.line_to(Point::new(sl + half, h - border_inset)); });
+                let right_edge = Path::new(|b| { b.move_to(Point::new(w - sl - half, half)); b.line_to(Point::new(w - half, h - border_inset)); });
+                frame.stroke(&left_edge, stroke);
+                frame.stroke(&right_edge, stroke);
+            }
         }
         vec![frame.into_geometry()]
     }
