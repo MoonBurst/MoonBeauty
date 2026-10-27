@@ -3,7 +3,7 @@
 //! D-Bus, or std::fs directly. Only the escape-hatch `Command` variants shell
 //! out, and those are opt-in.
 
-use crate::config::settings::{UnifiedCheck, UnifiedItem, UnifiedToggle};
+use crate::libraries::config::settings::{UnifiedCheck, UnifiedItem, UnifiedToggle};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::time::timeout;

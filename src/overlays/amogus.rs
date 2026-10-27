@@ -2,10 +2,10 @@ use iced::widget::{button, column, container, row, text, Stack, scrollable};
 use iced::{Alignment, Color, Element, Length, Padding, Rectangle};
 use tokio::process::Command;
 
-use crate::config::theme::{hex_to_color, ShellTheme};
-use crate::config::settings::ShellSettings;
-use crate::style::shape_box::{ShapeBox, ShapeType};
-use crate::style::TextExt;
+use crate::libraries::config::theme::{hex_to_color, ShellTheme};
+use crate::libraries::config::settings::ShellSettings;
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
+use crate::libraries::style::TextExt;
 
 #[derive(Debug, Clone)]
 pub struct CrewmateState {

@@ -6,9 +6,9 @@ use std::fs;
 use std::path::PathBuf;
 use tokio::process::Command;
 
-use crate::config::theme::ShellTheme;
-use crate::config::settings::ShellSettings;
-use crate::style::shape_box::{ShapeBox, ShapeType};
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::config::settings::ShellSettings;
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NoteItem {

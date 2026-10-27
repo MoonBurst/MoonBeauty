@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::config::theme::ShellTheme;
-use crate::style::shape_box::{ShapeBox, ShapeType};
-use crate::style::TextExt;
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
+use crate::libraries::style::TextExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TodoItem {
@@ -384,7 +384,7 @@ impl TodoOverlay {
         }
     }
 
-    pub fn view<'a>(&'a self, theme: &'a ShellTheme, settings: &crate::config::settings::ShellSettings) -> Element<'a, TodoMessage> {
+    pub fn view<'a>(&'a self, theme: &'a ShellTheme, settings: &crate::libraries::config::settings::ShellSettings) -> Element<'a, TodoMessage> {
         {
             use std::sync::OnceLock;
             static ONCE: OnceLock<()> = OnceLock::new();

@@ -4,12 +4,12 @@ use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use std::time::Instant;
 
-use crate::backend::weather::{WeatherAlert, WeatherData};
-use crate::backend::WeatherBackend;
-use crate::config::theme::ShellTheme;
-use crate::config::ShellSettings;
-use crate::style::shape_box::SlantSide;
-use crate::style::TextExt;
+use crate::libraries::backend::weather::{WeatherAlert, WeatherData};
+use crate::libraries::backend::WeatherBackend;
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::config::ShellSettings;
+use crate::libraries::style::shape_box::SlantSide;
+use crate::libraries::style::TextExt;
 
 const W_START: f32 = 130.0;
 const AUTO_MS: u128 = 20_000;

@@ -7,10 +7,10 @@ use tokio::process::Command;
 use super::calc::CalculatorOverlay;
 use super::dictionary::{DictionaryOverlay, MeaningEntry};
 use super::pass::PassOverlay;
-use crate::config::settings::ShellSettings;
-use crate::config::theme::ShellTheme;
-use crate::style::shape_box::{ShapeBox, ShapeType};
-use crate::style::{shell_font, TextExt};
+use crate::libraries::config::settings::ShellSettings;
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
+use crate::libraries::style::{shell_font, TextExt};
 
 #[derive(Debug, Clone)]
 pub struct AppEntry {

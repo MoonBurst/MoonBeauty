@@ -1,8 +1,8 @@
 use iced::widget::{button, column, container, row, scrollable, slider, text, text_input, Stack};
 use iced::{Alignment, Color, Element, Length, Padding};
 
-use crate::backend::system::{GpuInfo, SystemCollector};
-use crate::config::settings::{ContentRule, FriendProfile, ShellSettings};
+use crate::libraries::backend::system::{GpuInfo, SystemCollector};
+use crate::libraries::config::settings::{ContentRule, FriendProfile, ShellSettings};
 
 /// Debug log — gated on MBS_DEBUG or MBS_SETTINGS_DEBUG so release builds
 /// stay silent. Uses a persistent file handle (opened once) instead of
@@ -41,9 +41,9 @@ fn mbs_dbg(msg: &str) {
         let _ = writeln!(*f, "{}", msg);
     }
 }
-use crate::config::theme::{hex_to_color, ShellTheme};
-use crate::style::shape_box::{ShapeBox, ShapeType};
-use crate::style::TextExt;
+use crate::libraries::config::theme::{hex_to_color, ShellTheme};
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
+use crate::libraries::style::TextExt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsTab {
@@ -335,38 +335,38 @@ impl SettingsOverlay {
             SettingsMessage::ToggleProfileSound(idx) => {
                 if let Some(p) = settings.friend_profiles.get_mut(idx) {
                     p.sound = !p.sound;
-                    let _ = crate::config::settings::save_friend_profiles(&settings.friend_profiles);
+                    let _ = crate::libraries::config::settings::save_friend_profiles(&settings.friend_profiles);
                 }
             }
             SettingsMessage::ToggleProfileTts(idx) => {
                 if let Some(p) = settings.friend_profiles.get_mut(idx) {
                     p.tts = !p.tts;
-                    let _ = crate::config::settings::save_friend_profiles(&settings.friend_profiles);
+                    let _ = crate::libraries::config::settings::save_friend_profiles(&settings.friend_profiles);
                 }
             }
             SettingsMessage::ProfileSummaryChanged(idx, val) => {
                 if let Some(p) = settings.friend_profiles.get_mut(idx) {
                     p.summary = val.clone();
                     p.name = val.to_lowercase().replace(' ', "_");
-                    let _ = crate::config::settings::save_friend_profiles(&settings.friend_profiles);
+                    let _ = crate::libraries::config::settings::save_friend_profiles(&settings.friend_profiles);
                 }
             }
             SettingsMessage::ProfileColorChanged(idx, col) => {
                 if let Some(p) = settings.friend_profiles.get_mut(idx) {
                     p.color = col;
-                    let _ = crate::config::settings::save_friend_profiles(&settings.friend_profiles);
+                    let _ = crate::libraries::config::settings::save_friend_profiles(&settings.friend_profiles);
                 }
             }
             SettingsMessage::ProfileSoundPathChanged(idx, path) => {
                 if let Some(p) = settings.friend_profiles.get_mut(idx) {
                     p.sound_path = if path.trim().is_empty() { None } else { Some(path.trim().to_string()) };
-                    let _ = crate::config::settings::save_friend_profiles(&settings.friend_profiles);
+                    let _ = crate::libraries::config::settings::save_friend_profiles(&settings.friend_profiles);
                 }
             }
             SettingsMessage::ProfileTtsTemplateChanged(idx, tpl) => {
                 if let Some(p) = settings.friend_profiles.get_mut(idx) {
                     p.default_readout = if tpl.trim().is_empty() { None } else { Some(tpl.trim().to_string()) };
-                    let _ = crate::config::settings::save_friend_profiles(&settings.friend_profiles);
+                    let _ = crate::libraries::config::settings::save_friend_profiles(&settings.friend_profiles);
                 }
             }
             SettingsMessage::DeleteProfile(idx) => {
@@ -375,7 +375,7 @@ impl SettingsOverlay {
                     if self.selected_profile >= settings.friend_profiles.len() {
                         self.selected_profile = settings.friend_profiles.len().saturating_sub(1);
                     }
-                    let _ = crate::config::settings::save_friend_profiles(&settings.friend_profiles);
+                    let _ = crate::libraries::config::settings::save_friend_profiles(&settings.friend_profiles);
                 }
             }
             SettingsMessage::AddNewProfile => {
@@ -390,7 +390,7 @@ impl SettingsOverlay {
                     content_rules: Vec::new(),
                 });
                 self.selected_profile = settings.friend_profiles.len().saturating_sub(1);
-                let _ = crate::config::settings::save_friend_profiles(&settings.friend_profiles);
+                let _ = crate::libraries::config::settings::save_friend_profiles(&settings.friend_profiles);
             }
 
             SettingsMessage::AddContentRule(p_idx) => {
@@ -400,14 +400,14 @@ impl SettingsOverlay {
                         readout: "{name} has logged in".into(),
                         sound_path: None,
                     });
-                    let _ = crate::config::settings::save_friend_profiles(&settings.friend_profiles);
+                    let _ = crate::libraries::config::settings::save_friend_profiles(&settings.friend_profiles);
                 }
             }
             SettingsMessage::DeleteContentRule(p_idx, r_idx) => {
                 if let Some(p) = settings.friend_profiles.get_mut(p_idx) {
                     if r_idx < p.content_rules.len() {
                         p.content_rules.remove(r_idx);
-                        let _ = crate::config::settings::save_friend_profiles(&settings.friend_profiles);
+                        let _ = crate::libraries::config::settings::save_friend_profiles(&settings.friend_profiles);
                     }
                 }
             }
@@ -415,7 +415,7 @@ impl SettingsOverlay {
                 if let Some(p) = settings.friend_profiles.get_mut(p_idx) {
                     if let Some(r) = p.content_rules.get_mut(r_idx) {
                         r.pattern = val;
-                        let _ = crate::config::settings::save_friend_profiles(&settings.friend_profiles);
+                        let _ = crate::libraries::config::settings::save_friend_profiles(&settings.friend_profiles);
                     }
                 }
             }
@@ -423,7 +423,7 @@ impl SettingsOverlay {
                 if let Some(p) = settings.friend_profiles.get_mut(p_idx) {
                     if let Some(r) = p.content_rules.get_mut(r_idx) {
                         r.readout = val;
-                        let _ = crate::config::settings::save_friend_profiles(&settings.friend_profiles);
+                        let _ = crate::libraries::config::settings::save_friend_profiles(&settings.friend_profiles);
                     }
                 }
             }
@@ -486,7 +486,7 @@ impl SettingsOverlay {
             SettingsMessage::OverlayWidth(v) => settings.overlay_width = v.clamp(400, 3000),
             SettingsMessage::OverlayHeight(v) => settings.overlay_height = v.clamp(250, 2000),
             SettingsMessage::WindowWidth(id, w) => {
-                let entry = settings.standalone_windows.entry(id).or_insert(crate::config::settings::WindowDim {
+                let entry = settings.standalone_windows.entry(id).or_insert(crate::libraries::config::settings::WindowDim {
                     width: w,
                     height: 650,
                     field_height: None,
@@ -496,7 +496,7 @@ impl SettingsOverlay {
                 entry.width = w;
             }
             SettingsMessage::WindowHeight(id, h) => {
-                let entry = settings.standalone_windows.entry(id).or_insert(crate::config::settings::WindowDim {
+                let entry = settings.standalone_windows.entry(id).or_insert(crate::libraries::config::settings::WindowDim {
                     width: 840,
                     height: h,
                     field_height: None,
@@ -513,7 +513,7 @@ impl SettingsOverlay {
                 settings.overlay_angle = v.clamp(5, 85);
             }
 SettingsMessage::TestNotification => {
-                settings.friend_profiles = crate::config::settings::load_friend_profiles();
+                settings.friend_profiles = crate::libraries::config::settings::load_friend_profiles();
             }
             SettingsMessage::ToggleEditModule(id) => {
                 mbs_dbg(&format!("[dbg-toggle-FIRED] id={:?}", id));
@@ -533,7 +533,7 @@ SettingsMessage::AlarmSoundDurationChanged(v) => {
 }
             SettingsMessage::TestAlarmSound => {
                 if let Some(sound) = &settings.alarm_sound {
-                    crate::backend::play_alarm_sound(
+                    crate::libraries::backend::play_alarm_sound(
                         sound,
                         settings.alarm_sound_volume,
                         settings.alarm_sound_duration_sec,

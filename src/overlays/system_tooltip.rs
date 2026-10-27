@@ -1,24 +1,24 @@
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke};
 use iced::widget::{button, column, container, row, text, text_input, Stack};
 use iced::{Alignment, Color, Element, Length, Padding, Point, Rectangle, Task, Theme};
-use crate::style::TextExt;
+use crate::libraries::style::TextExt;
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use std::time::Instant;
 
-use crate::backend::system::{GpuInfo, ProcessItem, SystemCollector};
-use crate::config::theme::ShellTheme;
-use crate::config::ShellSettings;
-use crate::style::shape_box::SlantSide;
+use crate::libraries::backend::system::{GpuInfo, ProcessItem, SystemCollector};
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::config::ShellSettings;
+use crate::libraries::style::shape_box::SlantSide;
 
 const W_START: f32 = 130.0;
 const AUTO_MS: u128 = 10_000;
 
 #[derive(Debug, Clone)]
 pub enum Data {
-    Cpu(crate::backend::system::CpuMetrics),
-    Gpu(crate::backend::system::GpuMetrics),
-    Ram(crate::backend::system::RamMetrics),
+    Cpu(crate::libraries::backend::system::CpuMetrics),
+    Gpu(crate::libraries::backend::system::GpuMetrics),
+    Ram(crate::libraries::backend::system::RamMetrics),
 }
 
 #[derive(Debug, Clone)]

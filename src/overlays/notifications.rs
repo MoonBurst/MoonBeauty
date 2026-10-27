@@ -6,10 +6,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::config::settings::ShellSettings;
-use crate::config::theme::{hex_to_color, ShellTheme};
-use crate::style::shape_box::{ShapeBox, ShapeType, SlantSide};
-use crate::style::TextExt;
+use crate::libraries::config::settings::ShellSettings;
+use crate::libraries::config::theme::{hex_to_color, ShellTheme};
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
+use crate::libraries::style::TextExt;
 
 
 // ── Icon resolution from desktop entries ──────────────────────────
@@ -358,7 +358,7 @@ impl NotificationOverlay {
     pub fn scroll_offset_for_selected(
         &self,
         theme: &ShellTheme,
-        settings: &crate::config::settings::ShellSettings,
+        settings: &crate::libraries::config::settings::ShellSettings,
     ) -> Option<f32> {
         let id = self.selected_history_id?;
 
@@ -1154,7 +1154,7 @@ impl NotificationOverlay {
         .into()
     }
 
-    pub fn view_history<'a>(&'a self, theme: &'a ShellTheme, settings: &crate::config::settings::ShellSettings) -> Element<'a, NotifMessage> {
+    pub fn view_history<'a>(&'a self, theme: &'a ShellTheme, settings: &crate::libraries::config::settings::ShellSettings) -> Element<'a, NotifMessage> {
         let (win_w, win_h) = settings.get_window_size("history", 960, 720);
 
         let cut_f = theme.overlay_cut;

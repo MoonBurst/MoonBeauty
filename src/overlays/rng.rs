@@ -4,10 +4,10 @@ use iced::{Alignment, Element, Length, Padding};
 use std::fs::File;
 use std::io::Read;
 
-use crate::config::settings::ShellSettings;
-use crate::config::theme::ShellTheme;
-use crate::style::shape_box::{ShapeBox, ShapeType};
-use crate::style::TextExt;
+use crate::libraries::config::settings::ShellSettings;
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
+use crate::libraries::style::TextExt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeepMode { All, Highest, Lowest }

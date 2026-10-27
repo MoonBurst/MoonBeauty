@@ -4,15 +4,12 @@
 #![allow(clippy::field_reassign_with_default)]
 #![allow(clippy::should_implement_trait)]
 
-pub mod backend;
 pub mod bar;
-pub mod config;
-pub mod ipc;
+pub mod libraries;
 pub mod overlays;
-pub mod style;
 
-pub use config::{Base16Palette, ShellSettings, ShellTheme};
-pub use ipc::{send_client_command, IpcCommand, IpcServer, OverlayTarget};
+pub use libraries::config::{Base16Palette, ShellSettings, ShellTheme};
+pub use libraries::ipc::{send_client_command, IpcCommand, IpcServer, OverlayTarget};
 
 
 /// Debug-only logging. No-ops unless `MBS_DEBUG` is set in the environment.

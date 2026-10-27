@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use tokio::process::Command;
 use walkdir::WalkDir;
 
-use crate::config::settings::ShellSettings;
-use crate::config::theme::ShellTheme;
-use crate::style::shape_box::{ShapeBox, ShapeType, SlantSide};
+use crate::libraries::config::settings::ShellSettings;
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
 
 pub const PASS_SEARCH_ID: &str = "pass_search";
 

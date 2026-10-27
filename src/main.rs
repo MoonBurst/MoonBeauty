@@ -2,10 +2,10 @@ use iced::widget::{container, Stack};
 use iced::{Element, Length, Padding, Task as Command};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use moon_beauty_shell::backend::*;
+use moon_beauty_shell::libraries::backend::*;
 use moon_beauty_shell::bar::{CapsuleAction, TopBar, TopBarMessage};
-use moon_beauty_shell::config::{ShellSettings, ShellTheme};
-use moon_beauty_shell::ipc::{send_client_command, IpcCommand, OverlayTarget};
+use moon_beauty_shell::libraries::config::{ShellSettings, ShellTheme};
+use moon_beauty_shell::libraries::ipc::{send_client_command, IpcCommand, OverlayTarget};
 use moon_beauty_shell::overlays::*;
 use moon_beauty_shell::overlays::annotator::Tool;
 
@@ -192,7 +192,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     // ── Lock auth test mode ──
     if args.iter().any(|a| a == "--test-lock-auth") {
-        moon_beauty_shell::backend::lock_coordinator::LockCoordinator::run_auth_test();
+        moon_beauty_shell::libraries::backend::lock_coordinator::LockCoordinator::run_auth_test();
     }
 
     // ── Multi-monitor lock coordinator (parent mode) ──
@@ -202,7 +202,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     if args.iter().any(|a| a == "--lockscreen")
         && !args.iter().any(|a| a == "--lockscreen-instance")
     {
-        moon_beauty_shell::backend::lock_coordinator::LockCoordinator::spawn();
+        moon_beauty_shell::libraries::backend::lock_coordinator::LockCoordinator::spawn();
     }
 
     // --quickshot was replaced by --screenshot --annotate.
@@ -487,7 +487,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         let w = args.get(idx + 4).and_then(|s| s.parse().ok()).unwrap_or(250u32);
         let h = args.get(idx + 5).and_then(|s| s.parse().ok()).unwrap_or(400u32);
         if let Ok(json) = std::fs::read_to_string(&json_path) {
-            if let Ok(items) = serde_json::from_str::<Vec<moon_beauty_shell::backend::TrayMenuItem>>(&json) {
+            if let Ok(items) = serde_json::from_str::<Vec<moon_beauty_shell::libraries::backend::TrayMenuItem>>(&json) {
                 let _ = std::fs::remove_file(&json_path);
                 std::process::exit(match moon_beauty_shell::overlays::tray_context::run(items, bus, menu_path, w, h) {
                     Ok(_) => 0,
@@ -859,10 +859,10 @@ pub enum Message {
     TickWeather,
     TickEmailSync,
     EmailSynced,
-    EmailSyncedWithDiff(Vec<moon_beauty_shell::backend::email_client::NativeEnvelope>, Vec<moon_beauty_shell::backend::email_client::NativeEnvelope>),
+    EmailSyncedWithDiff(Vec<moon_beauty_shell::libraries::backend::email_client::NativeEnvelope>, Vec<moon_beauty_shell::libraries::backend::email_client::NativeEnvelope>),
     FocusComposeField,
     ComposeTabPressed(bool),
-    WeatherLoaded(Option<moon_beauty_shell::backend::WeatherData>),
+    WeatherLoaded(Option<moon_beauty_shell::libraries::backend::WeatherData>),
     TickClock,
     TickToasts,
     MetricsCollected(CpuMetrics, RamMetrics, GpuMetrics, AudioStatus, AudioStatus, Option<MprisTrack>),
@@ -892,7 +892,7 @@ pub enum Message {
     Lock(LockMessage),
     DismissActiveOverlay,
     CloseShell,
-    TrayItemsLoaded(Vec<moon_beauty_shell::backend::TrayItem>),
+    TrayItemsLoaded(Vec<moon_beauty_shell::libraries::backend::TrayItem>),
     TrayAnimTick,
     CollapseTrayIfGen(u64),
     CollapseTray,
@@ -951,20 +951,20 @@ pub struct MoonBeautyShellApp {
     standalone_child: Option<(OverlayTarget, std::process::Child)>,
     ipc_rx: std::sync::mpsc::Receiver<IpcCommand>,
     is_notif_surface: bool,
-    notif_rx: Option<std::sync::mpsc::Receiver<moon_beauty_shell::backend::notif_dbus::IncomingNotification>>,
+    notif_rx: Option<std::sync::mpsc::Receiver<moon_beauty_shell::libraries::backend::notif_dbus::IncomingNotification>>,
     settings_json_mtime: Option<std::time::SystemTime>,
     window_w: f32,
     notif_screen_at_startup: String,
     notif_surface_size: (u32, u32),
     tray_expanded: bool,
-    tray_items: Vec<moon_beauty_shell::backend::TrayItem>,
+    tray_items: Vec<moon_beauty_shell::libraries::backend::TrayItem>,
     tray_anim_width: f32,
     tray_target_width: f32,
     tray_anim_start_width: f32,
     tray_anim_started_at: std::time::Instant,
     tray_anim_duration_ms: u64,
     tray_timeout_gen: u64,
-    detected_gpus: Vec<moon_beauty_shell::backend::GpuInfo>,
+    detected_gpus: Vec<moon_beauty_shell::libraries::backend::GpuInfo>,
 
     launcher: AppLauncher,
     calc: CalculatorOverlay,
@@ -1130,7 +1130,7 @@ impl MoonBeautyShellApp {
         let w = args.get(idx + 4).and_then(|s| s.parse().ok()).unwrap_or(250u32);
         let h = args.get(idx + 5).and_then(|s| s.parse().ok()).unwrap_or(400u32);
         if let Ok(json) = std::fs::read_to_string(&json_path) {
-            if let Ok(items) = serde_json::from_str::<Vec<moon_beauty_shell::backend::TrayMenuItem>>(&json) {
+            if let Ok(items) = serde_json::from_str::<Vec<moon_beauty_shell::libraries::backend::TrayMenuItem>>(&json) {
                 let _ = std::fs::remove_file(&json_path);
                 std::process::exit(match moon_beauty_shell::overlays::tray_context::run(items, bus, menu_path, w, h) {
                     Ok(_) => 0,
@@ -1153,7 +1153,7 @@ impl MoonBeautyShellApp {
             std::thread::spawn(move || {
                 use std::io::Read;
                 use std::os::unix::net::UnixListener;
-                let path = moon_beauty_shell::ipc::get_socket_path();
+                let path = moon_beauty_shell::libraries::ipc::get_socket_path();
                 let _ = std::fs::remove_file(&path);
                 let listener = match UnixListener::bind(&path) {
                     Ok(l) => { eprintln!("[ipc] listener bound (sync thread)"); l }
@@ -1187,8 +1187,8 @@ impl MoonBeautyShellApp {
 
         let notif_rx = if is_notif_surface {
             let (tx, rx) = std::sync::mpsc::channel();
-            moon_beauty_shell::backend::notif_dbus::spawn(tx);
-            moon_beauty_shell::backend::tray_watcher::spawn();
+            moon_beauty_shell::libraries::backend::notif_dbus::spawn(tx);
+            moon_beauty_shell::libraries::backend::tray_watcher::spawn();
             Some(rx)
         } else {
             None
@@ -1286,7 +1286,7 @@ impl MoonBeautyShellApp {
         let mut init_tasks = vec![
             Command::done(Message::TickEmailSync),
             Command::perform(async {
-                moon_beauty_shell::backend::WeatherBackend::fetch().await.ok()
+                moon_beauty_shell::libraries::backend::WeatherBackend::fetch().await.ok()
             }, Message::WeatherLoaded)
         ];
 
@@ -1388,7 +1388,7 @@ impl MoonBeautyShellApp {
         if matches!(app.active_overlay, Some(OverlayTarget::Email)) {
             init_tasks.push(Command::done(Message::Email(EmailMessage::SetLoading)));
             init_tasks.push(Command::perform(
-                async { moon_beauty_shell::backend::email_client::fetch_envelopes("INBOX").await },
+                async { moon_beauty_shell::libraries::backend::email_client::fetch_envelopes("INBOX").await },
                 |res| match res {
                         Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(envs)),
                         Err(e) => Message::Email(EmailMessage::Error(e)),
@@ -1491,7 +1491,7 @@ impl MoonBeautyShellApp {
                                     let nid = t.id;
                                     self.notifs.update(NotifMessage::DismissToast(t.id));
                                     std::thread::spawn(move || {
-                                        moon_beauty_shell::backend::notif_dbus::emit_action_invoked(nid, "default");
+                                        moon_beauty_shell::libraries::backend::notif_dbus::emit_action_invoked(nid, "default");
                                         std::thread::sleep(std::time::Duration::from_millis(200));
                                         let matches = notification_candidates(&app, entry.as_deref());
                                         if !is_app_focused(&matches) {
@@ -1633,15 +1633,15 @@ impl MoonBeautyShellApp {
                 if self.is_notif_surface {
                     return Command::none();
                 }
-                if moon_beauty_shell::backend::email_client::config_exists() {
+                if moon_beauty_shell::libraries::backend::email_client::config_exists() {
                     eprintln!("[sync] Boot/Timer triggered email sync");
                     let folder = "INBOX".to_string();
                     return Command::perform(
                         async move {
-                            let old_envs = moon_beauty_shell::backend::email_client::load_index(&folder);
-                            if let Ok(new_envs) = moon_beauty_shell::backend::email_client::fetch_from_network(&folder).await {
-                                moon_beauty_shell::backend::email_client::save_index(&folder, &new_envs);
-                                moon_beauty_shell::backend::email_client::sync_bodies_background(folder).await;
+                            let old_envs = moon_beauty_shell::libraries::backend::email_client::load_index(&folder);
+                            if let Ok(new_envs) = moon_beauty_shell::libraries::backend::email_client::fetch_from_network(&folder).await {
+                                moon_beauty_shell::libraries::backend::email_client::save_index(&folder, &new_envs);
+                                moon_beauty_shell::libraries::backend::email_client::sync_bodies_background(folder).await;
                                 Ok::<_, String>((old_envs, new_envs))
                             } else {
                                 Err("fetch failed".into())
@@ -1699,7 +1699,7 @@ impl MoonBeautyShellApp {
             Message::EmailSynced => {}
             Message::TickWeather => {
                 return Command::perform(async {
-                    moon_beauty_shell::backend::WeatherBackend::fetch().await.ok()
+                    moon_beauty_shell::libraries::backend::WeatherBackend::fetch().await.ok()
                 }, Message::WeatherLoaded);
             }
             Message::WeatherLoaded(w) => {
@@ -2069,7 +2069,7 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                                 if timeout > 0 {
                                     return Command::batch(vec![
                                         Command::perform(
-                                            moon_beauty_shell::backend::tray_watcher::fetch_tray_items(),
+                                            moon_beauty_shell::libraries::backend::tray_watcher::fetch_tray_items(),
                                             Message::TrayItemsLoaded,
                                         ),
                                         Command::perform(
@@ -2082,7 +2082,7 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                                     ]);
                                 }
                                 return Command::perform(
-                                    moon_beauty_shell::backend::tray_watcher::fetch_tray_items(),
+                                    moon_beauty_shell::libraries::backend::tray_watcher::fetch_tray_items(),
                                     Message::TrayItemsLoaded,
                                 );
                             } else {
@@ -2094,7 +2094,7 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                             self.close_tray();
                             return Command::perform(
                                 async move {
-                                    let _ = moon_beauty_shell::backend::tray_watcher::activate_tray_item(&item.bus, &item.path).await;
+                                    let _ = moon_beauty_shell::libraries::backend::tray_watcher::activate_tray_item(&item.bus, &item.path).await;
                                 },
                                 |_| Message::TopBar(TopBarMessage::Noop)
                             );
@@ -2102,7 +2102,7 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                         CapsuleAction::TrayContextMenu(item) => {
                             let item_clone = item.clone();
                             return Command::perform(async move {
-                                if let Some((menu_path, items)) = moon_beauty_shell::backend::tray_watcher::get_menu_tree(&item_clone.bus, &item_clone.path).await {
+                                if let Some((menu_path, items)) = moon_beauty_shell::libraries::backend::tray_watcher::get_menu_tree(&item_clone.bus, &item_clone.path).await {
                                     let json = serde_json::to_string(&items).unwrap();
                                     let tmp_path = format!("/tmp/mbs-tray-menu-{}.json", std::process::id());
                                     std::fs::write(&tmp_path, json).unwrap();
@@ -2825,7 +2825,7 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                         let body = self.email.compose_body.text();
                         self.email.update(EmailMessage::CancelCompose);
                         return Command::perform(
-                            async move { moon_beauty_shell::backend::email_client::save_draft(&to, &sub, &body).await },
+                            async move { moon_beauty_shell::libraries::backend::email_client::save_draft(&to, &sub, &body).await },
                             |_| Message::Email(EmailMessage::DraftSaved)
                         );
                     } else {
@@ -2838,7 +2838,7 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                     return Command::batch(vec![
                         Command::done(Message::Email(EmailMessage::SetLoading)),
                         Command::perform(
-                            async move { moon_beauty_shell::backend::email_client::fetch_envelopes(&f).await },
+                            async move { moon_beauty_shell::libraries::backend::email_client::fetch_envelopes(&f).await },
                             |res| match res {
                                 Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(envs)),
                                 Err(e) => Message::Email(EmailMessage::Error(e)),
@@ -2850,7 +2850,7 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                     let folder = self.email.active_folder.clone();
                     self.email.update(EmailMessage::SelectMail(id.clone()));
                     return Command::perform(
-                        async move { moon_beauty_shell::backend::email_client::read_message(&id, &folder).await },
+                        async move { moon_beauty_shell::libraries::backend::email_client::read_message(&id, &folder).await },
                         |body| Message::Email(EmailMessage::MessageLoaded(body)),
                     );
                 }
@@ -2873,17 +2873,17 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                     eprintln!("[send] sending to={:?} subject={:?} attachments={}", to, sub, attachments.len());
                     self.email.update(EmailMessage::SendMail);
                     return Command::perform(
-                        async move { moon_beauty_shell::backend::email_client::send_message(&to, &sub, &body, attachments).await },
+                        async move { moon_beauty_shell::libraries::backend::email_client::send_message(&to, &sub, &body, attachments).await },
                         |res| match res {
                             Ok(_) => Message::Email(EmailMessage::MessageLoaded(
-                                moon_beauty_shell::backend::email_client::ParsedEmail {
+                                moon_beauty_shell::libraries::backend::email_client::ParsedEmail {
                                     text: "✓ Message sent.".into(),
                                     images: Vec::new(),
                                     attachments: Vec::new(),
                                 }
                             )),
                             Err(e) => Message::Email(EmailMessage::MessageLoaded(
-                                moon_beauty_shell::backend::email_client::ParsedEmail {
+                                moon_beauty_shell::libraries::backend::email_client::ParsedEmail {
                                     text: format!("✗ Send failed: {}", e),
                                     images: Vec::new(),
                                     attachments: Vec::new(),
@@ -2896,7 +2896,7 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                     self.email.update(EmailMessage::EnvelopesLoaded(envs));
                     let folder = self.email.active_folder.clone();
                     return Command::perform(
-                        async move { moon_beauty_shell::backend::email_client::fetch_from_network(&folder).await },
+                        async move { moon_beauty_shell::libraries::backend::email_client::fetch_from_network(&folder).await },
                         |res| match res {
                             Ok(envs) => Message::Email(EmailMessage::NetworkEnvelopesLoaded(envs)),
                             Err(_) => Message::Email(EmailMessage::SyncDone),
@@ -2905,10 +2905,10 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                 }
                 EmailMessage::NetworkEnvelopesLoaded(envs) => {
                     self.email.update(EmailMessage::EnvelopesLoaded(envs.clone()));
-                    moon_beauty_shell::backend::email_client::save_index(&self.email.active_folder, &envs);
+                    moon_beauty_shell::libraries::backend::email_client::save_index(&self.email.active_folder, &envs);
                     let folder = self.email.active_folder.clone();
                     return Command::perform(
-                        async move { moon_beauty_shell::backend::email_client::sync_bodies_background(folder).await },
+                        async move { moon_beauty_shell::libraries::backend::email_client::sync_bodies_background(folder).await },
                         |_| Message::Email(EmailMessage::SyncDone)
                     );
                 }
@@ -2934,7 +2934,7 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                             return Command::batch(vec![
                                 Command::done(Message::Email(EmailMessage::SetLoading)),
                                 Command::perform(
-                                    async move { moon_beauty_shell::backend::email_client::fetch_envelopes(&f).await },
+                                    async move { moon_beauty_shell::libraries::backend::email_client::fetch_envelopes(&f).await },
                                     |res| match res {
                                         Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(envs)),
                                         Err(e) => Message::Email(EmailMessage::Error(e)),
@@ -2951,7 +2951,7 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                             let folder = self.email.active_folder.clone();
                             self.email.update(EmailMessage::SelectMail(id.clone()));
                             return Command::perform(
-                                async move { moon_beauty_shell::backend::email_client::read_message(&id, &folder).await },
+                                async move { moon_beauty_shell::libraries::backend::email_client::read_message(&id, &folder).await },
                                 |body| Message::Email(EmailMessage::MessageLoaded(body)),
                             );
                         }
@@ -2964,7 +2964,7 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                         let star = !mail.is_starred;
                         self.email.update(EmailMessage::ToggleStar);
                         return Command::perform(
-                            async move { moon_beauty_shell::backend::email_client::toggle_star(&id, &folder, star).await },
+                            async move { moon_beauty_shell::libraries::backend::email_client::toggle_star(&id, &folder, star).await },
                             |res| match res {
                                 Ok(_) => Message::Email(EmailMessage::SyncDone),
                                 Err(e) => Message::Email(EmailMessage::Error(e)),
@@ -2988,22 +2988,22 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                             self.email.parsed_email = None;
                             self.email.active_mail_id = None;
 
-                            moon_beauty_shell::backend::email_client::save_index(&folder, &self.email.envelopes);
+                            moon_beauty_shell::libraries::backend::email_client::save_index(&folder, &self.email.envelopes);
 
                             let is_trash = folder == "Trash";
 
                             if !is_trash {
-                                let mut trash_envs = moon_beauty_shell::backend::email_client::load_index("Trash");
+                                let mut trash_envs = moon_beauty_shell::libraries::backend::email_client::load_index("Trash");
                                 trash_envs.insert(0, mail_clone);
-                                moon_beauty_shell::backend::email_client::save_index("Trash", &trash_envs);
+                                moon_beauty_shell::libraries::backend::email_client::save_index("Trash", &trash_envs);
                             }
 
                             return Command::perform(
                                 async move { 
                                     if is_trash {
-                                        moon_beauty_shell::backend::email_client::delete_message(&id, &folder).await 
+                                        moon_beauty_shell::libraries::backend::email_client::delete_message(&id, &folder).await 
                                     } else {
-                                        moon_beauty_shell::backend::email_client::move_to_trash(&id, &folder).await 
+                                        moon_beauty_shell::libraries::backend::email_client::move_to_trash(&id, &folder).await 
                                     }
                                 },
                                 |res| match res {
@@ -3019,7 +3019,7 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                         let email = mail.sender_email.clone();
                         if !email.is_empty() {
                             return Command::perform(
-                                async move { moon_beauty_shell::backend::email_client::save_contact(&email).await },
+                                async move { moon_beauty_shell::libraries::backend::email_client::save_contact(&email).await },
                                 |res| match res {
                                     Ok(_) => Message::Email(EmailMessage::DraftSaved),
                                     Err(e) => Message::Email(EmailMessage::Error(e)),
@@ -3054,7 +3054,7 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                     ).map(Message::Email);
                 }
                 EmailMessage::SaveLogin => {
-                    let cfg = moon_beauty_shell::backend::email_client::EmailConfig {
+                    let cfg = moon_beauty_shell::libraries::backend::email_client::EmailConfig {
                         email: self.email.login_email.clone(),
                         password: Some(self.email.login_password.clone()),
                         password_cmd: None,
@@ -3065,14 +3065,14 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                         sops_key: if self.email.login_sops_key.trim().is_empty() { None } else { Some(self.email.login_sops_key.clone()) },
                     };
                     let use_sops = self.email.use_sops;
-                    match moon_beauty_shell::backend::email_client::save_config(&cfg, use_sops) {
+                    match moon_beauty_shell::libraries::backend::email_client::save_config(&cfg, use_sops) {
                         Ok(_) => {
                             self.email.is_logging_in = false;
                             self.email.login_error = None;
                             return Command::batch(vec![
                                 Command::done(Message::Email(EmailMessage::SetLoading)),
                                 Command::perform(
-                                    async move { moon_beauty_shell::backend::email_client::fetch_envelopes("INBOX").await },
+                                    async move { moon_beauty_shell::libraries::backend::email_client::fetch_envelopes("INBOX").await },
                                     |res| match res {
                                         Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(envs)),
                                         Err(e) => Message::Email(EmailMessage::Error(e)),
@@ -3127,7 +3127,7 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                         let nid = t.id;
                         self.notifs.update(NotifMessage::DismissToast(id));
                         std::thread::spawn(move || {
-                            moon_beauty_shell::backend::notif_dbus::emit_action_invoked(nid, "default");
+                            moon_beauty_shell::libraries::backend::notif_dbus::emit_action_invoked(nid, "default");
                             std::thread::sleep(std::time::Duration::from_millis(200));
                             let matches = notification_candidates(&app, entry.as_deref());
                             if !is_app_focused(&matches) {
@@ -3377,7 +3377,7 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
             iced::Subscription::none()
         };
 
-        let email_sync_sub = if moon_beauty_shell::backend::email_client::config_exists() {
+        let email_sync_sub = if moon_beauty_shell::libraries::backend::email_client::config_exists() {
             iced::time::every(std::time::Duration::from_secs(60)).map(|_| Message::TickEmailSync)
         } else {
             iced::Subscription::none()

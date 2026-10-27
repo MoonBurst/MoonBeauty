@@ -2,11 +2,11 @@ use iced::widget::{button, container, text, tooltip, MouseArea, Row, Stack};
 use std::sync::{Mutex, OnceLock};
 use iced::{Alignment, Color, Element, Length};
 
-use crate::backend::UnifiedTelemetry;
-use crate::config::settings::ShellSettings;
-use crate::config::theme::{hex_to_color, ShellTheme};
-use crate::style::shape_box::{ShapeBox, ShapeType, SlantSide};
-use crate::style::shell_font;
+use crate::libraries::backend::UnifiedTelemetry;
+use crate::libraries::config::settings::ShellSettings;
+use crate::libraries::config::theme::{hex_to_color, ShellTheme};
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
+use crate::libraries::style::shell_font;
 
 #[derive(Debug, Clone)]
 pub enum CapsuleAction {
@@ -22,8 +22,8 @@ pub enum CapsuleAction {
     ToggleNotificationDnd,
     ToggleCustomMode,
     ToggleTrayExpanded,
-    TrayActivate(crate::backend::TrayItem),
-    TrayContextMenu(crate::backend::TrayItem),
+    TrayActivate(crate::libraries::backend::TrayItem),
+    TrayContextMenu(crate::libraries::backend::TrayItem),
     CancelTooltip(String),
 }
 
@@ -101,7 +101,7 @@ pub fn lookup_width(id: &str) -> Option<f32> {
 /// Compute the visible width of the fully-expanded tray (excluding slants).
 /// Matches the internal math in `render_tray_expanded` so the animator can
 /// target the exact final width.
-pub fn compute_expanded_visible_width(settings: &crate::config::settings::ShellSettings, item_count: usize) -> f32 {
+pub fn compute_expanded_visible_width(settings: &crate::libraries::config::settings::ShellSettings, item_count: usize) -> f32 {
     let shown = item_count.min(8);
     let icon_size = settings.tray_icon_size as f32;
     let icon_slot = icon_size + 8.0; // icon_size + icon_pad * 2
@@ -182,9 +182,9 @@ impl CapsuleRenderer {
                 let (txt, col) = match &telemetry.weather {
                     Some(w) => {
                         let (prefix, col) = match &w.alert {
-                            crate::backend::WeatherAlert::Danger(_) => ("🚨 ", theme.danger),
-                            crate::backend::WeatherAlert::Upcoming(_) => ("⚠️ ", theme.warning),
-                            crate::backend::WeatherAlert::None => ("", theme.text),
+                            crate::libraries::backend::WeatherAlert::Danger(_) => ("🚨 ", theme.danger),
+                            crate::libraries::backend::WeatherAlert::Upcoming(_) => ("⚠️ ", theme.warning),
+                            crate::libraries::backend::WeatherAlert::None => ("", theme.text),
                         };
                         (format!("{}{}°F/{}°C", prefix, w.temp_f, w.temp_c), col)
                     }
@@ -478,9 +478,9 @@ impl CapsuleRenderer {
     }
 
     pub fn render_tray_expanded<'a, Message: 'static + Clone>(
-        items: &[crate::backend::TrayItem],
+        items: &[crate::libraries::backend::TrayItem],
         theme: &ShellTheme,
-        settings: &crate::config::settings::ShellSettings,
+        settings: &crate::libraries::config::settings::ShellSettings,
         slant_left: SlantSide,
         slant_right: SlantSide,
         region: &str,

@@ -2,9 +2,9 @@ use iced::widget::{button, column, container, text, text_input, Stack};
 use iced::{Alignment, Element, Length};
 use tokio::process::Command;
 
-use crate::config::theme::ShellTheme;
-use crate::style::shape_box::{ShapeBox, ShapeType};
-use crate::style::TextExt;
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
+use crate::libraries::style::TextExt;
 
 #[derive(Debug, Clone)]
 pub enum WebSearchMessage {

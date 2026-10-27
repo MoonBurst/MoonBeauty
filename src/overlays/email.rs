@@ -1,10 +1,10 @@
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Stack, checkbox};
 use iced::{Element, Length};
 
-use crate::config::settings::ShellSettings;
-use crate::config::theme::ShellTheme;
-use crate::style::shape_box::{ShapeBox, ShapeType};
-use crate::style::TextExt;
+use crate::libraries::config::settings::ShellSettings;
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
+use crate::libraries::style::TextExt;
 
 pub const COMPOSE_TO_ID: &str = "compose_to";
 pub const COMPOSE_SUBJ_ID: &str = "compose_subj";
@@ -15,10 +15,10 @@ pub const COMPOSE_MANUAL_ATTACH_ID: &str = "compose_manual_attach";
 pub enum EmailMessage {
     SelectFolder(String),
     SelectMail(String),
-    EnvelopesLoaded(Vec<crate::backend::email_client::NativeEnvelope>),
-    NetworkEnvelopesLoaded(Vec<crate::backend::email_client::NativeEnvelope>),
+    EnvelopesLoaded(Vec<crate::libraries::backend::email_client::NativeEnvelope>),
+    NetworkEnvelopesLoaded(Vec<crate::libraries::backend::email_client::NativeEnvelope>),
     SyncDone,
-    MessageLoaded(crate::backend::email_client::ParsedEmail),
+    MessageLoaded(crate::libraries::backend::email_client::ParsedEmail),
     Error(String),
     SetLoading,
     OpenComposer,
@@ -72,11 +72,11 @@ pub struct EmailOverlay {
     pub folders: Vec<String>,
     pub active_folder: String,
     pub active_folder_idx: usize,
-    pub envelopes: Vec<crate::backend::email_client::NativeEnvelope>,
+    pub envelopes: Vec<crate::libraries::backend::email_client::NativeEnvelope>,
     pub active_mail_id: Option<String>,
     pub selected_index: usize,
     pub focus_pane: usize,
-    pub parsed_email: Option<crate::backend::email_client::ParsedEmail>,
+    pub parsed_email: Option<crate::libraries::backend::email_client::ParsedEmail>,
     pub is_composing: bool,
     pub compose_to: String,
     pub compose_subject: String,
@@ -107,7 +107,7 @@ impl Default for EmailOverlay {
 
 impl EmailOverlay {
     pub fn new() -> Self {
-        let is_logging_in = !crate::backend::email_client::config_exists();
+        let is_logging_in = !crate::libraries::backend::email_client::config_exists();
         Self {
             folders: vec!["INBOX".into(), "Unread".into(), "Starred".into(), "Sent".into(), "Drafts".into(), "Trash".into(), "Spam".into()],
             active_folder: "INBOX".into(),
@@ -124,7 +124,7 @@ impl EmailOverlay {
             active_compose_field: 0,
             compose_attachments: Vec::new(),
             compose_manual_attach: String::new(),
-            contacts: crate::backend::email_client::load_contacts(),
+            contacts: crate::libraries::backend::email_client::load_contacts(),
             selected_autocomplete_idx: None,
             is_loading: false,
             imap_error: None,
@@ -250,7 +250,7 @@ impl EmailOverlay {
                 self.compose_attachments.clear();
             }
             EmailMessage::OpenLogin => {
-                let cfg = crate::backend::email_client::load_config();
+                let cfg = crate::libraries::backend::email_client::load_config();
                 self.login_email = cfg.email;
                 self.login_password = cfg.password.unwrap_or_default();
                 self.login_imap = cfg.imap_host;
@@ -317,7 +317,7 @@ impl EmailOverlay {
                             .map(|s| s.trim_start_matches('.').to_string())
                             .filter(|s| !s.is_empty())
                             .unwrap_or_else(|| "attachment".to_string());
-                        let settings = crate::config::settings::ShellSettings::load();
+                        let settings = crate::libraries::config::settings::ShellSettings::load();
                         let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
                         let download_dir = if !settings.attachment_download_dir.trim().is_empty() {
                             std::path::PathBuf::from(settings.attachment_download_dir.trim())

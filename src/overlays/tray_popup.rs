@@ -5,9 +5,9 @@ use iced_layershell::settings::{LayerShellSettings, Settings};
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::config::theme::ShellTheme;
-use crate::config::ShellSettings;
-use crate::style::shape_box::SlantSide;
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::config::ShellSettings;
+use crate::libraries::style::shape_box::SlantSide;
 
 const W_START: f32 = 100.0;
 const AUTO_MS: u128 = 25_000;

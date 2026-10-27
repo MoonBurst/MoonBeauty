@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::config::theme::ShellTheme;
-use crate::config::settings::ShellSettings;
-use crate::style::shape_box::{ShapeBox, ShapeType};
-use crate::style::TextExt;
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::config::settings::ShellSettings;
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
+use crate::libraries::style::TextExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 

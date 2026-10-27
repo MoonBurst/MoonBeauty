@@ -2,9 +2,9 @@ use iced::widget::{column, container, text, text_input, Stack};
 use iced::{Alignment, Element, Length, Padding};
 use tokio::process::Command;
 
-use crate::config::settings::ShellSettings;
-use crate::config::theme::ShellTheme;
-use crate::style::shape_box::{ShapeBox, ShapeType};
+use crate::libraries::config::settings::ShellSettings;
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
 
 #[derive(Debug, Clone)]
 pub enum CalcMessage {

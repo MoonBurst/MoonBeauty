@@ -4,7 +4,7 @@
 
 use std::sync::mpsc::Sender;
 
-use crate::ipc::protocol::{get_annotator_socket_path, AnnotatorCommand};
+use crate::libraries::ipc::protocol::{get_annotator_socket_path, AnnotatorCommand};
 
 pub fn spawn(tx: Sender<AnnotatorCommand>) {
     std::thread::spawn(move || {

@@ -5,24 +5,24 @@ use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use std::time::Instant;
 
-use crate::backend::system::ProcessItem;
-use crate::backend::{BorgBackend, BorgStatus, ClockBackend, MprisBackend, MprisTrack,
+use crate::libraries::backend::system::ProcessItem;
+use crate::libraries::backend::{BorgBackend, BorgStatus, ClockBackend, MprisBackend, MprisTrack,
                      PodmanBackend, PodmanStatus, SystemCollector};
-use crate::config::theme::ShellTheme;
-use crate::config::ShellSettings;
-use crate::style::shape_box::{ShapeBox, ShapeType, SlantSide};
-use crate::style::TextExt;
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::config::ShellSettings;
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
+use crate::libraries::style::TextExt;
 
 const W_START: f32 = 130.0;
 const AUTO_MS: u128 = 15_000;
 
 #[derive(Debug, Clone)]
 pub enum InfoData {
-    Calendar(crate::backend::CalendarViewData),
+    Calendar(crate::libraries::backend::CalendarViewData),
     Music(Option<MprisTrack>),
-    Unified(PodmanStatus, BorgStatus, Vec<crate::backend::UnifiedItemStatus>),
-    Net(crate::backend::NetMetrics),
-    Clock(Vec<crate::backend::WorldZoneColumn>),
+    Unified(PodmanStatus, BorgStatus, Vec<crate::libraries::backend::UnifiedItemStatus>),
+    Net(crate::libraries::backend::NetMetrics),
+    Clock(Vec<crate::libraries::backend::WorldZoneColumn>),
     Custom,
 }
 
@@ -148,23 +148,23 @@ impl App {
             Message::MusicSeek(secs) => {
                 let secs = secs;
                 return Task::perform(async move {
-                    let _ = crate::backend::MprisBackend::set_position(secs).await;
+                    let _ = crate::libraries::backend::MprisBackend::set_position(secs).await;
                 }, |_| Message::Noop);
             }
             Message::MusicSetVolume(vol) => {
                 let vol = vol;
                 return Task::perform(async move {
-                    let _ = crate::backend::MprisBackend::set_volume(vol).await;
+                    let _ = crate::libraries::backend::MprisBackend::set_volume(vol).await;
                 }, |_| Message::Noop);
             }
             Message::MusicOpenFolder(url) => {
                 return Task::perform(async move {
-                    crate::backend::MprisBackend::open_track_folder(url.as_deref()).await;
+                    crate::libraries::backend::MprisBackend::open_track_folder(url.as_deref()).await;
                 }, |_| Message::Noop);
             }
             Message::PodmanRestart(cname) => {
                 return Task::perform(async move {
-                    crate::backend::PodmanBackend::restart(&cname).await;
+                    crate::libraries::backend::PodmanBackend::restart(&cname).await;
                 }, |_| Message::Dismiss);
             }
             Message::UnifiedToggle(idx) => {
@@ -172,7 +172,7 @@ impl App {
                 if let Some(item) = s.unified_items.get(idx).cloned() {
                     let mode = self.mode.clone();
                     return Task::perform(async move {
-                        if let Err(e) = crate::backend::unified::toggle_item(&item).await {
+                        if let Err(e) = crate::libraries::backend::unified::toggle_item(&item).await {
                             eprintln!("[unified] toggle '{}' failed: {}", item.name, e);
                         }
                         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -185,7 +185,7 @@ impl App {
             Message::MusicTrashExecute(url) => {
                 self.trash_confirm = false;
                 return Task::perform(async move {
-                    crate::backend::MprisBackend::trash_current_track(url.as_deref()).await;
+                    crate::libraries::backend::MprisBackend::trash_current_track(url.as_deref()).await;
                 }, |_| Message::Noop);
             }
         }
@@ -1103,7 +1103,7 @@ async fn fetch_data(mode: String) -> InfoData {
             let p = PodmanBackend::poll().await;
             let b = BorgBackend::poll().await;
             let s = ShellSettings::load();
-            let items = crate::backend::unified::check_unified_items(&s.unified_items).await;
+            let items = crate::libraries::backend::unified::check_unified_items(&s.unified_items).await;
             InfoData::Unified(p, b, items)
         }
         "net" => {

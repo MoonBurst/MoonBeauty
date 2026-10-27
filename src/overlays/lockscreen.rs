@@ -2,11 +2,11 @@ use chrono::Local;
 use iced::widget::{column, container, text};
 use iced::{Alignment, Element, Length, Padding};
 use std::sync::mpsc;
-use crate::backend::lock_coordinator::LockIpc;
+use crate::libraries::backend::lock_coordinator::LockIpc;
 
-use crate::config::theme::ShellTheme;
-use crate::style::shape_box::{ShapeBox, ShapeType};
-use crate::style::TextExt;
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
+use crate::libraries::style::TextExt;
 
 #[derive(Debug, Clone)]
 pub enum LockMessage {
@@ -55,7 +55,7 @@ impl LockscreenOverlay {
                 }
             }
         };
-        let cached_global_padding = crate::config::ShellSettings::load().global_padding;
+        let cached_global_padding = crate::libraries::config::ShellSettings::load().global_padding;
         Self {
             buffer_len: 0,
             auth_failed: false,
