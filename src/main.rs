@@ -668,12 +668,6 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         }
     }
 
-    if args.iter().any(|a| a == "--alarm-tooltip") {
-        match moon_beauty_shell::overlays::alarm_tooltip::run() {
-            Ok(()) => std::process::exit(0),
-            Err(e) => { eprintln!("[alarm-tooltip] {e}"); std::process::exit(1); }
-        }
-    }
 
     iced_layershell::application(
         || MoonBeautyShellApp::new_app(),
@@ -1350,40 +1344,49 @@ impl MoonBeautyShellApp {
             }
             Message::TickClock => {
                 self.telemetry.bar_time = ClockBackend::get_bar_time();
-                let now = chrono::Local::now().timestamp();
-                let mut entries = moon_beauty_shell::overlays::reminders::RemindersOverlay::load();
-                let mut changed = false;
-                for e in entries.iter_mut() {
-                    if e.target_epoch <= now && !e.alerted {
-                        e.alerted = true;
-                        changed = true;
-                        let text = if e.text.is_empty() { "Timer Finished!".into() } else { e.text.clone() };
-                        let _ = std::process::Command::new("notify-send")
-                            .args(["-a", "Alarm", "-u", "critical", "⏰ Timer Complete!", &text])
-                            .spawn();
-                            
-                        if let Some(sound) = &self.settings.alarm_sound {
-                            let path = if std::path::Path::new(sound).is_absolute() {
-                                std::path::PathBuf::from(sound)
-                            } else {
-                                std::path::PathBuf::from("resources").join(sound)
-                            };
-                            if path.exists() {
-                                let path_str = path.to_string_lossy().to_string();
-                                let dur = self.settings.alarm_sound_duration_sec;
-                                let vol_pct = self.settings.alarm_sound_volume;
-                                let vol_f = (vol_pct as f32) / 100.0;
-                                let cmd = format!(
-                                    r#"timeout {}s pw-play --volume={:.2} "{}" 2>/dev/null"#,
-                                    dur, vol_f, path_str
-                                );
-                                let _ = std::process::Command::new("sh").arg("-c").arg(cmd).spawn();
+                // Only the primary bar process fires reminder notifications.
+                // The standalone reminders overlay and the notification surface
+                // also run TickClock every second; without this guard both see
+                // alerted=false simultaneously and each fires a notify-send +
+                // writes alerted=true, producing duplicate alerts.
+                if !self.is_standalone && !self.is_notif_surface {
+                    let now = chrono::Local::now().timestamp();
+                    let mut entries = moon_beauty_shell::overlays::reminders::RemindersOverlay::load();
+                    let mut changed = false;
+                    for e in entries.iter_mut() {
+                        if e.target_epoch <= now && !e.alerted {
+                            e.alerted = true;
+                            changed = true;
+                            let text = if e.text.is_empty() { "Timer Finished!".into() } else { e.text.clone() };
+                            let _ = std::process::Command::new("notify-send")
+                                .args(["-a", "Alarm", "-u", "critical", "⏰ Timer Complete!", &text])
+                                .spawn();
+
+                            if e.play_sound {
+                                if let Some(sound) = &self.settings.alarm_sound {
+                                    let path = if std::path::Path::new(sound).is_absolute() {
+                                        std::path::PathBuf::from(sound)
+                                    } else {
+                                        std::path::PathBuf::from("resources").join(sound)
+                                    };
+                                    if path.exists() {
+                                        let path_str = path.to_string_lossy().to_string();
+                                        let dur = self.settings.alarm_sound_duration_sec;
+                                        let vol_pct = self.settings.alarm_sound_volume;
+                                        let vol_f = (vol_pct as f32) / 100.0;
+                                        let cmd = format!(
+                                            r#"timeout {}s pw-play --volume={:.2} "{}" 2>/dev/null"#,
+                                            dur, vol_f, path_str
+                                        );
+                                        let _ = std::process::Command::new("sh").arg("-c").arg(cmd).spawn();
+                                    }
+                                }
                             }
                         }
                     }
-                }
-                if changed {
-                    moon_beauty_shell::overlays::reminders::save_reminders(&entries);
+                    if changed {
+                        moon_beauty_shell::overlays::reminders::save_reminders(&entries);
+                    }
                 }
             }
             Message::TickToasts => {
@@ -1601,8 +1604,23 @@ impl MoonBeautyShellApp {
                             // Fallback to capsule_center_x if no click in last 5s (e.g. IPC trigger).
                             let recent_click = self.last_cursor_time.elapsed() < std::time::Duration::from_secs(5);
 
-                            // 1. DROPDOWN TOOLTIPS (Alarm, CPU, GPU, RAM, Tray)
-                            if matches!(id.as_str(), "weather" | "cpu" | "gpu" | "ram" | "alarm" | "calendar" | "music" | "unified" | "net" | "custom") {
+                            // 1. ALARM — standalone reminders overlay.
+                            // Handled BEFORE the tooltip-open/toggle block so:
+                            //   (a) an open tooltip can't hijack the click,
+                            //   (b) id="alarm" never enters the tooltip spawn
+                            //       selection and falls through to --sys-tooltip
+                            //       (which defaults unknown targets to RAM).
+                            if id == "alarm" {
+                                if let Some(mut c) = self.weather_tooltip_child.take() {
+                                    let _ = c.kill();
+                                    let _ = c.wait();
+                                }
+                                self.toggle_standalone(OverlayTarget::Reminders);
+                                return Command::none();
+                            }
+
+                            // 2. DROPDOWN TOOLTIPS (CPU, GPU, RAM, Tray)
+                            if matches!(id.as_str(), "weather" | "cpu" | "gpu" | "ram" | "calendar" | "music" | "unified" | "net" | "custom") {
                                 // Toggle off if already open
                                 let running = self.weather_tooltip_child.as_mut()
                                     .and_then(|c| c.try_wait().ok())
@@ -1631,9 +1649,7 @@ impl MoonBeautyShellApp {
                                 let exe = resolve_exe();
                                 let mut cmd = std::process::Command::new(&exe);
 
-                                if id == "alarm" {
-                                    cmd.arg("--alarm-tooltip");
-                                } else if id == "weather" {
+                                if id == "weather" {
                                     cmd.arg("--weather-tooltip");
                                 } else if matches!(id.as_str(), "calendar" | "music" | "unified" | "net" | "custom") {
                                     cmd.arg("--info-tooltip").env("MBS_INFO_MODE", &id);
@@ -2295,6 +2311,8 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                 }
                 ReminderMessage::ScrollUp
                 | ReminderMessage::ScrollDown
+                | ReminderMessage::SelectFirst
+                | ReminderMessage::SelectLast
                 | ReminderMessage::DeleteSelected => {
                     self.reminders.update(msg);
                     return iced::widget::operation::scroll_to(
@@ -3007,6 +3025,23 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                     self.todo.update(moon_beauty_shell::overlays::todo::TodoMessage::CancelEdit);
                     return Command::none();
                 }
+                // Reminders: Escape clears the current input field, then the
+                // list selection, then finally dismisses. Prevents a mistyped
+                // reminder from wiping out the whole overlay on Esc.
+                if matches!(self.active_overlay, Some(OverlayTarget::Reminders)) {
+                    if !self.reminders.task_text.is_empty() {
+                        self.reminders.task_text.clear();
+                        return Command::none();
+                    }
+                    if !self.reminders.when_text.is_empty() {
+                        self.reminders.when_text.clear();
+                        return Command::none();
+                    }
+                    if self.reminders.selected_idx.is_some() {
+                        self.reminders.selected_idx = None;
+                        return Command::none();
+                    }
+                }
                 // Persist if we're closing the Settings overlay via Esc.
                 if matches!(self.active_overlay, Some(OverlayTarget::Settings)) {
                     let _ = self.settings.save();
@@ -3164,9 +3199,18 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
                         Some(Message::Reminders(ReminderMessage::ScrollDown))
                     }
                     Key::Named(Named::Delete) => {
-                            Some(Message::Reminders(ReminderMessage::DeleteSelected))
-                        }
-                        _ => None,
+                        Some(Message::Reminders(ReminderMessage::DeleteSelected))
+                    }
+                    Key::Named(Named::Home) => {
+                        Some(Message::Reminders(ReminderMessage::SelectFirst))
+                    }
+                    Key::Named(Named::End) => {
+                        Some(Message::Reminders(ReminderMessage::SelectLast))
+                    }
+                    Key::Character(c) if modifiers.control() && c.to_lowercase() == "s" => {
+                        Some(Message::Reminders(ReminderMessage::ToggleSoundSelected))
+                    }
+                    _ => None,
                 }
             })
         } else {

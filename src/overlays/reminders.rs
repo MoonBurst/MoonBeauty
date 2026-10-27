@@ -11,13 +11,18 @@ use crate::style::shape_box::{ShapeBox, ShapeType};
 use crate::style::TextExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+
 pub struct ReminderEntry {
     pub id: u64,
     pub target_epoch: i64,
     pub text: String,
     pub target_str: String,
     pub alerted: bool,
+    #[serde(default = "default_true")]
+    pub play_sound: bool,
 }
+
+fn default_true() -> bool { true }
 
 pub const REMINDER_TASK_ID: &str = "rem_task";
 pub const REMINDER_WHEN_ID: &str = "rem_when";
@@ -29,6 +34,8 @@ pub enum ReminderMessage {
     QuickWhen(String),
     ScrollUp,
     ScrollDown,
+    SelectFirst,
+    SelectLast,
     FocusNextField,
     FocusPrevField,
     DeleteSelected,
@@ -37,6 +44,8 @@ pub enum ReminderMessage {
     Refocus,
     AddReminder,
     DeleteReminder(u64),
+    ToggleSound(u64),
+    ToggleSoundSelected,
     Dismiss,
 }
 
@@ -106,75 +115,71 @@ impl RemindersOverlay {
     }
 
     pub fn parse_when(when_expr: &str) -> (i64, String) {
-        let now = Local::now();
-        let expr = when_expr.trim().to_lowercase();
+    let now = Local::now();
+    let expr = when_expr.trim().to_lowercase();
 
-        let mut minutes: i64 = 0;
-        let mut is_relative = false;
+    let mut minutes: i64 = 0;
+    let mut is_relative = false;
 
-        for part in expr.split_whitespace() {
-            if let Some(m) = part.strip_suffix('m') {
-                if let Ok(val) = m.parse::<i64>() {
-                    minutes += val;
-                    is_relative = true;
-                }
-            } else if let Some(h) = part.strip_suffix('h') {
-                if let Ok(val) = h.parse::<i64>() {
-                    minutes += val * 60;
-                    is_relative = true;
-                }
+    if !expr.contains("am") && !expr.contains("pm") {
+        let compact = expr.replace(' ', "");
+        
+        if let Some(h_pos) = compact.find('h') {
+            if let Ok(h) = compact[..h_pos].parse::<i64>() {
+                minutes += h * 60;
+                is_relative = true;
             }
         }
-
-        if is_relative && minutes > 0 {
-            let target = now + Duration::minutes(minutes);
-            return (
-                target.timestamp(),
-                target.format("%a, %b %d %I:%M %p").to_string(),
-            );
-        }
-
-        let is_tomorrow = expr.contains("tomorrow");
-        let target_date = if is_tomorrow {
-            now.date_naive() + Duration::days(1)
-        } else {
-            now.date_naive()
-        };
-
-        if let Some(time_part) = expr.split_whitespace().find(|s| s.contains(':') || s.ends_with("am") || s.ends_with("pm")) {
-            let mut hour = 9;
-            let mut min = 0;
-
-            if let Some((h_str, m_str)) = time_part.split_once(':') {
-                let is_pm = m_str.ends_with("pm");
-                let is_am = m_str.ends_with("am");
-                let clean_m = m_str.trim_end_matches("am").trim_end_matches("pm");
-                hour = h_str.parse().unwrap_or(9);
-                min = clean_m.parse().unwrap_or(0);
-                if is_pm && hour < 12 { hour += 12; }
-                if is_am && hour == 12 { hour = 0; }
-            } else if time_part.ends_with("pm") {
-                hour = time_part.trim_end_matches("pm").parse().unwrap_or(9);
-                if hour < 12 { hour += 12; }
-            } else if time_part.ends_with("am") {
-                hour = time_part.trim_end_matches("am").parse().unwrap_or(9);
-                if hour == 12 { hour = 0; }
-            }
-
-            if let Some(target) = target_date.and_hms_opt(hour, min, 0) {
-                let local_target = target.and_local_timezone(Local).unwrap();
-                return (
-                    local_target.timestamp(),
-                    local_target.format("%a, %b %d %I:%M %p").to_string(),
-                );
+        
+        let start = if let Some(h_pos) = compact.find('h') { h_pos + 1 } else { 0 };
+        if let Some(m_pos) = compact[start..].find('m') {
+            let abs_m_pos = start + m_pos;
+            if let Ok(m) = compact[start..abs_m_pos].parse::<i64>() {
+                minutes += m;
+                is_relative = true;
             }
         }
-
-        let fallback = now + Duration::minutes(30);
-        (fallback.timestamp(), fallback.format("%a, %b %d %I:%M %p").to_string())
     }
 
-    pub fn cycle_focus_forward(&mut self) {
+    if is_relative && minutes > 0 {
+        let target = now + Duration::minutes(minutes);
+        return (target.timestamp(), target.format("%a, %b %d %I:%M %p").to_string());
+    }
+
+    let is_tomorrow = expr.contains("tomorrow");
+    let target_date = if is_tomorrow { now.date_naive() + Duration::days(1) } else { now.date_naive() };
+
+    if let Some(time_part) = expr.split_whitespace().find(|s| s.contains(':') || s.ends_with("am") || s.ends_with("pm")) {
+        let mut hour = 9;
+        let mut min = 0;
+
+        if let Some((h_str, m_str)) = time_part.split_once(':') {
+            let is_pm = m_str.ends_with("pm");
+            let is_am = m_str.ends_with("am");
+            let clean_m = m_str.trim_end_matches("am").trim_end_matches("pm");
+            hour = h_str.parse().unwrap_or(9);
+            min = clean_m.parse().unwrap_or(0);
+            if is_pm && hour < 12 { hour += 12; }
+            if is_am && hour == 12 { hour = 0; }
+        } else if time_part.ends_with("pm") {
+            hour = time_part.trim_end_matches("pm").parse().unwrap_or(9);
+            if hour < 12 { hour += 12; }
+        } else if time_part.ends_with("am") {
+            hour = time_part.trim_end_matches("am").parse().unwrap_or(9);
+            if hour == 12 { hour = 0; }
+        }
+
+        if let Some(target) = target_date.and_hms_opt(hour, min, 0) {
+            let local_target = target.and_local_timezone(Local).unwrap();
+            return (local_target.timestamp(), local_target.format("%a, %b %d %I:%M %p").to_string());
+        }
+    }
+
+    let fallback = now + Duration::minutes(30);
+    (fallback.timestamp(), fallback.format("%a, %b %d %I:%M %p").to_string())
+}
+
+pub fn cycle_focus_forward(&mut self) {
         self.active_field = (self.active_field + 1) % 2;
     }
 
@@ -196,6 +201,12 @@ impl RemindersOverlay {
             ReminderMessage::AddReminder => {
                 let t = self.task_text.trim();
                 let w = self.when_text.trim();
+                if t.is_empty() && w.is_empty() {
+                    // Both inputs empty → Enter means "toggle sound on the
+                    // selected reminder", matching the footer hint.
+                    self.update(ReminderMessage::ToggleSoundSelected);
+                    return;
+                }
                 if !t.is_empty() && !w.is_empty() {
                     let (epoch, str_repr) = Self::parse_when(w);
                     let max_id = self.entries.iter().map(|e| e.id).max().unwrap_or(0);
@@ -205,6 +216,7 @@ impl RemindersOverlay {
                         text: t.to_string(),
                         target_str: str_repr,
                         alerted: false,
+                        play_sound: true,
                     });
                     self.task_text.clear();
                     self.when_text.clear();
@@ -214,6 +226,27 @@ impl RemindersOverlay {
             ReminderMessage::DeleteReminder(id) => {
                 self.entries.retain(|e| e.id != id);
                 self.save();
+            }
+            ReminderMessage::ToggleSound(id) => {
+                if let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
+                    e.play_sound = !e.play_sound;
+                    self.save();
+                }
+            }
+            ReminderMessage::ToggleSoundSelected => {
+                // Guard: only when the input fields are empty, so typing
+                // 's' or pressing Enter while composing doesn't toggle the
+                // selected reminder's sound.
+                if !self.task_text.is_empty() || !self.when_text.is_empty() { return; }
+                if let Some(idx) = self.selected_idx {
+                    if idx < self.entries.len() {
+                        let id = self.entries[idx].id;
+                        if let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
+                            e.play_sound = !e.play_sound;
+                            self.save();
+                        }
+                    }
+                }
             }
             ReminderMessage::FocusNextField => { self.cycle_focus_forward(); }
             ReminderMessage::FocusPrevField => { self.cycle_focus_backward(); }
@@ -231,6 +264,30 @@ impl RemindersOverlay {
                 // Approximate row step: row height (~60) + gap (8)
                 let idx = self.selected_idx.unwrap_or(0) as f32;
                 self.scroll_y = (idx * 68.0 - 40.0).max(0.0);
+            }
+            ReminderMessage::SelectFirst => {
+                if !self.task_text.is_empty() || !self.when_text.is_empty() { return; }
+                if self.entries.is_empty() { self.selected_idx = None; return; }
+                self.selected_idx = Some(0);
+                self.scroll_y = 0.0;
+            }
+            ReminderMessage::SelectLast => {
+                if !self.task_text.is_empty() || !self.when_text.is_empty() { return; }
+                if self.entries.is_empty() { self.selected_idx = None; return; }
+                self.selected_idx = Some(self.entries.len() - 1);
+                self.scroll_y = ((self.entries.len() - 1) as f32 * 68.0 - 40.0).max(0.0);
+            }
+            ReminderMessage::SelectFirst => {
+                if !self.task_text.is_empty() || !self.when_text.is_empty() { return; }
+                if self.entries.is_empty() { self.selected_idx = None; return; }
+                self.selected_idx = Some(0);
+                self.scroll_y = 0.0;
+            }
+            ReminderMessage::SelectLast => {
+                if !self.task_text.is_empty() || !self.when_text.is_empty() { return; }
+                if self.entries.is_empty() { self.selected_idx = None; return; }
+                self.selected_idx = Some(self.entries.len() - 1);
+                self.scroll_y = ((self.entries.len() - 1) as f32 * 68.0 - 40.0).max(0.0);
             }
             ReminderMessage::ScrollUp => {
                 if !self.task_text.is_empty() || !self.when_text.is_empty() { return; }
@@ -318,16 +375,6 @@ impl RemindersOverlay {
             ..Default::default()
         });
 
-        let quick_row = row![
-            text("Quick:").size(fs_sm).bold().color(theme.muted),
-            button(text("+5m").size(fs_sm)).on_press(ReminderMessage::QuickWhen("5m".into())).style(|_t, _s| button::Style { background: None, ..Default::default() }),
-            button(text("+15m").size(fs_sm)).on_press(ReminderMessage::QuickWhen("15m".into())).style(|_t, _s| button::Style { background: None, ..Default::default() }),
-            button(text("+30m").size(fs_sm)).on_press(ReminderMessage::QuickWhen("30m".into())).style(|_t, _s| button::Style { background: None, ..Default::default() }),
-            button(text("+1h").size(fs_sm)).on_press(ReminderMessage::QuickWhen("1h".into())).style(|_t, _s| button::Style { background: None, ..Default::default() }),
-            button(text("+tomorrow 9am").size(fs_sm)).on_press(ReminderMessage::QuickWhen("tomorrow 9am".into())).style(|_t, _s| button::Style { background: None, ..Default::default() }),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center);
 
         let mut list_col = column![].spacing(8);
         for (idx, item) in self.entries.iter().enumerate() {
@@ -358,12 +405,15 @@ impl RemindersOverlay {
                 ]
                 .width(Length::Fill),
                 text(rem_label).size(fs_sm).color(theme.success).bold(),
-                button(text("✕").size(fs_sm).color(theme.danger))
+                button(text(if item.play_sound { "🔔" } else { "🔕" }).size(fs_sm).color(if item.play_sound { theme.success } else { theme.muted }))
+                    .on_press(ReminderMessage::ToggleSound(id))
+                    .padding(4)
+                    .style(|_t, _s| button::Style { background: None, ..Default::default() }),
+                                button(text("✕").size(fs_sm).color(theme.danger))
                     .on_press(ReminderMessage::DeleteReminder(id))
                     .padding(4)
                     .style(|_t, _s| button::Style { background: None, ..Default::default() }),
             ]
-            .spacing(12)
             .align_y(Alignment::Center);
 
             let row_bg = if is_sel { theme.background } else { theme.surface_alt };
@@ -393,12 +443,10 @@ impl RemindersOverlay {
         .padding(Padding { top: 0.0, right: header_inset, bottom: 0.0, left: header_inset });
 
         let when_row = row![when_input, sched_btn]
-            .spacing(10)
             .align_y(iced::alignment::Vertical::Center);
 
         let input_area = container(
-            column![task_input, when_row, quick_row]
-                .spacing(12)
+            column![task_input, when_row]
         )
         .width(Length::Fill)
         .padding(Padding { top: 0.0, right: body_inset, bottom: 0.0, left: body_inset });
@@ -418,9 +466,17 @@ impl RemindersOverlay {
             .border(theme.border, theme.border_width)
             .size(Length::Fixed(win_w), Length::Fixed(win_h));
 
+        let footer = container(
+            text("Tab: Next field  •  ↑↓/Home/End: Select  •  Enter/Ctrl+S: Toggle sound  •  Del: Delete  •  Esc: Clear/Dismiss")
+                .size(fs_sm * 0.9)
+                .color(theme.muted)
+                .align_x(Alignment::Center)
+        )
+        .width(Length::Fill)
+        .padding(Padding { top: 8.0, right: header_inset, bottom: 0.0, left: header_inset });
+
         let card_content = container(
-            column![header_row, input_area, list_container]
-                .spacing(16)
+            column![header_row, input_area, list_container, footer]
                 .padding(Padding { top: pad_top, right: 0.0, bottom: pad_bottom, left: 0.0 }),
         )
         .width(Length::Fixed(win_w))

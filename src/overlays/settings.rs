@@ -7,6 +7,20 @@ use crate::config::settings::{ContentRule, FriendProfile, ShellSettings};
 /// Debug log — gated on MBS_DEBUG or MBS_SETTINGS_DEBUG so release builds
 /// stay silent. Uses a persistent file handle (opened once) instead of
 /// opening/writing/closing per call.
+/// Minimum tooltip size per module id. Mirrors the per-row minimums that
+/// used to be inlined in `render_row` — shared with the drag handler so the
+/// mapping `x_norm → w` matches the slider range that existed before.
+fn min_size_for(id: &str) -> (u32, u32) {
+    match id {
+        "alarm" => (400, 280),
+        "calendar" => (380, 260),
+        "music" => (380, 280),
+        "unified" => (380, 260),
+        "net" => (380, 260),
+        _ => (280, 200),
+    }
+}
+
 fn mbs_dbg(msg: &str) {
     use std::io::Write;
     use std::sync::{Mutex, OnceLock};
@@ -139,9 +153,9 @@ pub enum SettingsMessage {
     AttachmentDownloadDirChanged(String),
     OverlayCut(u32),
     OverlayAngle(u32),
-    TooltipSizeWidth(String, u32),
-    TooltipSizeHeight(String, u32),
     ResetTooltipSize(String),
+    SizeDrag { id: String, x_norm: f32, y_norm: f32 },
+    SizeCommit { id: String },
     AlarmSoundChanged(String),
     AlarmSoundDurationChanged(u32),
     AlarmSoundVolumeChanged(u32),
@@ -220,6 +234,7 @@ impl SettingsOverlay {
                 | SettingsMessage::SelectGpuId(_)
                 | SettingsMessage::TrayIconSize(_)
                 | SettingsMessage::LauncherIconSize(_)
+                | SettingsMessage::SizeCommit { .. }
         );
         match message {
             SettingsMessage::TrayIconSize(v) => settings.tray_icon_size = v.clamp(12, 48),
@@ -239,34 +254,24 @@ impl SettingsOverlay {
                     let _ = std::process::Command::new(exe).arg("--restart-bar").spawn();
                 }
             },
-            SettingsMessage::TooltipSizeWidth(id, w) => {
-                let def = (settings.tooltip_width_px, settings.tooltip_height_px);
-                let new_w = w.clamp(200, 1200);
-                let (changed, wv, hv) = {
-                    let e = settings.tooltip_sizes.entry(id.clone()).or_insert(def);
-                    let ch = e.0 != new_w;
-                    if ch { e.0 = new_w; }
-                    (ch, e.0, e.1)
-                };
-                if changed {
-                    let _ = settings.save();
-                    self.spawn_tooltip_preview(&id, wv, hv, settings);
-                }
+            SettingsMessage::SizeDrag { id, x_norm, y_norm } => {
+                let (min_w, min_h) = min_size_for(&id);
+                let max_w: u32 = 1200;
+                let max_h: u32 = 1000;
+                // Map x_norm linearly into [0, max], then clamp to [min, max].
+                // This makes the fill's aspect ratio exactly w/h when the
+                // track has the aspect ratio of (max_w, max_h).
+                let new_w = ((x_norm * max_w as f32).round() as u32).clamp(min_w, max_w);
+                let new_h = ((y_norm * max_h as f32).round() as u32).clamp(min_h, max_h);
+                settings.tooltip_sizes.insert(id, (new_w, new_h));
             }
-            SettingsMessage::TooltipSizeHeight(id, h) => {
-                let def = (settings.tooltip_width_px, settings.tooltip_height_px);
-                let new_h = h.clamp(100, 1000);
-                let (changed, wv, hv) = {
-                    let e = settings.tooltip_sizes.entry(id.clone()).or_insert(def);
-                    let ch = e.1 != new_h;
-                    if ch { e.1 = new_h; }
-                    (ch, e.0, e.1)
-                };
-                if changed {
-                    let _ = settings.save();
-                    self.spawn_tooltip_preview(&id, wv, hv, settings);
-                }
-            },SettingsMessage::ResetTooltipSize(id) => { self.kill_preview(); settings.tooltip_sizes.remove(&id); }
+            SettingsMessage::SizeCommit { id } => {
+                // Release → save happens via should_persist below.
+                // Spawn the live preview here, one time, at the final size.
+                let (w, h) = settings.tooltip_size(&id);
+                self.spawn_tooltip_preview(&id, w, h, settings);
+            }
+            SettingsMessage::ResetTooltipSize(id) => { self.kill_preview(); settings.tooltip_sizes.remove(&id); }
             SettingsMessage::SelectTab(t) => {
                 self.kill_preview();
                 self.active_tab = t;
@@ -1597,10 +1602,7 @@ SettingsMessage::SaveSettings => {}
                         .padding([2, 6])
                         .style(move |_t, _s| button::Style { background: None, border: iced::Border::default(), ..Default::default() });
 
-                    let (min_w, min_h): (u32, u32) = match id_str {
-                        "alarm" => (400, 280), "calendar" => (380, 260), "music" => (380, 280),
-                        "unified" => (380, 260), "net" => (380, 260), _ => (280, 200),
-                    };
+                    let (min_w, min_h): (u32, u32) = min_size_for(id_str);
 
                     let size_controls = if id_str == "tray" {
                         row![
@@ -1615,13 +1617,23 @@ SettingsMessage::SaveSettings => {}
                             text(format!("{}s", settings.tray_timeout_sec)).size((scale_sz(0.6)) as f32).color(theme.text).width(Length::Fixed(25.0)),
                         ].spacing(4).align_y(Alignment::Center)
                     } else {
+                        let resizer = super::size_resizer::SizeResizer {
+                            id: id_str.to_string(),
+                            w: w_val,
+                            h: h_val,
+                            min_w,
+                            min_h,
+                            max_w: 1200,
+                            max_h: 1000,
+                            bg: theme.background,
+                            fg: theme.text,
+                            border: theme.border,
+                            muted: theme.muted,
+                            display_w: 180.0,
+                            display_h: 150.0,
+                        };
                         row![
-                            text("W:").size((scale_sz(0.6)) as f32).color(theme.muted),
-                            slider(min_w..=1200, w_val, move |v| SettingsMessage::TooltipSizeWidth(id_w.clone(), v)).width(Length::Fixed(100.0)),
-                            text(format!("{}", w_val)).size((scale_sz(0.6)) as f32).color(theme.text).width(Length::Fixed(35.0)),
-                            text("H:").size((scale_sz(0.6)) as f32).color(theme.muted),
-                            slider(min_h..=1000, h_val, move |v| SettingsMessage::TooltipSizeHeight(id_h.clone(), v)).width(Length::Fixed(100.0)),
-                            text(format!("{}", h_val)).size((scale_sz(0.6)) as f32).color(theme.text).width(Length::Fixed(35.0)),
+                            resizer.view(),
                             button(text(if has_override { "×" } else { "·" }).size((scale_sz(0.7)) as f32).color(if has_override { theme.danger } else { theme.muted }))
                                 .on_press(SettingsMessage::ResetTooltipSize(id_reset))
                                 .padding([2, 6])
@@ -1630,7 +1642,7 @@ SettingsMessage::SaveSettings => {}
                                     border: iced::Border { color: if has_override { theme.danger } else { theme.border }, width: 1.0, radius: 3.0.into() },
                                     ..Default::default()
                                 }),
-                        ].spacing(4).align_y(Alignment::Center)
+                        ].spacing(6).align_y(Alignment::Center)
                     };
 
                     let btn_text = if is_visible { "HIDE" } else { "SHOW" };

@@ -1,4 +1,3 @@
-pub mod alarm_tooltip;
 pub mod amogus;
 pub mod annotator;
 pub mod plate_watermark;
@@ -16,6 +15,7 @@ pub mod power;
 pub mod reminders;
 pub mod rng;
 pub mod settings;
+pub mod size_resizer;
 pub mod todo;
 pub mod unicode;
 pub mod websearch;

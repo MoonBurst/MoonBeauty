@@ -110,8 +110,14 @@ impl App {
                 },
                 |d| Message::Loaded(Data::Gpu(d)),
             )
-        } else {
+        } else if target == "ram" {
             Task::perform(SystemCollector::collect_ram(), |d| Message::Loaded(Data::Ram(d)))
+        } else {
+            eprintln!(
+                "[sys-tooltip] FATAL: unknown MBS_SYS_TARGET={:?}; expected cpu|gpu|ram",
+                target
+            );
+            std::process::exit(2);
         };
         (app, Task::batch(vec![
             task,
