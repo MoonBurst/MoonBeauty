@@ -277,18 +277,6 @@ pub fn cycle_focus_forward(&mut self) {
                 self.selected_idx = Some(self.entries.len() - 1);
                 self.scroll_y = ((self.entries.len() - 1) as f32 * 68.0 - 40.0).max(0.0);
             }
-            ReminderMessage::SelectFirst => {
-                if !self.task_text.is_empty() || !self.when_text.is_empty() { return; }
-                if self.entries.is_empty() { self.selected_idx = None; return; }
-                self.selected_idx = Some(0);
-                self.scroll_y = 0.0;
-            }
-            ReminderMessage::SelectLast => {
-                if !self.task_text.is_empty() || !self.when_text.is_empty() { return; }
-                if self.entries.is_empty() { self.selected_idx = None; return; }
-                self.selected_idx = Some(self.entries.len() - 1);
-                self.scroll_y = ((self.entries.len() - 1) as f32 * 68.0 - 40.0).max(0.0);
-            }
             ReminderMessage::ScrollUp => {
                 if !self.task_text.is_empty() || !self.when_text.is_empty() { return; }
                 if self.entries.is_empty() { self.selected_idx = None; return; }
@@ -457,7 +445,6 @@ pub fn cycle_focus_forward(&mut self) {
         .width(Length::Fill)
         .height(Length::Fill)
         .padding(Padding { top: 0.0, right: body_inset, bottom: 0.0, left: body_inset });
-
 
 
         let card_bg = ShapeBox::new()
