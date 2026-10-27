@@ -194,7 +194,7 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         let settings = &self.settings;
         let theme = &self.theme;
-        let content_h = match &self.data {
+        let _content_h = match &self.data {
             Some(Data::Cpu(c)) => (c.top_procs.len().min(10) as f32 * 24.0) + 100.0 + settings.bar_height as f32,
             Some(Data::Gpu(g)) => (g.top_procs.len().min(10) as f32 * 24.0) + 100.0 + settings.bar_height as f32,
             Some(Data::Ram(r)) => (r.top_procs.len().min(10) as f32 * 24.0) + 100.0 + settings.bar_height as f32,
@@ -220,7 +220,7 @@ impl App {
             background: theme.background, border_color: theme.text, border_width: theme.control_border_width,
             frame: self.opened.elapsed().as_millis() as u64,
         };
-        let content: Element<'_, Message> = self.build_content(&theme, &settings, anim.opacity);
+        let content: Element<'_, Message> = self.build_content(theme, settings, anim.opacity);
         let clipped = crate::overlays::tooltip_engine::clip_content(content, anim.w, anim.h, if self.grow_right { iced::alignment::Horizontal::Left } else { iced::alignment::Horizontal::Right });
         let stacked = iced::widget::container(Stack::new().push(bg.view()).push(clipped))
             .width(Length::Fixed(anim.w))

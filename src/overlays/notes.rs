@@ -89,10 +89,9 @@ impl NotesOverlay {
                 || n.ts.contains(&query))
             .collect();
         match self.sort_mode {
-            SortMode::Alphabetical => notes.sort_by(|a, b|
-                a.content.to_lowercase().cmp(&b.content.to_lowercase())),
+            SortMode::Alphabetical => notes.sort_by_key(|a| a.content.to_lowercase()),
             SortMode::Newest => notes.sort_by(|a, b| b.id.cmp(&a.id)),
-            SortMode::Oldest => notes.sort_by(|a, b| a.id.cmp(&b.id)),
+            SortMode::Oldest => notes.sort_by_key(|a| a.id),
         }
         notes.into_iter().map(|n| n.id).collect()
     }

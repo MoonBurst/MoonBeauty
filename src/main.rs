@@ -665,7 +665,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
 
     iced_layershell::application(
-        || MoonBeautyShellApp::new_app(),
+        MoonBeautyShellApp::new_app,
         || "moon-beauty-shell".to_string(),
         MoonBeautyShellApp::update,
         MoonBeautyShellApp::view,
@@ -832,8 +832,8 @@ impl MoonBeautyShellApp {
 
         let card_w = s.notif_card_width as i32;
         let card_h = s.notif_card_height as i32;
-        let margin_x = s.notif_margin_x.max(16) as i32;
-        let baseline = s.notif_baseline_y as i32;
+        let margin_x = s.notif_margin_x.max(16);
+        let baseline = s.notif_baseline_y;
         let surface_w =
             (s.notif_card_width as i32 + 2 * s.notif_margin_x + 100).max(200);
 
@@ -841,7 +841,7 @@ impl MoonBeautyShellApp {
         let pad_left = if is_right { 0 } else { margin_x };
         let pad_right = if is_right { margin_x } else { 0 };
 
-        let peek = (s.notif_stack_overlap as i32).abs().max(4);
+        let peek = s.notif_stack_overlap.abs().max(4);
         let drop_dist = s.notif_drop_distance_px as i32;
         let fixed_base = drop_dist + 4 * peek;
 
@@ -1853,7 +1853,7 @@ impl MoonBeautyShellApp {
                             }
                             // Right-click on alarm capsule: wipe active timers
                             if id == "alarm" {
-                                let _ = moon_beauty_shell::overlays::reminders::save_reminders(&[]);
+                                moon_beauty_shell::overlays::reminders::save_reminders(&[]);
                                 eprintln!("[topbar] cleared active timers");
                             }
                         }
@@ -1993,7 +1993,7 @@ impl MoonBeautyShellApp {
                             return Command::none();
                         }
                         let def = definition.to_string();
-                        eprintln!("[launcher] dict copy: {}...", &def.chars().take(40).collect::<String>());
+                        eprintln!("[launcher] dict copy: {}...", def.chars().take(40).collect::<String>());
                         let _ = std::process::Command::new("wl-copy").arg(&def).spawn();
                         let _ = std::process::Command::new("notify-send")
                             .args(["-a", "Dictionary", "Copied", &def])
@@ -3020,12 +3020,9 @@ impl MoonBeautyShellApp {
                 }
                 LockMessage::PollIpc => {
                     if let Some(effect) = self.lockscreen.drain_ipc() {
-                        match effect {
-                            LockMessage::AuthSuccess => {
-                                eprintln!("[lock] coordinator signaled success — exiting");
-                                std::process::exit(0);
-                            }
-                            _ => {}
+                        if let LockMessage::AuthSuccess = effect {
+                            eprintln!("[lock] coordinator signaled success — exiting");
+                            std::process::exit(0);
                         }
                     }
                     return Command::none();
@@ -3226,7 +3223,7 @@ impl MoonBeautyShellApp {
 
         let clip_sub = if matches!(self.active_overlay, Some(OverlayTarget::Clipboard)) {
             iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers: _, .. }) = event else { return None; };
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event else { return None; };
                 match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => Some(Message::Clipboard(ClipboardMessage::SelectPrev)),
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => Some(Message::Clipboard(ClipboardMessage::SelectNext)),
@@ -3248,7 +3245,7 @@ impl MoonBeautyShellApp {
 
         let _todo_sub = if matches!(self.active_overlay, Some(OverlayTarget::Todo)) {
             iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers: _, .. }) = event else {
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event else {
                     return None;
                 };
                 // Cycle categories with L/R, cycle filter with U/D.
@@ -3500,7 +3497,7 @@ impl MoonBeautyShellApp {
             })
         } else if self.annotator.text_editing.is_some() {
             iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers: _, .. }) = event else { return None; };
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event else { return None; };
                 match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
                     Some(Message::Annotator(AnnotatorMessage::CancelText))
@@ -3513,7 +3510,7 @@ impl MoonBeautyShellApp {
             iced::Subscription::none()
         } else {
             iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers: _, .. }) = event else { return None; };
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event else { return None; };
                 {
                 if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
                     Some(Message::DismissActiveOverlay)
@@ -3527,7 +3524,7 @@ impl MoonBeautyShellApp {
         // Enter → save when annotator overlay is active.
         let annotator_sub = if matches!(self.active_overlay, Some(OverlayTarget::Annotator)) && self.annotator.text_editing.is_none() {
             iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers: _, .. }) = event else { return None; };
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event else { return None; };
                 match key {
                 iced::keyboard::Key::Character(c) => match c.as_str() {
                     "r" | "R" => Some(Message::Annotator(AnnotatorMessage::SetTool(Tool::Rect))),
@@ -3547,7 +3544,7 @@ impl MoonBeautyShellApp {
 
         let enter_sub = if matches!(self.active_overlay, Some(OverlayTarget::Annotator)) && self.annotator.text_editing.is_none() {
             iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers: _, .. }) = event else { return None; };
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event else { return None; };
                 match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
                     Some(Message::Annotator(AnnotatorMessage::Save))
@@ -3692,14 +3689,14 @@ impl MoonBeautyShellApp {
 
         let bar_view = TopBar::view(&self.settings, &self.theme, &self.telemetry, self.tray_expanded, &self.tray_items, self.tray_anim_width).map(Message::TopBar);
 
-        let base_content: Element<'_, Message> = bar_view.into();
+        let base_content: Element<'_, Message> = bar_view;
 
 
 
         if let Some(overlay) = overlay_element {
             Stack::new().push(base_content).push(overlay).into()
         } else {
-            base_content.into()
+            base_content
         }
     }
 }

@@ -85,11 +85,10 @@ fn widths_map() -> &'static Mutex<std::collections::HashMap<String, f32>> {
 pub fn record_width(id: &str, w: f32) {
     if let Ok(mut m) = widths_map().lock() {
         let old = m.get(id).copied();
-        if old != Some(w) {
-            if std::env::var_os("MBS_DEBUG").is_some() {
+        if old != Some(w)
+            && std::env::var_os("MBS_DEBUG").is_some() {
                 eprintln!("[capsule-width] {} = {:.1}px", id, w);
             }
-        }
         m.insert(id.to_string(), w);
     }
 }
@@ -547,11 +546,11 @@ impl CapsuleRenderer {
                         .into()
                 } else {
                     let initial = item.title.chars().next().unwrap_or('?').to_uppercase().to_string();
-                    text(initial).size((icon_size * 0.7) as f32).color(theme.text).into()
+                    text(initial).size(((icon_size * 0.7))).color(theme.text).into()
                 }
             } else {
                 let initial = item.title.chars().next().unwrap_or('?').to_uppercase().to_string();
-                text(initial).size((icon_size * 0.7) as f32).color(theme.text).into()
+                text(initial).size(((icon_size * 0.7))).color(theme.text).into()
             };
 
             let activate_item = item.clone();

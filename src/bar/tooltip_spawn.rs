@@ -95,8 +95,8 @@ pub fn compute_height(
             let (ny, nm) = if now.month() == 12 { (now.year() + 1, 1) } else { (now.year(), now.month() + 1) };
             let next = chrono::NaiveDate::from_ymd_opt(ny, nm, 1).unwrap_or_default();
             let days = next.signed_duration_since(first).num_days() as u32;
-            let offset = first.weekday().num_days_from_sunday() as u32;
-            let weeks = (offset + days + 6) / 7;
+            let offset = first.weekday().num_days_from_sunday();
+            let weeks = (offset + days).div_ceil(7);
             40 + 36 + 24 + weeks * 50 + 20
         }
         "cpu" => telemetry.cpu.top_procs.len().min(10) as u32 * 24 + 100,

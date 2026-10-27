@@ -265,10 +265,10 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     let half_cap = (cap_w / 2.0) as i32;
     
     // Symmetric alignment: +32 on the left, -32 on the right.
-    let adjust: i32 = s.slant_width as i32 + 20; // slant + padding
+    let _adjust: i32 = s.slant_width as i32 + 20; // slant + padding
 
     // Alignment offset for the slanted corner + padding.
-    let adjust: i32 = s.slant_width as i32 + 20; // slant + padding
+    let _adjust: i32 = s.slant_width as i32 + 20; // slant + padding
 
     let adjust_left = s.tooltip_offset_left;
     let adjust_right = s.tooltip_offset_right;
@@ -382,7 +382,7 @@ pub fn view_popup_content<'a>(
 ) -> iced::Element<'a, ()> {
     let line_count = weather.as_ref().map(|w| w.tooltip_lines.len().min(15)).unwrap_or(1);
     let target_h = (line_count as f32 * 24.0 + 40.0).max(100.0);
-    let content_h = target_h + settings.bar_height as f32;
+    let _content_h = target_h + settings.bar_height as f32;
     
     let effective_h = h as f32;
     let effective_target_h = (effective_h - settings.bar_height as f32).max(1.0);

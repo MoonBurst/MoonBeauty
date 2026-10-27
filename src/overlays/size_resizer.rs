@@ -80,14 +80,13 @@ impl canvas::Program<SettingsMessage> for SizeResizer {
                     }));
                 }
             }
-            iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                if state.dragging {
+            iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                if state.dragging => {
                     state.dragging = false;
                     return Some(iced::widget::Action::publish(SettingsMessage::SizeCommit {
                         id: self.id.clone(),
                     }));
                 }
-            }
             _ => {}
         }
         None
@@ -140,7 +139,7 @@ impl canvas::Program<SettingsMessage> for SizeResizer {
             color: self.fg,
             size: iced::Pixels(13.0),
             align_x: iced::alignment::Horizontal::Center.into(),
-            align_y: iced::alignment::Vertical::Center.into(),
+            align_y: iced::alignment::Vertical::Center,
             ..Text::default()
         });
 
@@ -152,7 +151,7 @@ impl canvas::Program<SettingsMessage> for SizeResizer {
             color: Color { a: 0.55, ..self.muted },
             size: iced::Pixels(9.0),
             align_x: iced::alignment::Horizontal::Right.into(),
-            align_y: iced::alignment::Vertical::Bottom.into(),
+            align_y: iced::alignment::Vertical::Bottom,
             ..Text::default()
         });
 

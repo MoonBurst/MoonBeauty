@@ -546,7 +546,7 @@ impl LockCoordinator {
             eprintln!(
                 "[lock-coord] auth attempt: len={} sha256_prefix={}",
                 clean.chars().count(),
-                sha256_prefix(&clean),
+                sha256_prefix(clean),
             );
         } else {
             eprintln!("[lock-coord] auth attempt: len={}", clean.chars().count());

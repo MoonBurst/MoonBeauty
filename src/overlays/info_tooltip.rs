@@ -195,10 +195,10 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         let settings = &self.settings;
         let theme = &self.theme;
-        let content_h = match &self.data {
+        let _content_h = match &self.data {
             Some(InfoData::Calendar(c)) => {
                 let total_cells = c.first_day_offset as u32 + c.days_in_month;
-                let weeks = (total_cells + 6) / 7;
+                let weeks = total_cells.div_ceil(7);
                 40.0 + 36.0 + 24.0 + (weeks as f32) * 50.0 + 20.0 + settings.bar_height as f32
             }
             Some(InfoData::Music(_)) => 400.0 + settings.bar_height as f32,
@@ -278,7 +278,7 @@ impl App {
         } else {
             iced::alignment::Horizontal::Right
         };
-        let content: Element<'_, Message> = self.build_content(&theme, &settings, anim.opacity, effective_h);
+        let content: Element<'_, Message> = self.build_content(theme, settings, anim.opacity, effective_h);
         let clipped = crate::overlays::tooltip_engine::clip_content(content, anim.w, anim.h, align);
         let stacked = iced::widget::container(Stack::new().push(bg_view).push(clipped))
             .width(Length::Fixed(anim.w))
@@ -334,8 +334,8 @@ impl App {
                 InfoData::Calendar(c) => {
                     // Compute exact content height from weeks
                     let total_cells = c.first_day_offset as u32 + c.days_in_month;
-                    let weeks = (total_cells + 6) / 7;
-                    let content_h = 40.0 + 36.0 + 24.0 + (weeks as f32) * 50.0 + 20.0;
+                    let weeks = total_cells.div_ceil(7);
+                    let _content_h = 40.0 + 36.0 + 24.0 + (weeks as f32) * 50.0 + 20.0;
 
 
                     let header_h = fs as f32 + 16.0;
@@ -462,7 +462,7 @@ impl App {
                     let seek_bar = row![
                         text(pos_str).size((fs - 2) as f32).color(text_col),
                         container(
-                            iced::widget::slider(0.0..=(len.max(1.0) as f64), pos, Message::MusicSeek)
+                            iced::widget::slider(0.0..=len.max(1.0), pos, Message::MusicSeek)
                                 .style(move |_t, _s| iced::widget::slider::Style {
                                     rail: iced::widget::slider::Rail {
                                         backgrounds: (iced::Background::Color(slider_fg), iced::Background::Color(slider_bg)),
@@ -1134,7 +1134,7 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     let half_cap = (cap_w / 2.0) as i32;
     
     // Alignment offset for the slanted corner + padding.
-    let adjust: i32 = s.slant_width as i32 + 20; // slant + padding
+    let _adjust: i32 = s.slant_width as i32 + 20; // slant + padding
 
     let adjust_left = s.tooltip_offset_left;
     let adjust_right = s.tooltip_offset_right;

@@ -1576,11 +1576,11 @@ SettingsMessage::SaveSettings => {}
                     ].spacing(3).width(Length::FillPortion(1)),
                     column![
                         row![text("Tooltip Left Offset").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tooltip_offset_left)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
-                        slider(-50..=100, settings.tooltip_offset_left, |v| SettingsMessage::TooltipOffsetLeft(v)).width(Length::Fill),
+                        slider(-50..=100, settings.tooltip_offset_left, SettingsMessage::TooltipOffsetLeft).width(Length::Fill),
                     ].spacing(3).width(Length::FillPortion(1)),
                     column![
                         row![text("Tooltip Right Offset").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tooltip_offset_right)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
-                        slider(-50..=100, settings.tooltip_offset_right, |v| SettingsMessage::TooltipOffsetRight(v)).width(Length::Fill),
+                        slider(-50..=100, settings.tooltip_offset_right, SettingsMessage::TooltipOffsetRight).width(Length::Fill),
                     ].spacing(3).width(Length::FillPortion(1)),
                         column![
                                     row![text("Tooltip Text Size").size((scale_sz(0.8)) as f32).bold().color(theme.text), row![].width(Length::Fill), text(format!("{}px", settings.tooltip_font_size)).size((scale_sz(0.8)) as f32).bold().color(theme.text)],
@@ -1594,8 +1594,8 @@ SettingsMessage::SaveSettings => {}
                 let render_row = |id_str: &str, is_visible: bool| -> Element<'a, SettingsMessage> {
                     let id = id_str.to_string();
                     let (w_val, h_val) = settings.tooltip_size(id_str);
-                    let id_w = id_str.to_string();
-                    let id_h = id_str.to_string();
+                    let _id_w = id_str.to_string();
+                    let _id_h = id_str.to_string();
                     let id_reset = id_str.to_string();
                     let has_override = settings.tooltip_sizes.contains_key(id_str);
 
@@ -1613,13 +1613,13 @@ SettingsMessage::SaveSettings => {}
                     let size_controls = if id_str == "tray" {
                         row![
                             text("W:").size((scale_sz(0.6)) as f32).color(theme.muted),
-                            slider(30..=400, settings.tray_width, move |v| SettingsMessage::TrayWidth(v)).width(Length::Fixed(80.0)),
+                            slider(30..=400, settings.tray_width, SettingsMessage::TrayWidth).width(Length::Fixed(80.0)),
                             text(format!("{}", settings.tray_width)).size((scale_sz(0.6)) as f32).color(theme.text).width(Length::Fixed(25.0)),
                             text("I:").size((scale_sz(0.6)) as f32).color(theme.muted),
-                            slider(12..=48, settings.tray_icon_size, move |v| SettingsMessage::TrayIconSize(v)).width(Length::Fixed(80.0)),
+                            slider(12..=48, settings.tray_icon_size, SettingsMessage::TrayIconSize).width(Length::Fixed(80.0)),
                             text(format!("{}px", settings.tray_icon_size)).size((scale_sz(0.6)) as f32).color(theme.text).width(Length::Fixed(25.0)),
                             text("T:").size((scale_sz(0.6)) as f32).color(theme.muted),
-                            slider(0..=30, settings.tray_timeout_sec, move |v| SettingsMessage::TrayTimeout(v)).width(Length::Fixed(80.0)),
+                            slider(0..=30, settings.tray_timeout_sec, SettingsMessage::TrayTimeout).width(Length::Fixed(80.0)),
                             text(format!("{}s", settings.tray_timeout_sec)).size((scale_sz(0.6)) as f32).color(theme.text).width(Length::Fixed(25.0)),
                         ].spacing(4).align_y(Alignment::Center)
                     } else {

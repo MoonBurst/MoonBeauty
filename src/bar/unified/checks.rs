@@ -43,14 +43,14 @@ async fn check_item(check: &UnifiedCheck) -> (bool, String) {
         UnifiedCheck::SystemdActive { unit } => match systemd_state(unit).await {
             Ok(state) => {
                 let ok = state == "active";
-                (ok, if ok { String::new() } else { format!("{}", state) })
+                (ok, if ok { String::new() } else { state.to_string() })
             }
             Err(e) => (false, truncate(&e, 40)),
         },
         UnifiedCheck::SystemdInactive { unit } => match systemd_state(unit).await {
             Ok(state) => {
                 let ok = state == "inactive" || state == "failed";
-                (ok, if ok { String::new() } else { format!("{}", state) })
+                (ok, if ok { String::new() } else { state.to_string() })
             }
             Err(e) => (false, truncate(&e, 40)),
         },

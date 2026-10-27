@@ -17,22 +17,11 @@
 //!   - split app.rs into app/{mod,update,view,...} submodules (10g)
 
 
-use iced::widget::{container, Stack};
-use iced::{Element, Length, Padding, Task as Command};
-use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
-use iced_layershell::settings::{LayerShellSettings, Settings};
 use moon_beauty_shell::libraries::backend::*;
-use moon_beauty_shell::bar::{CapsuleAction, TopBar, TopBarMessage};
+use moon_beauty_shell::bar::TopBarMessage;
 use moon_beauty_shell::libraries::config::{ShellSettings, ShellTheme};
-use moon_beauty_shell::libraries::ipc::{send_client_command, IpcCommand, OverlayTarget};
+use moon_beauty_shell::libraries::ipc::{IpcCommand, OverlayTarget};
 use moon_beauty_shell::overlays::*;
-use moon_beauty_shell::bar::geometry::{
-    capsule_actual_width, capsule_center_x,
-};
-use moon_beauty_shell::bar::outputs::{get_screen_width_for, resolve_primary_output};
-use moon_beauty_shell::libraries::process::resolve_exe;
-use moon_beauty_shell::overlays::screenshot::annotator::Tool;
-use moon_beauty_shell::overlays::screenshot;
 use moon_beauty_shell::bar::unified::UnifiedTelemetry;
 
 #[derive(Debug, Clone)]

@@ -290,7 +290,7 @@ impl AppLauncher {
             return None;
         };
 
-        let word = word_part.trim().split_whitespace().next().unwrap_or("");
+        let word = word_part.split_whitespace().next().unwrap_or("");
         if word.len() < 2 {
             return Some(vec![AppEntry {
                 name: "Dictionary — type a word after 'def '".to_string(),
@@ -334,7 +334,7 @@ impl AppLauncher {
             .or_else(|| lower.strip_prefix("define "))
             .or_else(|| lower.strip_prefix("dict "))
             .or_else(|| lower.strip_prefix("dictionary "))?;
-        let word = word_part.trim().split_whitespace().next().unwrap_or("");
+        let word = word_part.split_whitespace().next().unwrap_or("");
         if word.len() < 2 { return None; }
         if self.dict_cache.contains_key(word) { return None; }
         if self.dict_pending.as_deref() == Some(word) { return None; }
@@ -344,7 +344,7 @@ impl AppLauncher {
     /// Cached pass-store entries — reads the filesystem once per launcher session.
     fn get_pass_keys() -> &'static Vec<String> {
         static CACHE: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-        CACHE.get_or_init(|| PassOverlay::scan_passwords())
+        CACHE.get_or_init(PassOverlay::scan_passwords)
     }
 
     /// If the query starts with a pass-prefix keyword (`pass`, `passw`, `password`,
@@ -378,10 +378,9 @@ impl AppLauncher {
             rest.trim()
         } else if let Some(rest) = q.strip_prefix("secret ") {
             rest.trim()
-        } else if let Some(rest) = q.strip_prefix("secrets ") {
-            rest.trim()
         } else {
-            return None;
+            let rest = q.strip_prefix("secrets ")?;
+            rest.trim()
         };
 
         let keys = Self::get_pass_keys();

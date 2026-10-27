@@ -57,7 +57,7 @@ impl App {
 
     fn subscription(&self) -> iced::Subscription<Message> {
         iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers: _, .. }) = event else { return None; };
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event else { return None; };
                 {
             if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) { Some(Message::Dismiss) } else { None }
         }

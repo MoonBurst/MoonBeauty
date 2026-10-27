@@ -175,7 +175,7 @@ impl FragmentApp {
         iced::Subscription::batch([
             iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::Tick),
             iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers: _, .. }) = event else { return None; };
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event else { return None; };
                 match key {
                 iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
                     Some(Message::Escape)
@@ -329,8 +329,7 @@ pub fn run(
         layer: Layer::Overlay,
         keyboard_interactivity: KeyboardInteractivity::Exclusive,
         events_transparent: false,
-        start_mode: Some(monitor)
-                .map(iced_layershell::settings::StartMode::TargetScreen)
+        start_mode: Some(iced_layershell::settings::StartMode::TargetScreen(monitor))
                 .unwrap_or(iced_layershell::settings::StartMode::Active),
         ..Default::default()
     };

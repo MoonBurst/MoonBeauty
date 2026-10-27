@@ -242,7 +242,7 @@ pub fn detect_refresh_hz() -> u32 {
     *CACHED.get_or_init(|| {
         if let Ok(v) = std::env::var("MBS_REFRESH_HZ") {
             if let Ok(hz) = v.parse::<u32>() {
-                if hz >= 30 && hz <= 480 {
+                if (30..=480).contains(&hz) {
                     eprintln!("[refresh-detect] MBS_REFRESH_HZ override = {}Hz", hz);
                     return hz;
                 }
@@ -261,7 +261,7 @@ pub fn detect_refresh_hz() -> u32 {
                                     .and_then(|r| r.as_u64())
                                 {
                                     let hz = ((hz as f64) / 1000.0).round() as u32;
-                                    if hz >= 30 && hz <= 480 {
+                                    if (30..=480).contains(&hz) {
                                         eprintln!("[refresh-detect] focused monitor = {}Hz", hz);
                                         return hz;
                                     }
@@ -274,7 +274,7 @@ pub fn detect_refresh_hz() -> u32 {
                                 .and_then(|r| r.as_u64())
                             {
                                 let hz = ((hz as f64) / 1000.0).round() as u32;
-                                if hz >= 30 && hz <= 480 {
+                                if (30..=480).contains(&hz) {
                                     eprintln!("[refresh-detect] first monitor = {}Hz", hz);
                                     return hz;
                                 }

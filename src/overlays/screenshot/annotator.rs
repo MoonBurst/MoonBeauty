@@ -795,7 +795,7 @@ fn draw_ann<F: Fn(Point) -> Point>(frame: &mut Frame, a: &Annotation, to_disp: &
                 color: Color::WHITE,
                 size: iced::Pixels(radius * 1.2),
                 align_x: iced::alignment::Horizontal::Center.into(),
-                align_y: iced::alignment::Vertical::Center.into(),
+                align_y: iced::alignment::Vertical::Center,
                 ..canvas::Text::default()
             });
         }        Tool::Ellipse => {

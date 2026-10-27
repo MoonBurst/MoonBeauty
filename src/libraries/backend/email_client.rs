@@ -176,10 +176,10 @@ pub fn save_config(cfg: &EmailConfig, use_sops: bool) -> Result<(), String> {
                     }
                 }
             }
-            return Ok(());
+            Ok(())
         } else {
             let _ = std::fs::remove_file(&tmp);
-            return Err(format!("SOPS error: {}", String::from_utf8_lossy(&out.stderr)));
+            Err(format!("SOPS error: {}", String::from_utf8_lossy(&out.stderr)))
         }
     } else {
         let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&path).map_err(|e| e.to_string())?;
@@ -302,7 +302,7 @@ pub async fn fetch_from_network(folder: &str) -> Result<Vec<NativeEnvelope>, Str
         let tls = native_tls::TlsConnector::builder().build().map_err(|e| e.to_string())?;
         let client = imap::connect((cfg.imap_host.as_str(), cfg.imap_port), cfg.imap_host.as_str(), &tls).map_err(|e| e.to_string())?;
         let mut session = client.login(&cfg.email, &pass).map_err(|e| e.0.to_string())?;
-        session.select(&map_gmail_folder(&folder)).map_err(|e| e.to_string())?;
+        session.select(map_gmail_folder(&folder)).map_err(|e| e.to_string())?;
         let fetches = session.uid_fetch("1:*", "(FLAGS BODY.PEEK[HEADER.FIELDS (SUBJECT FROM DATE)])").map_err(|e| e.to_string())?;
             
         let mut envs = Vec::new();
@@ -343,7 +343,7 @@ async fn fetch_raw_message(id: &str, folder: &str) -> Result<Vec<u8>, String> {
         let tls = native_tls::TlsConnector::builder().build().unwrap();
         let client = imap::connect((cfg.imap_host.as_str(), cfg.imap_port), cfg.imap_host.as_str(), &tls).map_err(|e| e.to_string())?;
         let mut session = client.login(&cfg.email, &pass).map_err(|e| e.0.to_string())?;
-        session.select(&map_gmail_folder(&folder)).map_err(|e| e.to_string())?;
+        session.select(map_gmail_folder(&folder)).map_err(|e| e.to_string())?;
         let fetches = session.uid_fetch(&id, "(BODY.PEEK[])").map_err(|e| e.to_string())?;
         if let Some(fetch) = fetches.first() {
             if let Some(body) = fetch.body() {
@@ -606,7 +606,7 @@ pub async fn toggle_star(id: &str, folder: &str, star: bool) -> Result<(), Strin
         let tls = native_tls::TlsConnector::builder().build().unwrap();
         let client = imap::connect((cfg.imap_host.as_str(), cfg.imap_port), cfg.imap_host.as_str(), &tls).unwrap();
         let mut session = client.login(&cfg.email, &pass).map_err(|e| e.0.to_string())?;
-        session.select(&map_gmail_folder(&folder)).map_err(|e| e.to_string())?;
+        session.select(map_gmail_folder(&folder)).map_err(|e| e.to_string())?;
         let op = if star { "+FLAGS (\\Flagged)" } else { "-FLAGS (\\Flagged)" };
         session.uid_store(&id, op).map_err(|e| e.to_string())?;
         let _ = session.logout();
@@ -655,7 +655,7 @@ pub async fn delete_message(id: &str, folder: &str) -> Result<(), String> {
         let tls = native_tls::TlsConnector::builder().build().unwrap();
         let client = imap::connect((cfg.imap_host.as_str(), cfg.imap_port), cfg.imap_host.as_str(), &tls).unwrap();
         let mut session = client.login(&cfg.email, &pass).map_err(|e| e.0.to_string())?;
-        session.select(&map_gmail_folder(&folder)).map_err(|e| e.to_string())?;
+        session.select(map_gmail_folder(&folder)).map_err(|e| e.to_string())?;
         session.uid_store(&id, "+FLAGS (\\Deleted)").map_err(|e| e.to_string())?;
         session.expunge().map_err(|e| e.to_string())?;
         let _ = session.logout();

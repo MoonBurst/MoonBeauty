@@ -313,7 +313,7 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
 fn save_pixmap(id: &str, w: u32, h: u32, data: &[u8]) -> Option<String> {
     if w == 0 || h == 0 || data.len() != (w as usize * h as usize * 4) { return None; }
     let mut rgba = Vec::with_capacity(data.len());
-    for chunk in data.chunks_exact(4) {
+    for chunk in data.as_chunks::<4>().0 {
         rgba.push(chunk[1]); rgba.push(chunk[2]); rgba.push(chunk[3]); rgba.push(chunk[0]);
     }
     let img: image::RgbaImage = image::ImageBuffer::from_raw(w, h, rgba)?;

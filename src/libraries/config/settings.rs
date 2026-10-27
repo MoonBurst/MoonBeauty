@@ -533,7 +533,7 @@ impl ShellSettings {
 
     pub fn tooltip_size(&self, id: &str) -> (u32, u32) {
         self.tooltip_sizes.get(id).copied()
-            .unwrap_or_else(|| match id {
+            .unwrap_or(match id {
                 "alarm" => (500, 400),
                 "clock" => (540, 320),
                 _ => (self.tooltip_width_px, self.tooltip_height_px),
