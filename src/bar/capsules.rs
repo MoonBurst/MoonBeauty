@@ -551,7 +551,7 @@ impl CapsuleRenderer {
                         .unwrap_or('?')
                         .to_uppercase()
                         .to_string();
-                    text(initial).size(((icon_size * 0.7))).color(theme.text).into()
+                    text(initial).size(icon_size * 0.7).color(theme.text).into()
                 }
             } else {
                 let initial = item.title.chars().next()
@@ -560,7 +560,7 @@ impl CapsuleRenderer {
                     .unwrap_or('?')
                     .to_uppercase()
                     .to_string();
-                text(initial).size(((icon_size * 0.7))).color(theme.text).into()
+                text(initial).size(icon_size * 0.7).color(theme.text).into()
             };
 
             let activate_item = item.clone();

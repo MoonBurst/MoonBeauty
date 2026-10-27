@@ -11,6 +11,7 @@ use crate::libraries::style::TextExt;
 #[derive(Debug, Clone)]
 pub enum LockMessage {
     KeyPress(iced::keyboard::Key),
+    Tick,
     PollIpc,
     AuthFailed,
     AuthSuccess,
@@ -28,6 +29,7 @@ pub struct LockscreenOverlay {
     ipc_tx: Option<mpsc::Sender<LockIpc>>,
     ipc_rx: Option<mpsc::Receiver<LockIpc>>,
     pending_sends: u32,
+    last_tick: std::time::Instant,
 }
 
 impl Default for LockscreenOverlay {
@@ -64,6 +66,7 @@ impl LockscreenOverlay {
             ipc_tx,
             ipc_rx,
             pending_sends: 0,
+            last_tick: std::time::Instant::now(),
         }
     }
 

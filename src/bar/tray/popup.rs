@@ -2,7 +2,6 @@ use iced::widget::{button, column, container, row, text, MouseArea, Stack};
 use iced::{Alignment, Element, Length, Task, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::libraries::config::theme::ShellTheme;

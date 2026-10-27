@@ -329,8 +329,7 @@ pub fn run(
         layer: Layer::Overlay,
         keyboard_interactivity: KeyboardInteractivity::Exclusive,
         events_transparent: false,
-        start_mode: Some(iced_layershell::settings::StartMode::TargetScreen(monitor))
-                .unwrap_or(iced_layershell::settings::StartMode::Active),
+        start_mode: iced_layershell::settings::StartMode::TargetScreen(monitor),
         ..Default::default()
     };
 

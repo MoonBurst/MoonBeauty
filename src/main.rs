@@ -1885,7 +1885,7 @@ impl MoonBeautyShellApp {
                             if !self.tray_expanded {
                                 // OPENING
                                 self.tray_timeout_gen = self.tray_timeout_gen.wrapping_add(1);
-                                let my_gen = self.tray_timeout_gen;
+                                let _my_gen = self.tray_timeout_gen;
                                 
                                 self.tray_opened_at = std::time::Instant::now();
                                 self.tray_expanded = true;
@@ -3538,6 +3538,12 @@ impl MoonBeautyShellApp {
             iced::Subscription::none()
         };
 
+        let lock_jump_sub = if self.is_standalone && matches!(self.active_overlay, Some(OverlayTarget::Lockscreen)) {
+            iced::time::every(std::time::Duration::from_millis(500)).map(|_| Message::Lock(LockMessage::Tick))
+        } else {
+            iced::Subscription::none()
+        };
+
         let lock_key_sub = if matches!(self.active_overlay, Some(OverlayTarget::Lockscreen)) {
             iced::event::listen_with(handle_lock_keypress)
         } else {
@@ -3653,6 +3659,21 @@ impl MoonBeautyShellApp {
         let elapsed = self.tray_anim_started_at.elapsed().as_millis() as u64;
         let anim_active = elapsed < self.tray_anim_duration_ms
             && (self.tray_anim_width - self.tray_target_width).abs() > 0.01;
+        // Standalone window-close listener: when Sway detaches the surface
+        // on a TTY switch, it sends a Closed event. By exiting, we let the
+        // bar's lockscreen_watchdog see a dead child and respawn it.
+        let close_sub = if self.is_standalone {
+            iced::event::listen_with(|event, _, _| {
+                if let iced::Event::Window(iced::window::Event::Closed) = event {
+                    Some(Message::CloseShell)
+                } else {
+                    None
+                }
+            })
+        } else {
+            iced::Subscription::none()
+        };
+
         let anim_sub = if anim_active {
             iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::TrayAnimTick)
         } else {
@@ -3692,7 +3713,7 @@ impl MoonBeautyShellApp {
         iced::Subscription::batch(vec![clock_sub, toast_sub, hw_sub, email_sync_sub, weather_sub, anim_sub, esc_sub,
             enter_sub, ipc_sub, notif_sub, resize_sub, clip_sub, annotator_sub, text_typing_sub, email_sub,
             launcher_sub, history_sub, todo_sub, notes_sub, rng_sub, reminders_sub, reminders_tick_sub, unicode_sub,
-            lock_key_sub, lock_ipc_sub, lockscreen_watchdog_sub, tray_watchdog_sub, tray_fetch_sub])
+            lock_jump_sub, lock_key_sub, lock_ipc_sub, lockscreen_watchdog_sub, tray_watchdog_sub, tray_fetch_sub, close_sub])
     }
 
     pub fn view(&self) -> Element<'_, Message> {

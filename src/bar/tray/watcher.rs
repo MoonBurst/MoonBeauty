@@ -99,8 +99,7 @@ pub fn spawn() {
 
 // ── SNI client side: enumeration, icons, activation ────────────────
 
-use std::path::PathBuf;
-use sha2::{Digest, Sha256};
+use sha2::Digest;
 
 #[derive(Debug, Clone)]
 pub struct TrayItem {
@@ -414,22 +413,38 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
     // fails to render silently). Re-encoding through ImageMagick strips
     // malformed chunks (broken iCCP, etc.) and guarantees a clean PNG
     // iced can render.
+    // Try to re-encode using the `image` crate first (fast, no subprocess).
+    // The `image` crate is lenient with malformed chunks (like Steam's
+    // broken iCCP) and saving it writes a clean PNG.
+    if let Ok(bytes) = std::fs::read(&source) {
+        if let Ok(img) = image::load_from_memory(&bytes) {
+            // Overwrite base_dest with a clean PNG
+            let _ = std::fs::remove_file(&base_dest);
+            if img.save(&base_dest).is_ok() {
+                return hash_and_finalize(&base_dest);
+            }
+        }
+    }
+
+    eprintln!("[tray-icon] {} `image` crate failed to decode; falling back to magick", icon_name);
+
     if let Some(bin) = magick {
-        let status = std::process::Command::new(bin)
+        let _ = std::fs::remove_file(&base_dest);
+        let output = std::process::Command::new(bin)
             .args([
                 source.to_str().unwrap_or(""),
-                "-strip", // strip all metadata/chunks
+                "-strip",
                 base_dest.to_str().unwrap_or(""),
             ])
-            .status();
-        match status {
-            Ok(s) if s.success() => {
+            .output();
+        match output {
+            Ok(out) if out.status.success() => {
                 if base_dest.exists() && std::fs::metadata(&base_dest).map(|m| m.len() > 0).unwrap_or(false) {
                     return hash_and_finalize(&base_dest);
                 }
-                eprintln!("[tray-icon] {} magick produced empty output", icon_name);
+                eprintln!("[tray-icon] {} magick produced empty output. stderr: {}", icon_name, String::from_utf8_lossy(&out.stderr).trim());
             }
-            Ok(s) => eprintln!("[tray-icon] {} magick exited {:?}", icon_name, s.code()),
+            Ok(out) => eprintln!("[tray-icon] {} magick exited {:?}. stderr: {}", icon_name, out.status.code(), String::from_utf8_lossy(&out.stderr).trim()),
             Err(e) => eprintln!("[tray-icon] {} magick spawn: {}", icon_name, e),
         }
     } else {

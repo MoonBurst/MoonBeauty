@@ -264,8 +264,8 @@ fn history_row_height(toast: &NotificationToast, row_w: f32, fs: f32, fs_sm: f32
     let chars_per_line = (text_area_w / char_w).max(20.0) as usize;
     let body_len = toast.body.chars().count();
     let body_lines = body_len.div_ceil(chars_per_line).max(1);
-    let header_h = (fs * 1.2);
-    let line_h = (fs_sm * 1.2);
+    let header_h = fs * 1.2;
+    let line_h = fs_sm * 1.2;
     let text_h = HISTORY_ROW_PAD_Y + header_h + 4.0 + (body_lines as f32) * line_h + HISTORY_ROW_PAD_Y;
     // Row must fit the icon hexagon + padding, otherwise the hexagon
     // extends past the row background and looks like it's "breaking out".
