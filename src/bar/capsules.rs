@@ -210,14 +210,21 @@ impl CapsuleRenderer {
             }
             "notify" | "notifications" => {
                 let paused = crate::overlays::notifications::dnd_active();
+                // Held covers DND-held notifications (in the held file).
+                // Active covers currently-visible toasts + queued toasts
+                // (published by the notif-surface process). The capsule
+                // shows the sum, so unpausing doesn't drop to 0 while
+                // notifications are still on screen.
                 let held_count = crate::overlays::notifications::held_notifs_count();
+                let active_count = crate::overlays::notifications::read_active_count();
+                let total_count = held_count + active_count;
                 let base08_col = hex_to_color(&theme.palette.base08);
                 let text_col = if paused { base08_col } else { theme.text };
                 let border_col = if paused { base08_col } else { theme.border };
 
                 let elem = label::<Message>(&[
                     ("Notifications:".to_string(), text_col),
-                    (format!(" {}", held_count), text_col),
+                    (format!(" {}", total_count), text_col),
                 ], theme.font_size_normal);
                 (elem, CapsuleAction::ToggleNotificationDnd, border_col)
             }
@@ -270,11 +277,22 @@ impl CapsuleRenderer {
                 let cpu_warn = telemetry.cpu.temp_c >= theme.cpu_temp_warn || u32::from(telemetry.cpu.usage_pct) >= theme.cpu_usage_warn;
                 let val_col = if cpu_danger { theme.danger } else if cpu_warn { theme.warning } else { theme.text };
                 let border_col = if val_col == theme.text { theme.border } else { val_col };
-                let elem = label::<Message>(&[
+                // Zero-pad usage to 3 digits so the capsule width is stable
+                // across 9% → 10% → 100%. Padding zeros are drawn in the
+                // capsule background color (invisible) but still count toward
+                // `est_text_width`, which is what drives `bounding_w`.
+                let trimmed = telemetry.cpu.usage_pct.to_string();
+                let leading_zero_count = 3usize.saturating_sub(trimmed.len());
+                let zero_pad: String = "0".repeat(leading_zero_count);
+                let mut segments: Vec<(String, Color)> = vec![
                     ("CPU:".to_string(), theme.success),
                     (" ".to_string(), theme.success),
-                    (format!("{}% {}°C", telemetry.cpu.usage_pct, telemetry.cpu.temp_c), val_col),
-                ], theme.font_size_normal);
+                ];
+                if !zero_pad.is_empty() {
+                    segments.push((zero_pad, theme.background));
+                }
+                segments.push((format!("{}% {}°C", trimmed, telemetry.cpu.temp_c), val_col));
+                let elem = label::<Message>(&segments, theme.font_size_normal);
                 (elem, CapsuleAction::OpenOverlay("cpu".into()), border_col)
             }
             "gpu" => {
@@ -298,17 +316,33 @@ impl CapsuleRenderer {
                     theme.text
                 };
 
-                let elem = label::<Message>(&[
+                // Zero-pad numeric fields so the capsule width is stable
+                // across value transitions (e.g. 9% -> 10%, 99% -> 100%,
+                // 8W -> 12W -> 100W, 4GiB -> 12GiB -> 24GiB). The padding
+                // zeros are drawn in the capsule background color (visually
+                // invisible) but still count toward `est_text_width`, which
+                // is what drives the capsule's bounding box.
+                let mut segments: Vec<(String, Color)> = vec![
                     (format!("{}:", name), theme.success),
-                    (" ".to_string(), val_col),
-                    (format!("{}%", telemetry.gpu.usage_pct), usage_col),
-                    (" ".to_string(), val_col),
-                    (format!("{}°C", telemetry.gpu.temp_c), temp_col),
-                    (" ".to_string(), val_col),
-                    (format!("{}W", telemetry.gpu.power_w), val_col),
-                    (" ".to_string(), val_col),
-                    (format!("{}GiB", telemetry.gpu.vram_free_gib), vram_col),
-                ], theme.font_size_normal);
+                ];
+                let push_num = |segments: &mut Vec<(String, Color)>,
+                                val: u32,
+                                width: usize,
+                                suffix: &str,
+                                col: Color| {
+                    let s = val.to_string();
+                    let pad_count = width.saturating_sub(s.len());
+                    segments.push((" ".to_string(), val_col));
+                    if pad_count > 0 {
+                        segments.push(("0".repeat(pad_count), theme.background));
+                    }
+                    segments.push((format!("{}{}", s, suffix), col));
+                };
+                push_num(&mut segments, telemetry.gpu.usage_pct as u32, 3, "%", usage_col);
+                push_num(&mut segments, telemetry.gpu.temp_c, 3, "°C", temp_col);
+                push_num(&mut segments, telemetry.gpu.power_w, 3, "W", val_col);
+                push_num(&mut segments, telemetry.gpu.vram_free_gib, 2, "GiB", vram_col);
+                let elem = label::<Message>(&segments, theme.font_size_normal);
                 let border_col = if val_col == theme.text { theme.border } else { val_col };
                 (elem, CapsuleAction::OpenOverlay("gpu".into()), border_col)
             }
@@ -321,11 +355,30 @@ impl CapsuleRenderer {
                 let warn_gib = theme.ram_warn_gib as f32;
                 let danger_gib = theme.ram_danger_gib as f32;
                 let val_col = if display <= danger_gib { theme.danger } else if display <= warn_gib { theme.warning } else { theme.text };
-                let val_str = if display == 0.0 { " -- GiB".to_string() } else { format!(" {:.1} GiB", display) };
-                let elem = label::<Message>(&[
+                // Pad integer part to 2 digits with background-colored zeros:
+                //   " 9.9 GiB"  →  " 09.9 GiB"
+                //   "16.0 GiB"  →  " 16.0 GiB"
+                // Both are the same visual width. The leading padding zero is
+                // invisible against the capsule background but stabilizes the
+                // bounding box across the 9.9 → 10.0 transition.
+                let mut segments: Vec<(String, Color)> = vec![
                     ("RAM:".to_string(), theme.success),
-                    (val_str, val_col),
-                ], theme.font_size_normal);
+                ];
+                if display == 0.0 {
+                    segments.push((" -- GiB".to_string(), val_col));
+                } else {
+                    let num_str = format!("{:.1}", display);
+                    let (int_part, frac_part) = num_str
+                        .split_once('.')
+                        .unwrap_or((num_str.as_str(), ""));
+                    let pad_count = 2usize.saturating_sub(int_part.len());
+                    segments.push((" ".to_string(), val_col));
+                    if pad_count > 0 {
+                        segments.push(("0".repeat(pad_count), theme.background));
+                    }
+                    segments.push((format!("{}.{} GiB", int_part, frac_part), val_col));
+                }
+                let elem = label::<Message>(&segments, theme.font_size_normal);
                 let border_col = if display <= danger_gib { theme.danger } else if display <= warn_gib { theme.warning } else { theme.border };
                 (elem, CapsuleAction::OpenOverlay("ram".into()), border_col)
             }

@@ -1,7 +1,7 @@
 use iced::widget::canvas::{self, Frame, Geometry, Path, Stroke};
 use iced::{Color, Element, Length, Point, Rectangle, Size, Theme};
 
-pub struct Anim { pub w: f32, pub h: f32, pub slant: f32, pub opacity: f32 }
+pub struct Anim { pub w: f32, pub h: f32, pub slant: f32, pub cut: f32, pub opacity: f32 }
 
 #[inline]
 fn smoothstep(t: f32) -> f32 { let t = t.clamp(0.0, 1.0); t * t * (3.0 - 2.0 * t) }
@@ -25,7 +25,8 @@ pub fn compute(elapsed_ms: f32, cap_w: f32, final_w: f32, h_end: f32,
     let opacity_ms = (drop_ms * 0.6).max(1.0);
     let o_t = ((elapsed_ms - o_start) / opacity_ms).clamp(0.0, 1.0);
     let opacity = o_t * (2.0 - o_t);
-    Anim { w, h, slant: slant_h, opacity }
+    let cut = (w.min(h) * 0.15).max(0.0);
+    Anim { w, h, slant: slant_h, cut, opacity }
 }
 
 pub fn compute_close(elapsed_ms: f32, cap_w: f32, final_w: f32, h_end: f32,
@@ -47,7 +48,9 @@ pub fn compute_close(elapsed_ms: f32, cap_w: f32, final_w: f32, h_end: f32,
     let h_t = (h_elapsed / height_ms).clamp(0.0, 1.0);
     let h = h_end * (1.0 - h_t * h_t * h_t);
     let slant_h = slant_at(h);
-    Anim { w: core + slant_h, h, slant: slant_h, opacity }
+    let w_final = core + slant_h;
+    let cut = (w_final.min(h) * 0.15).max(0.0);
+    Anim { w: w_final, h, slant: slant_h, cut, opacity }
 }
 
 pub struct ParallelogramBg {
@@ -196,16 +199,31 @@ impl<Message> canvas::Program<Message> for TooltipBg {
     }
 }
 
-pub fn clip_content<'a, Message: 'a>(content: Element<'a, Message>, anim_w: f32, anim_h: f32, grow_right: bool) -> Element<'a, Message> {
-    let align = if grow_right { iced::alignment::Horizontal::Left } else { iced::alignment::Horizontal::Right };
-    iced::widget::container(content).width(Length::Fixed(anim_w)).height(Length::Fixed(anim_h))
-        .align_x(align).align_y(iced::alignment::Vertical::Top).clip(true).into()
+pub fn clip_content<'a, Message: 'a>(
+    content: Element<'a, Message>,
+    anim_w: f32,
+    anim_h: f32,
+    align: iced::alignment::Horizontal,
+) -> Element<'a, Message> {
+    iced::widget::container(content)
+        .width(Length::Fixed(anim_w))
+        .height(Length::Fixed(anim_h))
+        .align_x(align)
+        .align_y(iced::alignment::Vertical::Top)
+        .clip(true)
+        .into()
 }
 
-pub fn align_to_side<'a, Message: 'a>(el: Element<'a, Message>, grow_right: bool) -> Element<'a, Message> {
-    let align = if grow_right { iced::alignment::Horizontal::Left } else { iced::alignment::Horizontal::Right };
-    iced::widget::container(el).width(Length::Fill).height(Length::Fill)
-        .align_x(align).align_y(iced::alignment::Vertical::Top).into()
+pub fn align_to_side<'a, Message: 'a>(
+    el: Element<'a, Message>,
+    align: iced::alignment::Horizontal,
+) -> Element<'a, Message> {
+    iced::widget::container(el)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(align)
+        .align_y(iced::alignment::Vertical::Top)
+        .into()
 }
 
 /// Detect the focused monitor's refresh rate in Hz.
@@ -271,3 +289,102 @@ pub fn detect_refresh_hz() -> u32 {
     })
 }
 
+
+// ── OctagonBg: same animation cadence as ParallelogramBg but with 8
+// equal corner cuts (diamond-cornered rectangle). Used by the clock
+// tooltip — it's the keystone bar module and deserves a distinct shape.
+
+pub struct OctagonBg {
+    pub w: f32, pub h: f32, pub cut: f32,
+    pub background: Color, pub border_color: Color, pub border_width: f32,
+    pub frame: u64,
+}
+
+impl OctagonBg {
+    pub fn view<Message: 'static>(self) -> Element<'static, Message> {
+        let w = self.w; let h = self.h;
+        let inner = OctagonCanvas {
+            w: self.w, h: self.h, cut: self.cut,
+            background: self.background, border_color: self.border_color,
+            border_width: self.border_width,
+        };
+        let canvas_el: Element<'static, Message> =
+            canvas::Canvas::new(inner).width(Length::Fixed(w)).height(Length::Fixed(h)).into();
+        let marker_w = (self.frame % 2) as f32;
+        let marker_el: Element<'static, Message> = iced::widget::Space::new()
+            .width(Length::Fixed(marker_w))
+            .height(Length::Fixed(0.0))
+            .into();
+        iced::widget::Stack::new()
+            .push(canvas_el)
+            .push(marker_el)
+            .into()
+    }
+}
+
+pub struct OctagonCanvas {
+    pub w: f32, pub h: f32, pub cut: f32,
+    pub background: Color, pub border_color: Color, pub border_width: f32,
+}
+
+impl<Message> canvas::Program<Message> for OctagonCanvas {
+    // (bounds, w, h, cut) — same redraw-on-change pattern as TooltipBg.
+    type State = Option<(Rectangle, f32, f32, f32)>;
+
+    fn update(
+        &self,
+        state: &mut Self::State,
+        _event: &iced::Event,
+        bounds: Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Option<iced::widget::Action<Message>> {
+        let key = (bounds, self.w, self.h, self.cut);
+        if *state != Some(key) {
+            *state = Some(key);
+            return Some(iced::widget::Action::request_redraw());
+        }
+        None
+    }
+
+    fn draw(
+        &self, _s: &Self::State, renderer: &iced::Renderer, _t: &Theme,
+        bounds: Rectangle, _c: iced::mouse::Cursor,
+    ) -> Vec<Geometry> {
+        let mut frame = Frame::new(renderer, bounds.size());
+        let w = bounds.width;
+        let h = bounds.height;
+        let half = self.border_width / 2.0;
+
+        if w <= 2.0 * half || h <= 2.0 * half {
+            return vec![frame.into_geometry()];
+        }
+
+        // Clamp the cut so the two corner cuts never overlap the opposite
+        // sides. 0.35/0.45 matches ShapeBox::Hexagon's own clamps.
+        let cut = self.cut.min(w * 0.35).min(h * 0.45);
+
+        let path = Path::new(|b| {
+            b.move_to(Point::new(cut + half, half));
+            b.line_to(Point::new(w - cut - half, half));
+            b.line_to(Point::new(w - half, cut + half));
+            b.line_to(Point::new(w - half, h - cut - half));
+            b.line_to(Point::new(w - cut - half, h - half));
+            b.line_to(Point::new(cut + half, h - half));
+            b.line_to(Point::new(half, h - cut - half));
+            b.line_to(Point::new(half, cut + half));
+            b.close();
+        });
+
+        if self.background.a > 0.0 {
+            frame.fill(&path, self.background);
+        }
+        if self.border_width > 0.0 && self.border_color.a > 0.0 {
+            frame.stroke(
+                &path,
+                Stroke::default().with_color(self.border_color).with_width(self.border_width),
+            );
+        }
+
+        vec![frame.into_geometry()]
+    }
+}

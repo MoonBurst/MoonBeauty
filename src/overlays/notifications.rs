@@ -234,7 +234,7 @@ fn history_row_height(toast: &NotificationToast, row_w: f32, fs: f32, fs_sm: f32
 }
 
 use std::sync::Mutex;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 /// IDs we've already logged icon decisions for. Prevents per-frame
 /// log spam (view_history is called on every Tick message, ~1/sec).
@@ -307,6 +307,11 @@ pub enum NotifMessage {
 
 pub struct NotificationOverlay {
     pub active_toasts: Vec<NotificationToast>,
+    /// Overflow queue. When `active_toasts` hits the visible limit (4),
+    /// new toasts land here instead of evicting the oldest. `tick_toasts`
+    /// pulls from the front of this queue whenever an active toast
+    /// expires or is dismissed, restoring the "wait your turn" behavior.
+    pub pending_toasts: VecDeque<NotificationToast>,
     pub history: Vec<NotificationToast>,
     pub show_history: bool,
     pub stack_target_count: usize,
@@ -327,6 +332,7 @@ impl NotificationOverlay {
         let selected_history_id = history.first().map(|t| t.id);
         Self {
             active_toasts: Vec::new(),
+            pending_toasts: VecDeque::new(),
             history,
             show_history: false,
             stack_target_count: 0,
@@ -584,6 +590,25 @@ impl NotificationOverlay {
             tts_spoken: false,
         };
 
+        let tts_pending = !is_test
+            && matched_profile.map(|p| p.tts).unwrap_or(false);
+        let tts_readout = matched_profile.and_then(|p| p.default_readout.clone());
+        let tts_command = settings.tts_command.clone();
+        eprintln!(
+            "[tts-defer] app={:?} pending={} summary={:?}",
+            app_name, tts_pending, summary,
+        );
+
+        // Populate TTS fields on the item before routing it. Previously
+        // this happened via `active_toasts.last_mut()` after push; the
+        // queue routing below makes that unsafe, so we set it here.
+        let mut item = item;
+        item.tts_summary = summary.to_string();
+        item.tts_body = body.to_string();
+        item.tts_readout = tts_readout;
+        item.tts_command = tts_command;
+        item.tts_pending = tts_pending;
+
         if dnd_active() {
             eprintln!("[dnd] holding notification back while paused: {:?}", summary);
             self.history.insert(0, item.clone());
@@ -597,32 +622,26 @@ impl NotificationOverlay {
             eprintln!("[dnd] total notifications held: {}", held.len());
             return;
         }
-        if self.active_toasts.len() >= 4 {
-            self.active_toasts.remove(0);
+
+        // Route to active if there's room, else to the pending queue.
+        // 4 concurrent toasts is the visible limit; the 5th+ wait their
+        // turn and are pulled in by `tick_toasts` when a slot frees.
+        if self.active_toasts.len() < 4 {
+            self.active_toasts.push(item.clone());
+        } else {
+            self.pending_toasts.push_back(item.clone());
+            eprintln!(
+                "[queue] overflow: {:?} queued (pending={})",
+                summary,
+                self.pending_toasts.len()
+            );
         }
-        self.active_toasts.push(item.clone());
 
         self.history.insert(0, item);
         if self.history.len() > 80 {
             self.history.truncate(80);
         }
         self.save_history();
-
-        let tts_pending = !is_test
-        && matched_profile.map(|p| p.tts).unwrap_or(false);
-        let tts_readout = matched_profile.and_then(|p| p.default_readout.clone());
-        let tts_command = settings.tts_command.clone();
-        eprintln!(
-            "[tts-defer] app={:?} pending={} summary={:?}",
-            app_name, tts_pending, summary,
-        );
-        if let Some(t) = self.active_toasts.last_mut() {
-            t.tts_summary = summary.to_string();
-            t.tts_body = body.to_string();
-            t.tts_readout = tts_readout;
-            t.tts_command = tts_command;
-            t.tts_pending = tts_pending;
-        }
     }
 
     pub fn play_sound(path: String, volume: u32) {
@@ -828,6 +847,20 @@ impl NotificationOverlay {
                 t.exit_started_at = None;
                 t.slot_shift_start = Some(now);
             }
+
+            // Fill freed slots from the pending queue. Reset timers so the
+            // newly-promoted toast starts its full hold duration and its
+            // slide-in animation from the current instant, not from when
+            // it was originally queued.
+            while self.active_toasts.len() < 4 {
+                let Some(mut next) = self.pending_toasts.pop_front() else { break };
+                next.created_at = Instant::now();
+                next.hold_reset_at = Some(Instant::now());
+                next.exit_started_at = None;
+                next.slot_shift_start = Some(Instant::now());
+                eprintln!("[queue] promoting queued toast to active: {:?}", next.summary);
+                self.active_toasts.push(next);
+            }
         }
 
         let front_id = self.active_toasts
@@ -888,6 +921,7 @@ impl NotificationOverlay {
             }
             NotifMessage::ClearHistory => {
                 self.history.clear();
+                self.pending_toasts.clear();
                 self.selected_history_id = None;
                 self.save_history();
                 if let Ok(mut g) = LOGGED_ICONS.lock() {
@@ -1052,33 +1086,48 @@ impl NotificationOverlay {
             } else {
                 container(text("")).width(Length::Fixed(0.0)).into()
             };
+            // Full-body activate area. Padding lives INSIDE the
+            // MouseArea (via the container), and both the container and
+            // inner row are Fill height. Result: the entire toast body —
+            // including what was previously the 14px border — activates
+            // on click. No vertical centering gap.
             let toast_body = MouseArea::new(
-                row![
-                    icon_badge,
-                    avatar,
-                    column![
-                        text(&toast.summary).size((settings.notif_summary_size) as f32).bold().color(toast_text_color).width(Length::Fill),
-                                            text(&toast.body).size((settings.notif_body_size) as f32).color(toast_text_color).width(Length::Fill),
+                container(
+                    row![
+                        icon_badge,
+                        avatar,
+                        column![
+                            text(&toast.summary).size((settings.notif_summary_size) as f32).bold().color(toast_text_color).width(Length::Fill),
+                            text(&toast.body).size((settings.notif_body_size) as f32).color(toast_text_color).width(Length::Fill),
+                        ]
+                        .width(Length::Fill)
+                        .spacing(2),
                     ]
+                    .spacing(12)
+                    .align_y(Alignment::Center)
                     .width(Length::Fill)
-                    .spacing(2),
-                ]
-                .spacing(12)
-                .align_y(Alignment::Center)
+                    .height(Length::Fill)
+                )
+                .padding(14)
                 .width(Length::Fill)
+                .height(Length::Fill)
             )
             .on_press(NotifMessage::ActivateToast(id));
 
-            let content = row![
-                toast_body,
-                button(text("✕").size(12).color(theme.muted))
+            // Full-height close column. 48px wide, Fill height, ✕ centered
+            // vertically (matches the previous visual), but the whole
+            // column is now one big dismiss target.
+            let close_btn = button(text("✕").size(12).color(theme.muted))
                 .on_press(NotifMessage::DismissToast(id))
-                .padding(4)
-                .style(|_t, _s| button::Style { background: None, ..Default::default() }),
-            ]
-            .spacing(12)
-            .align_y(Alignment::Center)
-            .padding(14);
+                .padding(0)
+                .width(Length::Fixed(48.0))
+                .height(Length::Fill)
+                .style(|_t, _s| button::Style { background: None, ..Default::default() });
+
+            let content = row![toast_body, close_btn]
+                .spacing(0)
+                .width(Length::Fill)
+                .height(Length::Fill);
 
             let toast_card = container(Stack::new().push(card_bg.view()).push(content))
             .width(Length::Fixed(card_w))
@@ -1433,4 +1482,72 @@ pub fn take_held_notifs() -> Vec<NotificationToast> {
     g.count = 0;
     g.fetched_at = Instant::now();
     list
+}
+
+
+// ── Cross-process active count ─────────────────────────────────────
+//
+// The bar's notification capsule needs to know how many notifications
+// are currently on screen or queued. Those live in the notif-surface
+// process's memory (`active_toasts` + `pending_toasts`), not the bar.
+// The notif-surface writes this count to a small file on every change
+// (plus a heartbeat), and the bar reads it with a short cache.
+
+pub fn active_count_path() -> PathBuf {
+    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(dir).join("moon-beauty-shell-active-count")
+}
+
+/// Notif-surface calls this on any change to active+pending count.
+pub fn write_active_count(count: usize) {
+    let p = active_count_path();
+    let tmp = p.with_extension("tmp");
+    if fs::write(&tmp, count.to_string()).is_ok() {
+        let _ = fs::rename(tmp, p);
+    }
+}
+
+struct ActiveCountCache {
+    count: usize,
+    fetched_at: Instant,
+}
+static ACTIVE_COUNT_CACHE: std::sync::OnceLock<std::sync::Mutex<ActiveCountCache>> =
+    std::sync::OnceLock::new();
+
+fn active_count_cache() -> &'static std::sync::Mutex<ActiveCountCache> {
+    ACTIVE_COUNT_CACHE.get_or_init(|| {
+        std::sync::Mutex::new(ActiveCountCache {
+            count: 0,
+            fetched_at: Instant::now() - std::time::Duration::from_secs(60),
+        })
+    })
+}
+
+/// Bar-side read. Cached 250ms (fast enough to feel instant on DND
+/// toggle, slow enough to avoid hammering the file during animation).
+pub fn read_active_count() -> usize {
+    let mut g = active_count_cache().lock().unwrap();
+    if g.fetched_at.elapsed() > std::time::Duration::from_millis(250) {
+        g.count = read_active_count_uncached();
+        g.fetched_at = Instant::now();
+    }
+    g.count
+}
+
+fn read_active_count_uncached() -> usize {
+    let p = active_count_path();
+    let Ok(meta) = fs::metadata(&p) else { return 0; };
+    // Stale detection: if the notif-surface has been dead for >10s,
+    // treat as 0 so the capsule doesn't show a phantom count forever.
+    if let Ok(modified) = meta.modified() {
+        if let Ok(elapsed) = modified.elapsed() {
+            if elapsed.as_secs() > 10 {
+                return 0;
+            }
+        }
+    }
+    fs::read_to_string(&p)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
 }

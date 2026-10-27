@@ -531,23 +531,13 @@ SettingsMessage::AlarmSoundChanged(v) => {
 SettingsMessage::AlarmSoundDurationChanged(v) => {
     settings.alarm_sound_duration_sec = v.clamp(1, 60);
 }
-SettingsMessage::TestAlarmSound => {
+            SettingsMessage::TestAlarmSound => {
                 if let Some(sound) = &settings.alarm_sound {
-                    let path = if std::path::Path::new(sound).is_absolute() {
-                        std::path::PathBuf::from(sound)
-                    } else {
-                        std::path::PathBuf::from("resources").join(sound)
-                    };
-                    let path_str = path.to_string_lossy().to_string();
-                    let dur = settings.alarm_sound_duration_sec;
-                    let vol_pct = settings.alarm_sound_volume;
-                    // pw-play needs fractional volume (0.0-1.0), NOT percent (6)
-                    let vol_f = (vol_pct as f32) / 100.0;
-                    let cmd = format!(
-                        r#"timeout {}s pw-play --volume={:.2} "{}" 2>/dev/null"#,
-                        dur, vol_f, path_str
+                    crate::backend::play_alarm_sound(
+                        sound,
+                        settings.alarm_sound_volume,
+                        settings.alarm_sound_duration_sec,
                     );
-                    let _ = std::process::Command::new("sh").arg("-c").arg(cmd).spawn();
                 }
             }
 SettingsMessage::SaveSettings => {}
@@ -557,7 +547,7 @@ SettingsMessage::SaveSettings => {}
 
             }
 
-            SettingsMessage::ImportAlarmSound => {
+                        SettingsMessage::ImportAlarmSound => {
                 let output = std::process::Command::new("sh")
                     .arg("-c")
                     .arg("zenity --file-selection --title='Select alarm sound' 2>/dev/null || kdialog --getopenfilename . 2>/dev/null || yad --file 2>/dev/null")
@@ -567,11 +557,27 @@ SettingsMessage::SaveSettings => {}
                     if !path_str.is_empty() {
                         let src = std::path::Path::new(&path_str);
                         if let Some(filename) = src.file_name().and_then(|f| f.to_str()) {
-                            let _ = std::fs::create_dir_all("resources");
-                            let dest = std::path::PathBuf::from("resources").join(filename);
-                            if std::fs::copy(src, &dest).is_ok() {
-                                settings.alarm_sound = Some(filename.to_string());
-                                let _ = settings.save();
+                            // Copy to XDG_DATA/moon-beauty-shell/sounds — stable
+                            // across cwd changes. The old `resources/` copy
+                            // worked only when the bar was launched from the
+                            // project root; systemd / nix develop / standalone
+                            // children all fail that assumption.
+                            let dest_dir = dirs::data_dir()
+                                .map(|d| d.join("moon-beauty-shell").join("sounds"))
+                                .unwrap_or_else(|| {
+                                    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources")
+                                });
+                            let _ = std::fs::create_dir_all(&dest_dir);
+                            let dest = dest_dir.join(filename);
+                            match std::fs::copy(src, &dest) {
+                                Ok(_) => {
+                                    settings.alarm_sound = Some(filename.to_string());
+                                    let _ = settings.save();
+                                    eprintln!("[alarm-sound] imported {} -> {}", filename, dest.display());
+                                }
+                                Err(e) => {
+                                    eprintln!("[alarm-sound] import failed (copy to {}): {e}", dest.display());
+                                }
                             }
                         }
                     }

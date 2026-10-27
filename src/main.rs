@@ -744,7 +744,42 @@ fn handle_email_keypress(event: iced::Event, status: iced::event::Status, _windo
     }
 }
 
+/// Keyboard handler for annotator text-annotation mode. Forwards printable
+/// characters, Enter, and Backspace to the annotator's text buffer. Modifier
+/// combos fall through (they're reserved for tool shortcuts / global binds);
+/// events already captured by a focused widget (e.g. the watermark
+/// text_input) are skipped so we don't double-handle them.
+fn handle_annotator_text_input(
+    event: iced::Event,
+    status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Message> {
+    let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
+        return None;
+    };
+    use iced::keyboard::{Key, key::Named};
 
+    if modifiers.control() || modifiers.alt() || modifiers.logo() {
+        return None;
+    }
+
+    if status == iced::event::Status::Captured {
+        return None;
+    }
+
+    match key {
+        Key::Character(s) if !s.is_empty() => {
+            Some(Message::Annotator(AnnotatorMessage::CharacterInput(s.to_string())))
+        }
+        Key::Named(Named::Backspace) => {
+            Some(Message::Annotator(AnnotatorMessage::BackspacePressed))
+        }
+        Key::Named(Named::Enter) => {
+            Some(Message::Annotator(AnnotatorMessage::NewLinePressed))
+        }
+        _ => None,
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -790,6 +825,12 @@ pub enum Message {
     TrayAnimTick,
     CollapseTrayIfGen(u64),
     CollapseTray,
+    /// Pre-computed toast rectangles (surface-local coords). Emitted
+    /// whenever the toast count changes; `try_into` converts it to
+    /// `LayershellCustomAction::SetInputRegion` so the layer surface's
+    /// click target shrinks to just the visible toasts. Everything else
+    /// (the empty area around/above/below toasts) becomes pass-through.
+    SetToastInputRegion(Vec<(i32, i32, i32, i32)>),
 }
 
 impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message {
@@ -803,6 +844,18 @@ impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message
                 Ok(iced_layershell::actions::LayershellCustomActionWithId::new(
                     None,
                     iced_layershell::actions::LayershellCustomAction::SizeChange((w, h)),
+                ))
+            }
+            Message::SetToastInputRegion(rects) => {
+                Ok(iced_layershell::actions::LayershellCustomActionWithId::new(
+                    None,
+                    iced_layershell::actions::LayershellCustomAction::SetInputRegion(
+                        iced_layershell::actions::ActionCallback::new(move |region| {
+                            for (x, y, w, h) in &rects {
+                                region.add(*x, *y, *w, *h);
+                            }
+                        }),
+                    ),
                 ))
             }
             other => Err(other),
@@ -857,9 +910,56 @@ pub struct MoonBeautyShellApp {
     weather_tick: bool,
 
     last_cursor_x: f32,
-    last_cursor_time: std::time::Instant,}
+    last_cursor_time: std::time::Instant,
+    /// Last observed active-toast count. Changes trigger a fresh
+    /// SetToastInputRegion emit so the click target tracks the toasts.
+    last_toast_count: usize,
+    /// (count, written_at) for the active+pending count file. Write on
+    /// change; heartbeat every 3s so the file's mtime stays fresh and
+    /// the bar's staleness check never trips while we're alive.
+    last_active_pending_written: Option<(usize, std::time::Instant)>,
+}
 
 impl MoonBeautyShellApp {
+    /// Compute surface-local rectangles for each currently-active toast.
+    /// Coordinates mirror `view_toasts`' resting pin positions (post-drop,
+    /// post-expand) so the input region matches where toasts actually sit
+    /// once their slide-in animation settles.
+    fn compute_toast_rects(&self) -> Vec<(i32, i32, i32, i32)> {
+        let s = &self.settings;
+        let is_right = s.notif_corner.contains("right");
+        let is_top = s.notif_corner.contains("top");
+
+        let card_w = s.notif_card_width as i32;
+        let card_h = s.notif_card_height as i32;
+        let margin_x = s.notif_margin_x.max(16) as i32;
+        let baseline = s.notif_baseline_y as i32;
+        let surface_w =
+            (s.notif_card_width as i32 + 2 * s.notif_margin_x + 100).max(200);
+
+        let pad_top = if is_top { baseline } else { 0 };
+        let pad_left = if is_right { 0 } else { margin_x };
+        let pad_right = if is_right { margin_x } else { 0 };
+
+        let peek = (s.notif_stack_overlap as i32).abs().max(4);
+        let drop_dist = s.notif_drop_distance_px as i32;
+        let fixed_base = drop_dist + 4 * peek;
+
+        let x_surface = if is_right {
+            surface_w - pad_right - card_w
+        } else {
+            pad_left
+        };
+
+        let n = self.notifs.active_toasts.len();
+        let mut rects = Vec::with_capacity(n);
+        for i in 0..n {
+            let y_surface = pad_top + fixed_base - (i as i32) * peek;
+            rects.push((x_surface, y_surface, card_w, card_h));
+        }
+        rects
+    }
+
     fn close_tray(&mut self) {
         if self.tray_expanded {
             self.tray_expanded = false;
@@ -1081,7 +1181,10 @@ impl MoonBeautyShellApp {
             weather_tick: false,
         
             last_cursor_x: 0.0,
-            last_cursor_time: std::time::Instant::now() - std::time::Duration::from_secs(30),};
+            last_cursor_time: std::time::Instant::now() - std::time::Duration::from_secs(30),
+            last_toast_count: 0,
+            last_active_pending_written: None,
+        };
 
         let mut init_tasks = vec![
             Command::done(Message::TickEmailSync),
@@ -1318,10 +1421,11 @@ impl MoonBeautyShellApp {
                                 item.hold_reset_at = Some(std::time::Instant::now());
                                 item.exit_started_at = None;
                                 item.slot_shift_start = None;
-                                if self.notifs.active_toasts.len() >= 4 {
-                                    self.notifs.active_toasts.remove(0);
+                                if self.notifs.active_toasts.len() < 4 {
+                                    self.notifs.active_toasts.push(item);
+                                } else {
+                                    self.notifs.pending_toasts.push_back(item);
                                 }
-                                self.notifs.active_toasts.push(item);
                             }
                         }
                     }
@@ -1336,9 +1440,33 @@ impl MoonBeautyShellApp {
                     } else {
                         (big_w, big_h)
                     };
-                    if want != self.notif_surface_size {
+                    let toast_count = self.notifs.active_toasts.len();
+                    let count_changed = toast_count != self.last_toast_count;
+
+                    // Publish active+pending to the bar. Runs on every tick,
+                    // but only writes on change or once every 3s heartbeat.
+                    let active_pending =
+                        self.notifs.active_toasts.len() + self.notifs.pending_toasts.len();
+                    let should_write = match self.last_active_pending_written {
+                        None => true,
+                        Some((prev, at)) => {
+                            prev != active_pending || at.elapsed().as_secs() >= 3
+                        }
+                    };
+                    if should_write {
+                        moon_beauty_shell::overlays::notifications::write_active_count(active_pending);
+                        self.last_active_pending_written =
+                            Some((active_pending, std::time::Instant::now()));
+                    }
+
+                    if want != self.notif_surface_size || count_changed {
                         self.notif_surface_size = want;
-                        return Command::done(Message::ResizeNotifSurface(want.0, want.1));
+                        self.last_toast_count = toast_count;
+                        let rects = self.compute_toast_rects();
+                        return Command::batch(vec![
+                            Command::done(Message::ResizeNotifSurface(want.0, want.1)),
+                            Command::done(Message::SetToastInputRegion(rects)),
+                        ]);
                     }
                 }
             }
@@ -1364,22 +1492,11 @@ impl MoonBeautyShellApp {
 
                             if e.play_sound {
                                 if let Some(sound) = &self.settings.alarm_sound {
-                                    let path = if std::path::Path::new(sound).is_absolute() {
-                                        std::path::PathBuf::from(sound)
-                                    } else {
-                                        std::path::PathBuf::from("resources").join(sound)
-                                    };
-                                    if path.exists() {
-                                        let path_str = path.to_string_lossy().to_string();
-                                        let dur = self.settings.alarm_sound_duration_sec;
-                                        let vol_pct = self.settings.alarm_sound_volume;
-                                        let vol_f = (vol_pct as f32) / 100.0;
-                                        let cmd = format!(
-                                            r#"timeout {}s pw-play --volume={:.2} "{}" 2>/dev/null"#,
-                                            dur, vol_f, path_str
-                                        );
-                                        let _ = std::process::Command::new("sh").arg("-c").arg(cmd).spawn();
-                                    }
+                                    play_alarm_sound(
+                                        sound,
+                                        self.settings.alarm_sound_volume,
+                                        self.settings.alarm_sound_duration_sec,
+                                    );
                                 }
                             }
                         }
@@ -3057,6 +3174,9 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
             }
             
             Message::Noop => {}
+            Message::SetToastInputRegion(_) => {
+                // Intercepted by `try_into` — never reaches update.
+            }
             Message::CloseShell => {
                 std::process::exit(0);
             }
@@ -3104,7 +3224,7 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
         };
 
         let text_typing_sub = if self.annotator.text_editing.is_some() {
-            iced::event::listen_with(handle_email_keypress)
+            iced::event::listen_with(handle_annotator_text_input)
         } else {
             iced::Subscription::none()
         };

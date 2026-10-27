@@ -220,12 +220,12 @@ impl App {
             frame: self.opened.elapsed().as_millis() as u64,
         };
         let content: Element<'_, Message> = self.build_content(&theme, &settings, anim.opacity);
-        let clipped = crate::overlays::tooltip_engine::clip_content(content, anim.w, anim.h, self.grow_right);
+        let clipped = crate::overlays::tooltip_engine::clip_content(content, anim.w, anim.h, if self.grow_right { iced::alignment::Horizontal::Left } else { iced::alignment::Horizontal::Right });
         let stacked = iced::widget::container(Stack::new().push(bg.view()).push(clipped))
             .width(Length::Fixed(anim.w))
             .height(Length::Fixed(anim.h))
             .clip(true);
-        crate::overlays::tooltip_engine::align_to_side(stacked.into(), self.grow_right)
+        crate::overlays::tooltip_engine::align_to_side(stacked.into(), if self.grow_right { iced::alignment::Horizontal::Left } else { iced::alignment::Horizontal::Right })
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
@@ -691,17 +691,6 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     let half_cap = (cap_w / 2.0) as i32;
     
     // Dynamic alignment offset for the slanted corner + padding.
-
-    let adjust_left = s.tooltip_offset_left;
-    let adjust_right = s.tooltip_offset_right;
-
-    let adjust_left = s.tooltip_offset_left;
-    let adjust_right = s.tooltip_offset_right;
-    let adjust_left = s.tooltip_offset_left;
-    let adjust_right = s.tooltip_offset_right;
-
-    let adjust_left = s.tooltip_offset_left;
-    let adjust_right = s.tooltip_offset_right;
 
     let adjust_left = s.tooltip_offset_left;
     let adjust_right = s.tooltip_offset_right;

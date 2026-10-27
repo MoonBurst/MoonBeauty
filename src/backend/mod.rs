@@ -12,7 +12,7 @@ pub mod tray_watcher;
 pub mod unified;
 pub mod weather;
 
-pub use audio::{AudioBackend, AudioStatus};
+pub use audio::{AudioBackend, AudioStatus, play_alarm_sound, resolve_alarm_sound_path};
 pub use borg::{BorgBackend, BorgStatus};
 pub use clock::{CalendarViewData, ClockBackend, WorldZoneColumn};
 pub use mpris::{MprisBackend, MprisTrack};

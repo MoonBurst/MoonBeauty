@@ -22,6 +22,7 @@ pub enum InfoData {
     Music(Option<MprisTrack>),
     Unified(PodmanStatus, BorgStatus, Vec<crate::backend::UnifiedItemStatus>),
     Net(crate::backend::NetMetrics),
+    Clock(Vec<crate::backend::WorldZoneColumn>),
     Custom,
 }
 
@@ -203,10 +204,19 @@ impl App {
             Some(InfoData::Music(_)) => 400.0 + settings.bar_height as f32,
             Some(InfoData::Unified(..)) => 400.0 + settings.bar_height as f32,
             Some(InfoData::Net(_)) => 450.0 + settings.bar_height as f32,
+            Some(InfoData::Clock(_)) => 320.0 + settings.bar_height as f32,
             Some(InfoData::Custom) => 300.0 + settings.bar_height as f32,
             None => self.h as f32,
         };
         let effective_h = self.h as f32;
+
+        let is_clock = self.mode == "clock";
+        // For the keystone (clock) we pass slant_base=0. The octagon draw path
+        // doesn't use `slant` at all — it uses `cut`. Passing 0 forces
+        // compute() to lock width at the capsule's width during the drop phase,
+        // then expand symmetrically during the expand phase (instead of growing
+        // width by slant-coupling during drop like the parallelogram does).
+        let slant_base = if is_clock { 0.0 } else { theme.slant_width };
 
         let anim = if let Some(t) = self.closing_at {
             crate::overlays::tooltip_engine::compute_close(
@@ -214,44 +224,67 @@ impl App {
                 self.w_start,
                 self.w as f32,
                 effective_h,
-                theme.slant_width,
+                slant_base,
                 settings.bar_height as f32,
                 self.drop_ms,
             )
         } else {
             crate::overlays::tooltip_engine::compute(
                 self.opened.elapsed().as_millis() as f32,
-            self.w_start,
-            self.w as f32,
-            effective_h,
-            theme.slant_width,
-            settings.bar_height as f32,
-            self.drop_ms,
-            self.expand_ms,
-        
+                self.w_start,
+                self.w as f32,
+                effective_h,
+                slant_base,
+                settings.bar_height as f32,
+                self.drop_ms,
+                self.expand_ms,
             )
         };
-        let _slant = (theme.slant_width * (anim.h / settings.bar_height as f32)).max(0.0);
 
-        let slant_h = theme.slant_width * (anim.h / settings.bar_height as f32);
-        let bg = crate::overlays::tooltip_engine::ParallelogramBg {
-            w: anim.w,
-            h: anim.h,
-            slant: slant_h,
-            slant_right: self.slant_l == SlantSide::Right,
-            background: theme.background,
-            border_color: theme.text,
-            border_width: theme.control_border_width,
-            frame: self.opened.elapsed().as_millis() as u64,
+        // Clock gets an octagon; every other info tooltip gets the parallelogram.
+        let is_clock = self.mode == "clock";
+        let bg_view: Element<'_, Message> = if is_clock {
+            let oct = crate::overlays::tooltip_engine::OctagonBg {
+                w: anim.w,
+                h: anim.h,
+                cut: anim.cut,
+                background: theme.background,
+                border_color: theme.text,
+                border_width: theme.control_border_width,
+                frame: self.opened.elapsed().as_millis() as u64,
+            };
+            oct.view()
+        } else {
+            let slant_h = theme.slant_width * (anim.h / settings.bar_height.max(1) as f32);
+            let para = crate::overlays::tooltip_engine::ParallelogramBg {
+                w: anim.w,
+                h: anim.h,
+                slant: slant_h,
+                slant_right: self.slant_l == SlantSide::Right,
+                background: theme.background,
+                border_color: theme.text,
+                border_width: theme.control_border_width,
+                frame: self.opened.elapsed().as_millis() as u64,
+            };
+            para.view()
         };
 
+        // Clock: content and outer box both centered. Other modes preserve
+        // the existing left/right grow behavior.
+        let align = if is_clock {
+            iced::alignment::Horizontal::Center
+        } else if self.grow_right {
+            iced::alignment::Horizontal::Left
+        } else {
+            iced::alignment::Horizontal::Right
+        };
         let content: Element<'_, Message> = self.build_content(&theme, &settings, anim.opacity, effective_h);
-        let clipped = crate::overlays::tooltip_engine::clip_content(content, anim.w, anim.h, self.grow_right);
-        let stacked = iced::widget::container(Stack::new().push(bg.view()).push(clipped))
+        let clipped = crate::overlays::tooltip_engine::clip_content(content, anim.w, anim.h, align);
+        let stacked = iced::widget::container(Stack::new().push(bg_view).push(clipped))
             .width(Length::Fixed(anim.w))
             .height(Length::Fixed(anim.h))
             .clip(true);
-        crate::overlays::tooltip_engine::align_to_side(stacked.into(), self.grow_right)
+        crate::overlays::tooltip_engine::align_to_side(stacked.into(), align)
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
@@ -755,6 +788,53 @@ impl App {
                         col = col.push(slanted_row(empty_el, y + 10.0, total_h, slant_h, slant_right, safe, w_f, 20.0));
                     }
                 }
+                InfoData::Clock(cols) => {
+                    let header_h = fs as f32 + 16.0;
+                    let header = row![
+                        text("WORLD CLOCK").size((fs.max(14)) as f32).bold().color(text_col),
+                        iced::widget::space::horizontal(),
+                        mk_close(),
+                    ].align_y(Alignment::Center).width(Length::Fill);
+                    let cut_f = (w_f.min(total_h) * 0.15).max(0.0);
+                    col = col.push(octagon_row(header.into(), y + header_h * 0.5, total_h, cut_f, safe, w_f, header_h));
+                    y += header_h + gap;
+
+                    let mut grid_row = row![].spacing(12).width(Length::Fill);
+                    for c in cols {
+                        let mut col_widget = column![].spacing(6).width(Length::FillPortion(1));
+                        col_widget = col_widget.push(
+                            text(c.title).size((fs - 1) as f32).bold().color(muted).width(Length::Fill).align_x(Alignment::Center)
+                        );
+                        for (name, code, time, is_me) in &c.zones {
+                            let t_color = if *is_me { success } else { text_col };
+                            let is_me_val = *is_me;
+                            let bg = if is_me_val { Some(iced::Background::Color(a(t.surface_alt))) } else { None };
+                            let border_c = if is_me_val { success } else { Color::TRANSPARENT };
+
+                            let item = container(
+                                row![
+                                    column![
+                                        text(*name).size((fs - 2) as f32).bold().color(t_color).wrapping(iced::widget::text::Wrapping::None),
+                                        text(*code).size((fs - 3) as f32).color(muted).wrapping(iced::widget::text::Wrapping::None),
+                                    ].spacing(2).width(Length::Fill),
+                                    text(time).size((fs + 1) as f32).bold().color(t_color).wrapping(iced::widget::text::Wrapping::None),
+                                ].align_y(Alignment::Center)
+                            )
+                            .padding([4, 8])
+                            .width(Length::Fill)
+                            .style(move |_t| container::Style {
+                                background: bg,
+                                border: iced::Border { color: border_c, width: if is_me_val { 1.0 } else { 0.0 }, radius: 4.0.into() },
+                                ..Default::default()
+                            });
+                            col_widget = col_widget.push(item);
+                        }
+                        grid_row = grid_row.push(col_widget);
+                    }
+
+                    let grid_h = 5.0 * 48.0;
+                    col = col.push(octagon_row(grid_row.into(), y + grid_h * 0.5, total_h, cut_f, safe, w_f, grid_h));
+                }
                 InfoData::Custom => {
                     let header = row![
                         text("CUSTOM MODULE").size((fs) as f32).bold().color(text_col),
@@ -813,6 +893,59 @@ fn slanted_row<'a, M: 'a>(
         inner_clipped,
         iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(rp)),
     ].height(Length::Fixed(row_h)).width(Length::Fixed(total_w)).into()
+}
+
+
+/// Octagon-aware row insets: content hugs the middle columns of a widened
+/// octagon, but the top and bottom rows are pulled inward proportionally
+/// to how far they sit inside the diagonal corner cut. Mirrors slanted_row,
+/// but for a 4-cut octagon instead of a 2-cut parallelogram.
+fn octagon_row<'a, M: 'a>(
+    inner: Element<'a, M>,
+    y_mid: f32,
+    total_h: f32,
+    cut: f32,
+    safe: f32,
+    total_w: f32,
+    row_h: f32,
+) -> Element<'a, M> {
+    let half_row = row_h * 0.5;
+    let y_top = (y_mid - half_row).max(0.0);
+    let y_bot = (y_mid + half_row).min(total_h);
+
+    // Inset at row boundary: 0 in the middle band, rises linearly from 0
+    // to `cut` as you approach the top or bottom edge.
+    let inset_at = |y: f32| -> f32 {
+        if cut <= 0.0 { return 0.0; }
+        if y < cut {
+            cut - y
+        } else if y > total_h - cut {
+            y - (total_h - cut)
+        } else {
+            0.0
+        }
+    };
+
+    // Take the max of top/bottom insets so a row that straddles the
+    // diagonal doesn't poke out on one corner.
+    let inset = inset_at(y_top).max(inset_at(y_bot));
+    let lp = inset + safe;
+    let rp = inset + safe;
+    let inner_w = (total_w - lp - rp).max(10.0);
+
+    let inner_clipped = container(inner)
+        .width(Length::Fixed(inner_w))
+        .height(Length::Fixed(row_h))
+        .clip(true);
+
+    row![
+        iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(lp)),
+        inner_clipped,
+        iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(rp)),
+    ]
+    .height(Length::Fixed(row_h))
+    .width(Length::Fixed(total_w))
+    .into()
 }
 
 struct KillButtonShape {
@@ -979,6 +1112,7 @@ async fn fetch_data(mode: String) -> InfoData {
             tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             InfoData::Net(sc.update_net())
         }
+        "clock" => InfoData::Clock(ClockBackend::get_world_matrix()),
         _ => InfoData::Custom,
     }
 }
@@ -1005,18 +1139,17 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     let adjust_left = s.tooltip_offset_left;
     let adjust_right = s.tooltip_offset_right;
 
-    let adjust_left = s.tooltip_offset_left;
-    let adjust_right = s.tooltip_offset_right;
-    let adjust_left = s.tooltip_offset_left;
-    let adjust_right = s.tooltip_offset_right;
+    // Clock is the keystone — center the window on the capsule, so the
+    // octagon grows symmetrically outward from the clock's position.
+    let is_clock = std::env::var("MBS_INFO_MODE")
+        .map(|m| m == "clock")
+        .unwrap_or(false);
 
-    let adjust_left = s.tooltip_offset_left;
-    let adjust_right = s.tooltip_offset_right;
-
-    let adjust_left = s.tooltip_offset_left;
-    let adjust_right = s.tooltip_offset_right;
-
-    let (anchor, margin) = if grow_right {
+    let (anchor, margin) = if is_clock {
+        // Left-anchor with margin = cx - w/2, so window center = cx.
+        let margin_left = (cx - (w as i32) / 2).max(0);
+        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, margin_left))
+    } else if grow_right {
         (Anchor::Top | Anchor::Left, (margin_top, 0, 0, (cx - half_cap + adjust_left).max(0)))
     } else {
         (Anchor::Top | Anchor::Right, (margin_top, (sw - cx - half_cap + adjust_right).max(0), 0, 0))

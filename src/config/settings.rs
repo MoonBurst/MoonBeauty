@@ -535,6 +535,7 @@ impl ShellSettings {
         self.tooltip_sizes.get(id).copied()
             .unwrap_or_else(|| match id {
                 "alarm" => (500, 400),
+                "clock" => (540, 320),
                 _ => (self.tooltip_width_px, self.tooltip_height_px),
             })
     }

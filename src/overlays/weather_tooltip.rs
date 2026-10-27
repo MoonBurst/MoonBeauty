@@ -129,9 +129,9 @@ impl App {
         };
 
         let content: Element<'_, Message> = self.build_content(&theme, &settings, anim.opacity);
-        let clipped = crate::overlays::tooltip_engine::clip_content(content, anim.w, anim.h, self.grow_right);
+        let clipped = crate::overlays::tooltip_engine::clip_content(content, anim.w, anim.h, if self.grow_right { iced::alignment::Horizontal::Left } else { iced::alignment::Horizontal::Right });
         let stacked: Element<'_, Message> = Stack::new().push(bg.view()).push(clipped).into();
-        crate::overlays::tooltip_engine::align_to_side(stacked, self.grow_right)
+        crate::overlays::tooltip_engine::align_to_side(stacked, if self.grow_right { iced::alignment::Horizontal::Left } else { iced::alignment::Horizontal::Right })
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
@@ -273,17 +273,6 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     let adjust_left = s.tooltip_offset_left;
     let adjust_right = s.tooltip_offset_right;
 
-    let adjust_left = s.tooltip_offset_left;
-    let adjust_right = s.tooltip_offset_right;
-    let adjust_left = s.tooltip_offset_left;
-    let adjust_right = s.tooltip_offset_right;
-
-    let adjust_left = s.tooltip_offset_left;
-    let adjust_right = s.tooltip_offset_right;
-
-    let adjust_left = s.tooltip_offset_left;
-    let adjust_right = s.tooltip_offset_right;
-
     let (anchor, margin) = if grow_right {
         (Anchor::Top | Anchor::Left, (margin_top, 0, 0, (cx - half_cap + adjust_left).max(0)))
     } else {
@@ -364,7 +353,7 @@ pub fn render_tooltip_popup<'a>(
     };
 
     let clipped = crate::overlays::tooltip_engine::clip_content(
-        content, current_w, current_h, true
+        content, current_w, current_h, iced::alignment::Horizontal::Left
     );
 
     let stacked: iced::Element<'a, ()> = iced::widget::Stack::new()

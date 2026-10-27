@@ -219,9 +219,9 @@ impl App {
             .width(Length::Fixed(self.w as f32))
             .height(Length::Fixed(self.h as f32))
             .into();
-        let clipped = crate::overlays::tooltip_engine::clip_content(body_fixed, anim.w, anim.h, self.grow_right);
+        let clipped = crate::overlays::tooltip_engine::clip_content(body_fixed, anim.w, anim.h, if self.grow_right { iced::alignment::Horizontal::Left } else { iced::alignment::Horizontal::Right });
         let inner: Element<'_, Message> = Stack::new().push(bg.view()).push(clipped).into();
-        let positioned: Element<'_, Message> = container(crate::overlays::tooltip_engine::align_to_side(inner, self.grow_right)).into();
+        let positioned: Element<'_, Message> = container(crate::overlays::tooltip_engine::align_to_side(inner, if self.grow_right { iced::alignment::Horizontal::Left } else { iced::alignment::Horizontal::Right })).into();
 
         let catcher: Element<'_, Message> = button(container(iced::widget::container(iced::widget::Space::new()).width(Length::Fill)))
             .on_press(Message::Dismiss)
