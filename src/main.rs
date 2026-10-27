@@ -1692,7 +1692,7 @@ impl MoonBeautyShellApp {
                                     cmd.env("MBS_OUTPUT", o);
                                 }
                                                                                                                                 cmd
-                                   .env("MBS_TOOLTIP_W", tip_w.max(cap_w as u32).to_string())
+                                   .env("MBS_TOOLTIP_W", compute_tooltip_width(&id, self).to_string())
                                    .env("MBS_TOOLTIP_H", compute_tooltip_height(&id, self).to_string())
                                    .env("MBS_TOOLTIP_DROP_MS", self.settings.tooltip_drop_ms.to_string())
                                    .env("MBS_TOOLTIP_EXPAND_MS", self.settings.tooltip_expand_ms.to_string())
@@ -3510,6 +3510,23 @@ eprintln!("[spawn-env] id={:?} MBS_TOOLTIP_H computed, spawning now", id);
     }
 }
 
+
+fn compute_tooltip_width(id: &str, app: &MoonBeautyShellApp) -> u32 {
+    let settings_w = app.settings.tooltip_size(id).0;
+    // Minimum width per module. Prevents content clipping against the
+    // parallelogram's inward-leaning diagonal borders.
+    let min_w = match id {
+        "alarm" => 640,
+        "weather" => 700,
+        "calendar" => 500,
+        "music" => 480,
+        "cpu" | "gpu" => 440,
+        "ram" => 560,
+        "net" => 500,
+        _ => 400,
+    };
+    settings_w.max(min_w)
+}
 
 fn compute_tooltip_height(id: &str, app: &MoonBeautyShellApp) -> u32 {
     let bar_h = app.settings.bar_height;
