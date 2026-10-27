@@ -374,6 +374,9 @@ impl App {
                     }
                 }
                 InfoData::Music(track_opt) => {
+                    // Extra horizontal padding so widgets don't clip against the diagonal edges
+                    let safe = safe + 20.0;
+
                     let (title, artist, _album, playing, pos, len, _url, vol) = match track_opt {
                         Some(tr) => (tr.title.clone(), tr.artist.clone(), tr.album.clone(), tr.is_playing, tr.position_sec, tr.length_sec, tr.url.clone(), tr.volume_pct),
                         None => ("No Track".into(), "No Artist".into(), "".into(), false, 0.0, 0.0, None, 100),
