@@ -182,7 +182,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     // ── Lock auth test mode ──
     if args.iter().any(|a| a == "--test-lock-auth") {
-        moon_beauty_shell::libraries::backend::lock_coordinator::LockCoordinator::run_auth_test();
+        moon_beauty_shell::overlays::lockscreen::LockCoordinator::run_auth_test();
     }
 
     // ── Multi-monitor lock coordinator (parent mode) ──
@@ -192,7 +192,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     if args.iter().any(|a| a == "--lockscreen")
         && !args.iter().any(|a| a == "--lockscreen-instance")
     {
-        moon_beauty_shell::libraries::backend::lock_coordinator::LockCoordinator::spawn();
+        moon_beauty_shell::overlays::lockscreen::LockCoordinator::spawn();
     }
 
     // --quickshot was replaced by --screenshot --annotate.
@@ -675,51 +675,21 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     .run()
 }
 
-fn handle_lock_keypress(event: iced::Event, status: iced::event::Status, _window: iced::window::Id) -> Option<Message> {
-    let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-        modified_key, text, ..
-    }) = event
-    else {
-        return None;
-    };
+fn handle_lock_keypress(
+    event: iced::Event,
+    status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Message> {
     if status == iced::event::Status::Captured {
         return None;
     }
-
-    use iced::keyboard::{Key, key::Named};
-
-    // Named control keys FIRST. Enter's `text` is Some("\r"), which is a
-    // control char — must check `modified_key` before the printable filter
-    // below, or Enter gets rejected and Submit is never sent to the
-    // coordinator (which is exactly why the lockscreen stayed locked).
-    if let Key::Named(named) = &modified_key {
-        if matches!(named, Named::Enter | Named::Backspace | Named::Tab) {
-            if std::env::var_os("MBS_LOCK_DEBUG").is_some() {
-                eprintln!("[lock-key] named: {:?}", named);
-            }
-            return Some(Message::Lock(LockMessage::KeyPress(modified_key)));
+    let debug = std::env::var_os("MBS_LOCK_DEBUG").is_some();
+    moon_beauty_shell::overlays::lockscreen::resolve_lock_key(event).map(|k| {
+        if debug {
+            eprintln!("[lock-key] resolved: {:?}", k);
         }
-    }
-
-    // Printable chars: prefer `text` (respects IME, keyboard layout, and
-    // shift/caps). Filter control chars so stray \r\n don't pollute.
-    if let Some(t) = text {
-        if !t.is_empty() && !t.chars().any(|c| c.is_control()) {
-            if std::env::var_os("MBS_LOCK_DEBUG").is_some() {
-                eprintln!("[lock-key] text: {:?}", t);
-            }
-            return Some(Message::Lock(LockMessage::KeyPress(Key::Character(t))));
-        }
-    }
-
-    // Fallback: modified_key for chars where text is absent.
-    if let Key::Character(c) = modified_key {
-        if !c.is_empty() {
-            return Some(Message::Lock(LockMessage::KeyPress(Key::Character(c))));
-        }
-    }
-
-    None
+        Message::Lock(LockMessage::KeyPress(k))
+    })
 }
 
 fn handle_email_keypress(event: iced::Event, status: iced::event::Status, _window: iced::window::Id) -> Option<Message> {
@@ -1881,7 +1851,7 @@ impl MoonBeautyShellApp {
                                     Some(self.settings.notif_screen_name.as_str())
                                 } else { None };
                                 let sw = get_screen_width_for(target_output);
-                                let cx = if recent_click && self.last_cursor_x > 0.0 {
+                                let _cx = if recent_click && self.last_cursor_x > 0.0 {
                                     self.last_cursor_x as i32
                                 } else {
                                     capsule_center_x(&self.settings, sw, &id)

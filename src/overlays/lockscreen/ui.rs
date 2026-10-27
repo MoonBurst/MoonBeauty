@@ -2,7 +2,7 @@ use chrono::Local;
 use iced::widget::{column, container, text};
 use iced::{Alignment, Element, Length, Padding};
 use std::sync::mpsc;
-use crate::libraries::backend::lock_coordinator::LockIpc;
+use super::coordinator::LockIpc;
 
 use crate::libraries::config::theme::ShellTheme;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
