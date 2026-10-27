@@ -4,6 +4,8 @@
 //!               WeatherAlert (danger/warning severity classification)
 //! - `tooltip` : the standalone layer-shell popup spawned by `--weather-tooltip`
 //!               from main.rs when the weather capsule is clicked
+#![allow(clippy::doc_lazy_continuation)]
+#![allow(clippy::doc_overindented_list_items)]
 
 pub mod client;
 pub mod tooltip;

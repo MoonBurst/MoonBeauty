@@ -29,6 +29,7 @@ pub struct LockscreenOverlay {
     ipc_tx: Option<mpsc::Sender<LockIpc>>,
     ipc_rx: Option<mpsc::Receiver<LockIpc>>,
     pending_sends: u32,
+    #[allow(dead_code)]
     last_tick: std::time::Instant,
 }
 
@@ -168,9 +169,7 @@ impl LockscreenOverlay {
     ///   None otherwise (updates applied in-place)
     pub fn drain_ipc(&mut self) -> Option<LockMessage> {
         let mut result = None;
-        let Some(rx) = self.ipc_rx.as_ref() else {
-            return None;
-        };
+        let rx = self.ipc_rx.as_ref()?;
         while let Ok(msg) = rx.try_recv() {
             match msg {
                 LockIpc::BufferUpdate(n) => {
@@ -271,7 +270,7 @@ impl LockscreenOverlay {
         // never overflows the card.
         let field_w = (280.0 + pad * 6.67).min(520.0);
         let field_h = (40.0 + pad * 1.33).min(80.0);
-        let cut_u16 = (pad * 1.33).max(8.0).min(28.0) as u16;
+        let cut_u16 = (pad * 1.33).clamp(8.0, 28.0) as u16;
 
         {
             use std::sync::OnceLock;

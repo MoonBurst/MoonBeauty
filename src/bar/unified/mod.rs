@@ -6,6 +6,8 @@
 //! - `borg`   : BorgBackend (backup status file poller), BorgStatus
 //! - `checks` : check_unified_items, toggle_item, UnifiedItemStatus
 //!              (declarative health checks from settings.unified_items)
+#![allow(clippy::doc_lazy_continuation)]
+#![allow(clippy::doc_overindented_list_items)]
 
 pub mod borg;
 pub mod checks;

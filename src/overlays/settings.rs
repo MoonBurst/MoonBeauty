@@ -2639,7 +2639,7 @@ impl SettingsOverlay {
                     ],
                     slider(
                         5..=100,
-                        (settings.tooltip_drop_ms / 10).max(5).min(100),
+                        (settings.tooltip_drop_ms / 10).clamp(5, 100),
                         |v: u32| SettingsMessage::TooltipDropMs(v * 10)
                     )
                     .width(Length::Fill),
@@ -2660,7 +2660,7 @@ impl SettingsOverlay {
                     ],
                     slider(
                         5..=100,
-                        (settings.tooltip_expand_ms / 10).max(5).min(100),
+                        (settings.tooltip_expand_ms / 10).clamp(5, 100),
                         |v: u32| SettingsMessage::TooltipExpandMs(v * 10)
                     )
                     .width(Length::Fill),

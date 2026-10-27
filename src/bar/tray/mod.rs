@@ -8,6 +8,8 @@
 //!
 //! Both `popup` and `context` are standalone layer-shell processes spawned
 //! from `main.rs` when the bar's tray capsule is clicked.
+#![allow(clippy::doc_lazy_continuation)]
+#![allow(clippy::doc_overindented_list_items)]
 
 pub mod context;
 pub mod popup;

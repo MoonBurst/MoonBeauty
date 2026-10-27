@@ -248,7 +248,6 @@ impl App {
                     .status();
             }
             Message::MusicSeek(secs) => {
-                let secs = secs;
                 return Task::perform(
                     async move {
                         let _ = crate::libraries::backend::MprisBackend::set_position(secs).await;
@@ -257,7 +256,6 @@ impl App {
                 );
             }
             Message::MusicSetVolume(vol) => {
-                let vol = vol;
                 return Task::perform(
                     async move {
                         let _ = crate::libraries::backend::MprisBackend::set_volume(vol).await;

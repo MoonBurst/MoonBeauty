@@ -3,6 +3,7 @@
 //! Enumerates `org.mpris.MediaPlayer2.*` bus names, prefers whichever is
 //! currently Playing, and reads/writes the standard Player interface.
 
+#![allow(clippy::type_complexity)]
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::process::Command;

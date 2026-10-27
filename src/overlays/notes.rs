@@ -97,7 +97,7 @@ impl NotesOverlay {
             .collect();
         match self.sort_mode {
             SortMode::Alphabetical => notes.sort_by_key(|a| a.content.to_lowercase()),
-            SortMode::Newest => notes.sort_by(|a, b| b.id.cmp(&a.id)),
+            SortMode::Newest => notes.sort_by_key(|x| std::cmp::Reverse(x.id)),
             SortMode::Oldest => notes.sort_by_key(|a| a.id),
         }
         notes.into_iter().map(|n| n.id).collect()

@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_match)]
 use super::*;
 
 impl MoonBeautyShellApp {
@@ -775,10 +776,6 @@ impl MoonBeautyShellApp {
                                 // subscription (see subscription()), which polls
                                 // tray_opened_at.elapsed() every 500ms while
                                 // tray_expanded is true. No per-open timer needed.
-                                return Command::perform(
-                                    moon_beauty_shell::bar::tray::watcher::fetch_tray_items(),
-                                    Message::TrayItemsLoaded,
-                                );
                                 return Command::perform(
                                     moon_beauty_shell::bar::tray::watcher::fetch_tray_items(),
                                     Message::TrayItemsLoaded,

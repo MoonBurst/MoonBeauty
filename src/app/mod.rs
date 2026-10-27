@@ -30,7 +30,6 @@ use crate::{
     detect_notif_surface,
     detect_standalone_overlay,
     focus_notification_app,
-    focused_app_id,
     handle_annotator_text_input,
     handle_email_keypress,
     handle_lock_keypress,
@@ -45,9 +44,6 @@ use iced::{Element, Length, Padding, Task as Command};
 use moon_beauty_shell::overlays::screenshot::annotator::Tool;
 use moon_beauty_shell::bar::outputs::{get_screen_width_for, resolve_primary_output};
 use moon_beauty_shell::bar::geometry::{capsule_actual_width, capsule_center_x};
-use moon_beauty_shell::bar::tooltip_spawn::{
-    compute_height as compute_tooltip_height, spawn as spawn_tooltip, SpawnRequest,
-};
 use moon_beauty_shell::bar::unified::UnifiedTelemetry;
 use moon_beauty_shell::bar::{CapsuleAction, TopBar, TopBarMessage};
 use moon_beauty_shell::libraries::backend::*;
@@ -57,6 +53,7 @@ use moon_beauty_shell::overlays::*;
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    #[allow(dead_code)]
     Noop,
     TickHardware,
     TickWeather,
@@ -66,6 +63,7 @@ pub enum Message {
         Vec<moon_beauty_shell::libraries::backend::email_client::NativeEnvelope>,
         Vec<moon_beauty_shell::libraries::backend::email_client::NativeEnvelope>,
     ),
+    #[allow(dead_code)]
     FocusComposeField,
     ComposeTabPressed(bool),
     WeatherLoaded(Option<moon_beauty_shell::bar::weather::WeatherData>),
@@ -112,6 +110,7 @@ pub enum Message {
     TrayItemsLoaded(Vec<moon_beauty_shell::bar::tray::TrayItem>),
     TrayAnimTick,
     TrayWatchdogTick,
+    #[allow(dead_code)]
     CollapseTray,
     /// Pre-computed toast rectangles (surface-local coords). Emitted
     /// whenever the toast count changes; `try_into` converts it to
@@ -207,6 +206,7 @@ pub struct MoonBeautyShellApp {
     pub notifs: NotificationOverlay,
     pub settings_ui: SettingsOverlay,
     pub lockscreen: LockscreenOverlay,
+    #[allow(dead_code)]
     pub weather_tick: bool,
 
     pub last_cursor_x: f32,

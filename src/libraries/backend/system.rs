@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+#![allow(clippy::empty_line_after_doc_comments)]
 use std::fs;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
@@ -382,7 +384,7 @@ impl SystemCollector {
                     )
                 })
                 .collect();
-            procs.sort_by(|a, b| b.2.cmp(&a.2));
+            procs.sort_by_key(|x| std::cmp::Reverse(x.2));
 
             let top_procs = procs
                 .into_iter()

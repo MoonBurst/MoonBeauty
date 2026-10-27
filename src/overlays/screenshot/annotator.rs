@@ -866,9 +866,7 @@ impl canvas::Program<AnnotatorMessage> for OverlayCanvas {
         if self.reveal_mode {
             return None;
         }
-        let Some(dr) = compute_display_rect(bounds, self.image_size) else {
-            return None;
-        };
+        let dr = compute_display_rect(bounds, self.image_size)?;
         let scale = (dr.width / self.image_size.width).max(0.0001);
         let to_img = |p: Point| Point::new((p.x - dr.x) / scale, (p.y - dr.y) / scale);
         let clamp_img = |p: Point| {
