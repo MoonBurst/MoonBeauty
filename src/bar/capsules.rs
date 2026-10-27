@@ -545,11 +545,21 @@ impl CapsuleRenderer {
                         .height(Length::Fixed(icon_size))
                         .into()
                 } else {
-                    let initial = item.title.chars().next().unwrap_or('?').to_uppercase().to_string();
+                    let initial = item.title.chars().next()
+                        .or_else(|| item.id.chars().next())
+                        .or_else(|| item.tooltip.chars().next())
+                        .unwrap_or('?')
+                        .to_uppercase()
+                        .to_string();
                     text(initial).size(((icon_size * 0.7))).color(theme.text).into()
                 }
             } else {
-                let initial = item.title.chars().next().unwrap_or('?').to_uppercase().to_string();
+                let initial = item.title.chars().next()
+                    .or_else(|| item.id.chars().next())
+                    .or_else(|| item.tooltip.chars().next())
+                    .unwrap_or('?')
+                    .to_uppercase()
+                    .to_string();
                 text(initial).size(((icon_size * 0.7))).color(theme.text).into()
             };
 

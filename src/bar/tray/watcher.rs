@@ -100,6 +100,7 @@ pub fn spawn() {
 // ── SNI client side: enumeration, icons, activation ────────────────
 
 use std::path::PathBuf;
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone)]
 pub struct TrayItem {
@@ -264,35 +265,152 @@ fn parse_registered(s: &str) -> Option<(String, String)> {
 fn resolve_icon(icon_name: &str) -> Option<String> {
     use std::path::Path;
     if icon_name.is_empty() { return None; }
-    if icon_name.starts_with('/') {
-        return if Path::new(icon_name).exists() { Some(icon_name.to_string()) } else { None };
+
+    // Cache directory. Content-hashed filenames below ensure iced's
+    // internal image-handle cache invalidates whenever the bytes change.
+    let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join("mbs-tray");
+    let _ = std::fs::create_dir_all(&runtime_dir);
+
+    let safe_name: String = icon_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+
+    // Fast path: if a previously-normalized version is already cached, reuse.
+    // Files are named "icon-<safe>.<ext>" — we check all possible extensions.
+    for ext in ["png", "svg", "xpm"] {
+        let cached = runtime_dir.join(format!("icon-{}.{}", safe_name, ext));
+        if cached.exists() && std::fs::metadata(&cached).map(|m| m.len() > 0).unwrap_or(false) {
+            return Some(cached.to_string_lossy().into_owned());
+        }
     }
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-    let roots = [
-        PathBuf::from("/run/current-system/sw/share/icons/hicolor"),
-        PathBuf::from("/usr/share/icons/hicolor"),
-        PathBuf::from("/usr/local/share/icons/hicolor"),
-        home.join(".local/share/icons/hicolor"),
-        home.join(".local/share/flatpak/exports/share/icons/hicolor"),
-        home.join(".nix-profile/share/icons/hicolor"),
-    ];
-    let sizes = ["48x48", "64x64", "128x128", "256x256", "512x512", "scalable", "symbolic"];
-    let exts = ["png", "svg", "xpm"];
-    for root in &roots {
-        for size in &sizes {
-            for ext in &exts {
-                let p = root.join(size).join("apps").join(format!("{}.{}", icon_name, ext));
-                if p.exists() { return Some(p.to_string_lossy().into_owned()); }
+
+    // Locate the source file
+    let source: std::path::PathBuf = if icon_name.starts_with('/') {
+        if !Path::new(icon_name).exists() { return None; }
+        std::path::PathBuf::from(icon_name)
+    } else {
+        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+        let roots = [
+            std::path::PathBuf::from("/run/current-system/sw/share/icons/hicolor"),
+            std::path::PathBuf::from("/usr/share/icons/hicolor"),
+            std::path::PathBuf::from("/usr/local/share/icons/hicolor"),
+            home.join(".local/share/icons/hicolor"),
+            home.join(".local/share/flatpak/exports/share/icons/hicolor"),
+            home.join(".nix-profile/share/icons/hicolor"),
+        ];
+        let sizes = ["48x48", "64x64", "128x128", "256x256", "512x512", "scalable", "symbolic"];
+        let exts = ["png", "svg", "xpm"];
+
+        let mut found: Option<std::path::PathBuf> = None;
+        'search: for root in &roots {
+            for size in &sizes {
+                for ext in &exts {
+                    let candidate = root.join(size).join("apps").join(format!("{}.{}", icon_name, ext));
+                    if candidate.exists() { found = Some(candidate); break 'search; }
+                }
+            }
+        }
+        if found.is_none() {
+            'search2: for pix in ["/run/current-system/sw/share/pixmaps", "/usr/share/pixmaps"] {
+                for ext in &exts {
+                    let candidate = std::path::PathBuf::from(pix).join(format!("{}.{}", icon_name, ext));
+                    if candidate.exists() { found = Some(candidate); break 'search2; }
+                }
+            }
+        }
+        found?
+    };
+
+    // Decide destination extension. SVG → keep as SVG (iced has svg handle).
+    // Everything else → normalize to PNG (ImageMagick rewrites cleanly).
+    let src_ext = source.extension().and_then(|s| s.to_str()).unwrap_or("png");
+    let is_svg_src = src_ext.eq_ignore_ascii_case("svg");
+
+    // Base dest paths (no hash yet)
+    let base_dest = if is_svg_src {
+        runtime_dir.join(format!("icon-{}.svg", safe_name))
+    } else {
+        runtime_dir.join(format!("icon-{}.png", safe_name))
+    };
+
+    // Helper: rename file to include a content hash, invalidating iced's
+    // image cache whenever bytes change. Returns the final path.
+    let hash_and_finalize = |path: &std::path::Path| -> Option<String> {
+        let bytes = std::fs::read(path).ok()?;
+        let hash = sha2::Sha256::digest(&bytes);
+        let hex = format!("{:x}", hash);
+        let short = &hex[..8];
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("png");
+        let stem = path.file_stem().and_then(|s| s.to_str())?;
+        let final_name = format!("{}-{}.{}", stem, short, ext);
+        let final_path = path.with_file_name(final_name);
+        if final_path != path {
+            std::fs::rename(path, &final_path).ok()?;
+        }
+        Some(final_path.to_string_lossy().into_owned())
+    };
+
+
+    // ImageMagick availability check (cached once per call for simplicity;
+    // it's cheap — just which())
+    let magick = if std::process::Command::new("magick").arg("--version").output()
+        .map(|o| o.status.success()).unwrap_or(false)
+    { Some("magick") }
+    else if std::process::Command::new("convert").arg("--version").output()
+        .map(|o| o.status.success()).unwrap_or(false)
+    { Some("convert") }
+    else { None };
+
+    // ── SVG path: no re-encode, just copy ──────────────────────────
+    if is_svg_src {
+        match std::fs::copy(&source, &base_dest) {
+            Ok(_) => return hash_and_finalize(&base_dest),
+            Err(e) => {
+                eprintln!("[tray-icon] {} svg copy failed: {}", icon_name, e);
+                return None;
             }
         }
     }
-    for pix in ["/run/current-system/sw/share/pixmaps", "/usr/share/pixmaps"] {
-        for ext in &exts {
-            let p = PathBuf::from(pix).join(format!("{}.{}", icon_name, ext));
-            if p.exists() { return Some(p.to_string_lossy().into_owned()); }
+
+    // ── Raster path: ALWAYS normalize via ImageMagick ──────────────
+    // Rationale: some shipped PNGs (notably Steam's steam_tray_mono.png)
+    // are structurally valid enough that `image` crate's header parser
+    // accepts them, but iced's render pipeline fails at pixel data (or
+    // fails to render silently). Re-encoding through ImageMagick strips
+    // malformed chunks (broken iCCP, etc.) and guarantees a clean PNG
+    // iced can render.
+    if let Some(bin) = magick {
+        let status = std::process::Command::new(bin)
+            .args([
+                source.to_str().unwrap_or(""),
+                "-strip",                        // strip all metadata/chunks
+                "-define", "png:color-type=6",   // RGBA
+                base_dest.to_str().unwrap_or(""),
+            ])
+            .status();
+        match status {
+            Ok(s) if s.success() => {
+                if base_dest.exists() && std::fs::metadata(&base_dest).map(|m| m.len() > 0).unwrap_or(false) {
+                    return hash_and_finalize(&base_dest);
+                }
+                eprintln!("[tray-icon] {} magick produced empty output", icon_name);
+            }
+            Ok(s) => eprintln!("[tray-icon] {} magick exited {:?}", icon_name, s.code()),
+            Err(e) => eprintln!("[tray-icon] {} magick spawn: {}", icon_name, e),
         }
+    } else {
+        eprintln!("[tray-icon] {} no ImageMagick; copying raw (may not render)", icon_name);
     }
-    None
+
+    // Fallback: raw copy (may fail to render, but at least icon_path exists)
+    match std::fs::copy(&source, &base_dest) {
+        Ok(_) => hash_and_finalize(&base_dest),
+        Err(_) => None,
+    }
 }
 
 fn save_pixmap(id: &str, w: u32, h: u32, data: &[u8]) -> Option<String> {

@@ -64,9 +64,13 @@ pub enum Message {
     Lock(LockMessage),
     DismissActiveOverlay,
     CloseShell,
+    /// Background fetch of tray items — fires on startup and
+    /// every 15s. Ensures the first open has a correct
+    /// item count (avoids the 206→186 re-animation flicker).
+    FetchTrayItems,
     TrayItemsLoaded(Vec<moon_beauty_shell::bar::tray::TrayItem>),
     TrayAnimTick,
-    CollapseTrayIfGen(u64),
+    TrayWatchdogTick,
     CollapseTray,
     /// Pre-computed toast rectangles (surface-local coords). Emitted
     /// whenever the toast count changes; `try_into` converts it to
@@ -136,6 +140,11 @@ pub struct MoonBeautyShellApp {
     pub tray_anim_started_at: std::time::Instant,
     pub tray_anim_duration_ms: u64,
     pub tray_timeout_gen: u64,
+    /// When the tray was last opened. Used by the TrayWatchdogTick
+    /// subscription to close the tray when `settings.tray_timeout_sec`
+    /// expires. Independent from `tray_anim_started_at` because the
+    /// latter is reset by TrayItemsLoaded when item count changes.
+    pub tray_opened_at: std::time::Instant,
     pub detected_gpus: Vec<moon_beauty_shell::libraries::backend::GpuInfo>,
 
     pub launcher: AppLauncher,

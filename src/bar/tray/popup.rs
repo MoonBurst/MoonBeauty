@@ -187,8 +187,18 @@ impl App {
             for item in &self.items {
                 let label = if !item.title.is_empty() { item.title.clone() } else { item.id.clone() };
                 let icon_elem: Element<'_, Message> = if let Some(path) = &item.icon_path {
-                    iced::widget::image(iced::widget::image::Handle::from_path(path.clone()))
-                        .width(Length::Fixed(22.0)).height(Length::Fixed(22.0)).into()
+                    if path.ends_with(".svg") {
+                        iced::widget::svg(iced::widget::svg::Handle::from_path(path.clone()))
+                            .width(Length::Fixed(22.0))
+                            .height(Length::Fixed(22.0))
+                            .into()
+                    } else {
+                        iced::widget::image(iced::widget::image::Handle::from_path(path.clone()))
+                            .width(Length::Fixed(22.0))
+                            .height(Length::Fixed(22.0))
+                            .content_fit(iced::ContentFit::Contain)
+                            .into()
+                    }
                 } else {
                     text("●").size(18).color(icon_color).into()
                 };
