@@ -31,6 +31,16 @@ impl Default for PassOverlay {
 }
 
 impl PassOverlay {
+    /// Cheap constructor — no filesystem walk. Used when the pass
+    /// overlay is not the target (spawning for another overlay).
+    pub fn empty() -> Self {
+        Self {
+            search_query: String::new(),
+            filtered_keys: Vec::new(),
+            all_keys: Vec::new(),
+        }
+    }
+
     pub fn new() -> Self {
         let all_keys = Self::scan_passwords();
         Self {

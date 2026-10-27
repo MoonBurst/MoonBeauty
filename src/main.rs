@@ -16,6 +16,10 @@ use moon_beauty_shell::overlays::screenshot::annotator::Tool;
 use moon_beauty_shell::bar::unified::UnifiedTelemetry;
 use moon_beauty_shell::overlays::screenshot;
 
+pub(crate) static TM0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+
+
 mod app;
 
 use app::{Message, MoonBeautyShellApp};
@@ -189,6 +193,8 @@ fn app_style(_state: &MoonBeautyShellApp, _theme: &iced::Theme) -> iced::theme::
 }
 
 pub fn main() -> Result<(), iced_layershell::Error> {
+    TM0.set(std::time::Instant::now()).ok();
+    eprintln!("[startup-m] process+0ms: entered main");
     let args: Vec<String> = std::env::args().collect();
 
     // ── Lock auth test mode ──
@@ -560,7 +566,9 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         "[main-v225] standalone_target={:?} is_notif={}",
         standalone_target, is_notif_surface
     );
+    eprintln!("[startup-m] process+{}ms: after arg parsing", crate::TM0.get().map(|t| t.elapsed().as_millis()).unwrap_or(0));
     let settings = ShellSettings::load();
+    eprintln!("[startup-m] process+{}ms: after ShellSettings::load", crate::TM0.get().map(|t| t.elapsed().as_millis()).unwrap_or(0));
 
     if !is_notif_surface && standalone_target.is_none() {
         let _ = std::process::Command::new("pkill")
@@ -573,14 +581,17 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             .spawn();
     }
 
-    let resolved_output: Option<String> = if settings.notif_screen_name != "Auto"
+    // Fast path: bar already set MBS_OUTPUT — child inherits it.
+    let resolved_output: Option<String> = if std::env::var("MBS_OUTPUT").is_ok() {
+        None
+    } else if settings.notif_screen_name != "Auto"
         && settings.notif_screen_name != "Auto (Primary)"
         && !settings.notif_screen_name.is_empty()
     {
         Some(settings.notif_screen_name.clone())
     } else {
-        // Resolve ONCE at startup. Prefer primary; fall back to focused.
-        let primary = std::process::Command::new("swaymsg")
+        // Single swaymsg call; prefer primary, then focused, in one pass.
+        std::process::Command::new("swaymsg")
             .args(["-t", "get_outputs", "-r"])
             .output()
             .ok()
@@ -592,23 +603,13 @@ pub fn main() -> Result<(), iced_layershell::Error> {
                         return o.get("name").and_then(|n| n.as_str()).map(String::from);
                     }
                 }
-                None
-            });
-        let focused = std::process::Command::new("swaymsg")
-            .args(["-t", "get_outputs", "-r"])
-            .output()
-            .ok()
-            .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
-            .and_then(|v| {
-                let arr = v.as_array()?;
                 for o in arr {
                     if o.get("focused").and_then(|f| f.as_bool()) == Some(true) {
                         return o.get("name").and_then(|n| n.as_str()).map(String::from);
                     }
                 }
                 None
-            });
-        primary.or(focused)
+            })
     };
     // Only the top-level bar process resolves MBS_OUTPUT.
     // Child processes (tooltips, notif-surface, standalone overlays) inherit
@@ -624,6 +625,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             std::env::var("MBS_OUTPUT")
         );
     }
+    eprintln!("[startup-m] process+{}ms: after resolved_output (swaymsg)", crate::TM0.get().map(|t| t.elapsed().as_millis()).unwrap_or(0));
     let binded_output_name = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
 
     if is_notif_surface {
@@ -752,7 +754,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         }
     }
 
-    iced_layershell::application(
+    let _app = iced_layershell::application(
         MoonBeautyShellApp::new_app,
         || "moon-beauty-shell".to_string(),
         MoonBeautyShellApp::update,
@@ -764,8 +766,9 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     .settings(Settings {
         layer_settings,
         ..Default::default()
-    })
-    .run()
+    });
+    eprintln!("[startup-m] process+{}ms: before app.run()", crate::TM0.get().map(|t| t.elapsed().as_millis()).unwrap_or(0));
+    _app.run()
 }
 
 fn handle_lock_keypress(

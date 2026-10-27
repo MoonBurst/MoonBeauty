@@ -2,15 +2,20 @@ use super::*;
 
 impl MoonBeautyShellApp {
     pub fn subscription(&self) -> iced::Subscription<Message> {
-        let clock_sub =
-            iced::time::every(std::time::Duration::from_millis(1000)).map(|_| Message::TickClock);
+        let is_bar = !self.is_standalone && !self.is_notif_surface;
+        let clock_sub = if is_bar {
+            iced::time::every(std::time::Duration::from_millis(1000)).map(|_| Message::TickClock)
+        } else {
+            iced::Subscription::none()
+        };
         let toast_sub = if self.is_notif_surface && !self.notifs.active_toasts.is_empty() {
             iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::TickToasts)
         } else {
             iced::Subscription::none()
         };
 
-        let email_sync_sub = if moon_beauty_shell::libraries::backend::email_client::config_exists()
+        let email_sync_sub = if is_bar
+            && moon_beauty_shell::libraries::backend::email_client::config_exists()
         {
             iced::time::every(std::time::Duration::from_secs(60)).map(|_| Message::TickEmailSync)
         } else {
@@ -23,12 +28,19 @@ impl MoonBeautyShellApp {
             iced::Subscription::none()
         };
 
-        let hw_sub = iced::time::every(std::time::Duration::from_millis(
-            self.settings.hardware_poll_interval_ms,
-        ))
-        .map(|_| Message::TickHardware);
-        let weather_sub =
-            iced::time::every(std::time::Duration::from_secs(900)).map(|_| Message::TickWeather);
+        let hw_sub = if is_bar {
+            iced::time::every(std::time::Duration::from_millis(
+                self.settings.hardware_poll_interval_ms,
+            ))
+            .map(|_| Message::TickHardware)
+        } else {
+            iced::Subscription::none()
+        };
+        let weather_sub = if is_bar {
+            iced::time::every(std::time::Duration::from_secs(900)).map(|_| Message::TickWeather)
+        } else {
+            iced::Subscription::none()
+        };
 
         let clip_sub = if matches!(self.active_overlay, Some(OverlayTarget::Clipboard)) {
             iced::event::listen_with(|event, _status, _window| {
@@ -460,7 +472,7 @@ impl MoonBeautyShellApp {
         let ipc_sub = if self.is_standalone || self.is_notif_surface {
             iced::Subscription::none()
         } else {
-            iced::time::every(std::time::Duration::from_millis(50)).map(|_| Message::PollIpc)
+            iced::time::every(std::time::Duration::from_millis(10)).map(|_| Message::PollIpc)
         };
 
         // Lockscreen watchdog: 500ms cadence. Combined with the

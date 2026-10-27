@@ -78,6 +78,10 @@ impl RemindersOverlay {
         }
     }
 
+    pub fn empty() -> Self {
+        Self { task_text: String::new(), when_text: String::new(), entries: Vec::new(), scroll_y: 0.0, active_field: 0, selected_idx: None }
+    }
+
     pub fn storage_path() -> PathBuf {
         let base = dirs::runtime_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
         let mbs = base.join("moon_reminders.json");

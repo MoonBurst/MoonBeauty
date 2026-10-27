@@ -108,6 +108,43 @@ impl Default for EmailOverlay {
 }
 
 impl EmailOverlay {
+    /// Cheap constructor — skips config/contacts load. Used when the
+    /// email overlay is not the target (spawning for another overlay).
+    pub fn empty() -> Self {
+        Self {
+            folders: vec!["INBOX".into()],
+            active_folder: "INBOX".into(),
+            active_folder_idx: 0,
+            envelopes: Vec::new(),
+            active_mail_id: None,
+            selected_index: 0,
+            focus_pane: 0,
+            parsed_email: None,
+            is_composing: false,
+            compose_to: String::new(),
+            compose_subject: String::new(),
+            compose_body: iced::widget::text_editor::Content::new(),
+            active_compose_field: 0,
+            compose_attachments: Vec::new(),
+            compose_manual_attach: String::new(),
+            contacts: Vec::new(),
+            selected_autocomplete_idx: None,
+            is_loading: false,
+            imap_error: None,
+            is_logging_in: false,
+            show_advanced_servers: false,
+            login_email: String::new(),
+            login_password: String::new(),
+            login_imap: "imap.gmail.com".into(),
+            login_smtp: "smtp.gmail.com".into(),
+            use_sops: false,
+            login_sops_key: String::new(),
+            login_error: None,
+            is_adding_folder: false,
+            new_folder_name: String::new(),
+        }
+    }
+
     pub fn new() -> Self {
         let is_logging_in = !crate::libraries::backend::email_client::config_exists();
         Self {

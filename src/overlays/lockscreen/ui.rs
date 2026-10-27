@@ -39,6 +39,19 @@ impl Default for LockscreenOverlay {
 }
 
 impl LockscreenOverlay {
+    pub fn empty() -> Self {
+        Self {
+            buffer_len: 0,
+            auth_failed: false,
+            is_caps_lock: false,
+            cached_global_padding: 12,
+            ipc_tx: None,
+            ipc_rx: None,
+            pending_sends: 0,
+            last_tick: std::time::Instant::now(),
+        }
+    }
+
     pub fn new() -> Self {
         // Only --lockscreen-instance children have MBS_LOCK_SOCKET. Bar,
         // notif-surface, and tooltip processes do not, and warning about

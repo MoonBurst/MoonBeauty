@@ -405,12 +405,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
-name = "beul"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3c3baedf037b161e69da9200947329f52afa3b6e1cdbe6f344d6aa350fedd2f"
-
-[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2129,7 +2123,6 @@ dependencies = [
  "iced_runtime",
  "layershellev",
  "log",
- "mundy",
  "thiserror 2.0.21",
  "tracing",
  "window_clipboard",
@@ -3063,6 +3056,7 @@ dependencies = [
  "futures-util",
  "html2text",
  "iced",
+ "iced_futures",
  "iced_layershell",
  "image",
  "imap",
@@ -3111,7 +3105,6 @@ checksum = "f32eb0db40f2df2bcfb05c93b8f73938d4c26ce9ac8881f1df0c8d3296921a73"
 dependencies = [
  "android-build",
  "async-io",
- "beul",
  "cfg-if",
  "dispatch",
  "futures-channel",

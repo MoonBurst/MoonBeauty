@@ -105,7 +105,12 @@
           ];
           buildInputs = (linkLibs pkgs) ++ (runtimeTools pkgs);
           shellHook = ''
-            export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath (linkLibs pkgs)}:/run/opengl-driver/lib:/run/opengl-driver-32/lib''${LD_LIBRARY_PATH:+:''$LD_LIBRARY_PATH}"
+            # Bake rpath at link time instead of exporting LD_LIBRARY_PATH.
+            # LD_LIBRARY_PATH forces glibc's loader to probe every entry for
+            # every library — ~700 failed openat() calls per spawn, ~130 ms
+            # of wasted disk I/O. rpath uses ld.so.cache, one probe per lib.
+            export NIX_RPATH_PATHS="${pkgs.lib.makeLibraryPath (linkLibs pkgs)}:/run/opengl-driver/lib:/run/opengl-driver-32/lib"
+            export RUSTFLAGS="-C link-arg=-fuse-ld=mold -C link-arg=-Wl,--enable-new-dtags,-rpath,$NIX_RPATH_PATHS"
           '';
         };
 

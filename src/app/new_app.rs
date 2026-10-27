@@ -2,6 +2,9 @@ use super::*;
 
 impl MoonBeautyShellApp {
     pub fn new_app() -> (Self, Command<Message>) {
+        eprintln!("[startup-t] process+{}ms: entered new_app", crate::TM0.get().map(|t| t.elapsed().as_millis()).unwrap_or(0));
+        let _t0 = std::time::Instant::now();
+        eprintln!("[startup-t] t+0ms: entered new_app");
         let args: Vec<String> = std::env::args().collect();
         let standalone_target = detect_standalone_overlay(&args);
         if let Some(idx) = args.iter().position(|a| a == "--tray-context-menu") {
@@ -37,6 +40,7 @@ impl MoonBeautyShellApp {
         let is_notif_surface = detect_notif_surface(&args);
         let is_standalone = standalone_target.is_some();
         let settings = ShellSettings::load();
+        eprintln!("[startup-t] t+{}ms: ShellSettings::load done", _t0.elapsed().as_millis());
         let _tray_width_px = settings.tray_width as f32;
         eprintln!(
             "[startup] tray_width={} tray_timeout={}s",
@@ -97,9 +101,17 @@ impl MoonBeautyShellApp {
             None
         };
 
+        eprintln!("[startup-t] t+{}ms: theme + IPC thread done", _t0.elapsed().as_millis());
         let notif_screen_at_startup = settings.notif_screen_name.clone();
+        eprintln!("[startup-t] t+{}ms: pre-Self", _t0.elapsed().as_millis());
         let app = Self {
-            settings_ui: SettingsOverlay::new(&settings),
+            settings_ui: if is_notif_surface
+                || (is_standalone && !matches!(standalone_target, Some(OverlayTarget::Settings)))
+            {
+                SettingsOverlay::empty()
+            } else {
+                SettingsOverlay::new(&settings)
+            },
             settings,
             theme,
             telemetry: UnifiedTelemetry {
@@ -117,7 +129,7 @@ impl MoonBeautyShellApp {
                 borg: Default::default(),
                 bar_time: ClockBackend::get_bar_time(),
             },
-            active_overlay: standalone_target,
+            active_overlay: standalone_target.clone(),
             weather_tooltip_child: None,
             is_standalone,
             system_collector: SystemCollector::new(),
@@ -146,7 +158,15 @@ impl MoonBeautyShellApp {
                 SystemCollector::list_gpus_sync()
             },
 
-            launcher: AppLauncher::new(),
+            launcher: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Launcher)) {
+                // Cheap constructor: no desktop file scan. Saves 200-400ms
+                // on every non-launcher overlay spawn (clipboard, notes,
+                // email, todo, reminders, calc, pass, unicode, websearch,
+                // annotator, rng, amogus, settings, notifications, etc).
+                AppLauncher::new_empty()
+            } else {
+                AppLauncher::new()
+            },
             calc: {
                 if let Ok(expr) = std::env::var("MBS_CALC_EXPR") {
                     CalculatorOverlay::new_with_input(&expr)
@@ -155,12 +175,16 @@ impl MoonBeautyShellApp {
                 }
             },
             clipboard: ClipboardOverlay::new(),
-            notes: NotesOverlay::new(),
-            pass: PassOverlay::new(),
+            notes: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Notes)) { NotesOverlay::empty() } else { NotesOverlay::new() },
+            pass: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Pass)) {
+                PassOverlay::empty()
+            } else {
+                PassOverlay::new()
+            },
             power: PowerOverlay::new(),
-            todo: TodoOverlay::new(),
-            reminders: RemindersOverlay::new(),
-            dict: DictionaryOverlay::new(),
+            todo: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Todo)) { TodoOverlay::empty() } else { TodoOverlay::new() },
+            reminders: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Reminders)) { RemindersOverlay::empty() } else { RemindersOverlay::new() },
+            dict: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Dictionary)) { DictionaryOverlay::empty() } else { DictionaryOverlay::new() },
             unicode: UnicodeOverlay::new(),
             web: WebSearchOverlay::new(),
             amogus: AmogusOverlay::new(),
@@ -179,9 +203,19 @@ impl MoonBeautyShellApp {
                 a
             },
             rng: RngOverlay::new(),
-            email: EmailOverlay::new(),
-            notifs: NotificationOverlay::new(),
-            lockscreen: LockscreenOverlay::new(),
+            email: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Email)) {
+                EmailOverlay::empty()
+            } else {
+                EmailOverlay::new()
+            },
+            notifs: if is_notif_surface
+                || matches!(standalone_target, Some(OverlayTarget::NotificationsHistory))
+            {
+                NotificationOverlay::new()
+            } else {
+                NotificationOverlay::empty()
+            },
+            lockscreen: if matches!(standalone_target, Some(OverlayTarget::Lockscreen)) { LockscreenOverlay::new() } else { LockscreenOverlay::empty() },
             weather_tick: false,
 
             last_cursor_x: 0.0,
@@ -190,19 +224,27 @@ impl MoonBeautyShellApp {
             last_active_pending_written: None,
             last_lockscreen_check: std::time::Instant::now(),
         };
+        eprintln!("[startup-t] t+{}ms: Self constructed", _t0.elapsed().as_millis());
 
-        let mut init_tasks = vec![
-            Command::done(Message::FetchTrayItems),
-            Command::done(Message::TickEmailSync),
-            Command::perform(
+        // Bar-only init tasks. Overlays (--notes, --clipboard, --settings,
+        // …) and the notif-surface don't render weather/tray/email — the
+        // bar's TopBar::view is the only consumer. Firing them per-spawn
+        // was costing 2 curl subprocesses (~20 ms each) plus a potential
+        // feedback loop through the weather subscription.
+        let is_bar = !is_standalone && !is_notif_surface;
+        let mut init_tasks: Vec<Command<Message>> = Vec::new();
+        if is_bar {
+            init_tasks.push(Command::done(Message::FetchTrayItems));
+            init_tasks.push(Command::done(Message::TickEmailSync));
+            init_tasks.push(Command::perform(
                 async {
                     moon_beauty_shell::bar::weather::WeatherBackend::fetch()
                         .await
                         .ok()
                 },
                 Message::WeatherLoaded,
-            ),
-        ];
+            ));
+        }
 
         if matches!(app.active_overlay, Some(OverlayTarget::Launcher)) {
             // Immediate focus attempt
@@ -356,6 +398,7 @@ impl MoonBeautyShellApp {
             }
         }
 
+        eprintln!("[startup-t] t+{}ms: about to return", _t0.elapsed().as_millis());
         (app, Command::batch(init_tasks))
     }
 }

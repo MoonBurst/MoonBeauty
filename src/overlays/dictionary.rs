@@ -67,6 +67,10 @@ impl DictionaryOverlay {
         }
     }
 
+    pub fn empty() -> Self {
+        Self { word_query: String::new(), active_definitions: Vec::new(), cache: HashMap::new() }
+    }
+
     fn cache_path() -> PathBuf {
         let base = dirs::cache_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
         base.join("moon_dict_cache.json")

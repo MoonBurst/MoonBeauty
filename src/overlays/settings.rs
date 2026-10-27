@@ -206,6 +206,19 @@ impl SettingsOverlay {
         }
     }
 
+    pub fn empty() -> Self {
+        Self {
+            active_tab: SettingsTab::Notifications,
+            selected_screen: "Auto (Primary)".into(),
+            selected_profile: 0,
+            last_save: std::time::Instant::now(),
+            editing_module: None,
+            preview_child: None,
+            last_preview: std::time::Instant::now() - std::time::Duration::from_secs(60),
+            detected_gpus: Vec::new(),
+        }
+    }
+
     pub fn update(&mut self, message: SettingsMessage, settings: &mut ShellSettings) {
         mbs_dbg(&format!(
             "[dbg-update-entry] {:?}",

@@ -425,6 +425,19 @@ impl NotificationOverlay {
         }
     }
 
+    pub fn empty() -> Self {
+        Self {
+            active_toasts: Vec::new(),
+            pending_toasts: VecDeque::new(),
+            history: Vec::new(),
+            show_history: false,
+            stack_target_count: 0,
+            stack_from_count: 0,
+            stack_anim_start: Instant::now(),
+            selected_history_id: None,
+        }
+    }
+
     fn history_path() -> PathBuf {
         let base = dirs::cache_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
         base.join("moon_notification_history.json")

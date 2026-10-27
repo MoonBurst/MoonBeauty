@@ -80,6 +80,10 @@ impl NotesOverlay {
         }
     }
 
+    pub fn empty() -> Self {
+        Self { input_text: String::new(), notes: Vec::new(), selected_id: None, sort_mode: SortMode::Newest }
+    }
+
     fn visible_notes(&self) -> Vec<u64> {
         let query = self.input_text.trim().to_lowercase();
         let mut notes: Vec<&NoteItem> = self
