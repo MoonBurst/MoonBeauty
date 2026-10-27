@@ -3293,14 +3293,12 @@ impl MoonBeautyShellApp {
                     return Command::none();
                 }
 
-                // Measure pause BEFORE anything else. If a tick fires >2s
-                // after the previous one, the session was suspended (TTY
-                // switch, suspend, hibernate). Layer surfaces held by the
-                // lock children are dropped by sway on output detach
-                // WITHOUT sending Closed to the client — from the child's
-                // perspective nothing happened, but its wl_surface is no
-                // longer composited and keyboard grab is gone. Detect via
-                // elapsed-time gap and force a full respawn.
+                // Pause detection: session was suspended (TTY switch, sleep).
+                // Layer surfaces held by lock children are dropped by sway
+                // on output detach WITHOUT sending Closed to the client —
+                // from the child's perspective nothing happened, but its
+                // wl_surface is no longer composited and keyboard grab is
+                // gone. Detect via elapsed-time gap and force a full respawn.
                 let now = std::time::Instant::now();
                 let since_last = now.saturating_duration_since(self.last_lockscreen_check);
                 self.last_lockscreen_check = now;
@@ -3323,23 +3321,47 @@ impl MoonBeautyShellApp {
                     return Command::none();
                 }
 
-                // Also respawn if the coordinator actually exited.
-                let exited = match self.standalone_child.as_mut() {
-                    Some((_, child)) => {
-                        matches!(child.try_wait(), Ok(Some(_)) | Err(_))
-                    }
-                    None => true,
-                };
-                if !exited {
-                    return Command::none();
+                // Exit status discrimination:
+                //   success() == true  → coordinator exited cleanly. The only
+                //     code path that does this is auth success: coordinator
+                //     broadcasts Success, kills children, exits(0). Respawning
+                //     here would immediately re-lock the screen — that's the
+                //     "locks as soon as I unlock it" bug.
+                //   success() == false → crash (nonzero exit or signal kill).
+                //     Respawn to keep the screen locked.
+                match self.standalone_child.as_mut() {
+                    Some((_, child)) => match child.try_wait() {
+                        Ok(None) => {
+                            // Still running.
+                            return Command::none();
+                        }
+                        Ok(Some(status)) => {
+                            if status.success() {
+                                eprintln!(
+                                    "[lockscreen-watchdog] coordinator exited cleanly (auth success), not respawning"
+                                );
+                                self.standalone_child = None;
+                                return Command::none();
+                            }
+                            eprintln!(
+                                "[lockscreen-watchdog] coordinator crashed (code={:?}), respawning",
+                                status.code()
+                            );
+                            self.standalone_child = None;
+                            self.spawn_standalone(OverlayTarget::Lockscreen);
+                            return Command::none();
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[lockscreen-watchdog] try_wait error ({e}), respawning"
+                            );
+                            self.standalone_child = None;
+                            self.spawn_standalone(OverlayTarget::Lockscreen);
+                            return Command::none();
+                        }
+                    },
+                    None => return Command::none(),
                 }
-
-                eprintln!(
-                    "[lockscreen-watchdog] coordinator dead; respawning immediately"
-                );
-                self.standalone_child = None;
-                self.spawn_standalone(OverlayTarget::Lockscreen);
-                return Command::none();
             }
             Message::Noop => {}
             Message::SetToastInputRegion(_) => {
