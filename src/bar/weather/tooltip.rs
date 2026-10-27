@@ -4,8 +4,8 @@ use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use std::time::Instant;
 
-use crate::libraries::backend::weather::{WeatherAlert, WeatherData};
-use crate::libraries::backend::WeatherBackend;
+use crate::bar::weather::client::{WeatherAlert, WeatherData};
+use crate::bar::weather::WeatherBackend;
 use crate::libraries::config::theme::ShellTheme;
 use crate::libraries::config::ShellSettings;
 use crate::libraries::style::shape_box::SlantSide;
@@ -401,13 +401,13 @@ pub fn view_popup_content<'a>(
                 .font(iced::Font::MONOSPACE)
                 .wrapping(iced::widget::text::Wrapping::None);
 
-            col = col.push(crate::overlays::weather_tooltip::slanted_row(
+            col = col.push(crate::bar::weather::tooltip::slanted_row(
                 text_widget.into(), y_mid, effective_target_h, full_slant, false, 20.0, w as f32, 24.0
             ));
         }
     } else {
         let text_widget = iced::widget::text("Loading weather...").size(16).color(theme.muted);
-        col = col.push(crate::overlays::weather_tooltip::slanted_row(
+        col = col.push(crate::bar::weather::tooltip::slanted_row(
             text_widget.into(), 32.0, effective_target_h, full_slant, false, 20.0, w as f32, 24.0
         ));
     }

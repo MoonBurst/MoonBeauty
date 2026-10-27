@@ -182,9 +182,9 @@ impl CapsuleRenderer {
                 let (txt, col) = match &telemetry.weather {
                     Some(w) => {
                         let (prefix, col) = match &w.alert {
-                            crate::libraries::backend::WeatherAlert::Danger(_) => ("🚨 ", theme.danger),
-                            crate::libraries::backend::WeatherAlert::Upcoming(_) => ("⚠️ ", theme.warning),
-                            crate::libraries::backend::WeatherAlert::None => ("", theme.text),
+                            crate::bar::weather::WeatherAlert::Danger(_) => ("🚨 ", theme.danger),
+                            crate::bar::weather::WeatherAlert::Upcoming(_) => ("⚠️ ", theme.warning),
+                            crate::bar::weather::WeatherAlert::None => ("", theme.text),
                         };
                         (format!("{}{}°F/{}°C", prefix, w.temp_f, w.temp_c), col)
                     }

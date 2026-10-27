@@ -645,7 +645,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
 
     if args.iter().any(|a| a == "--weather-tooltip") {
-        match moon_beauty_shell::overlays::weather_tooltip::run() {
+        match moon_beauty_shell::bar::weather::tooltip::run() {
             Ok(()) => std::process::exit(0),
             Err(e) => { eprintln!("[weather-tooltip] {e}"); std::process::exit(1); }
         }
@@ -822,7 +822,7 @@ pub enum Message {
     EmailSyncedWithDiff(Vec<moon_beauty_shell::libraries::backend::email_client::NativeEnvelope>, Vec<moon_beauty_shell::libraries::backend::email_client::NativeEnvelope>),
     FocusComposeField,
     ComposeTabPressed(bool),
-    WeatherLoaded(Option<moon_beauty_shell::libraries::backend::WeatherData>),
+    WeatherLoaded(Option<moon_beauty_shell::bar::weather::WeatherData>),
     TickClock,
     TickToasts,
     MetricsCollected(CpuMetrics, RamMetrics, GpuMetrics, AudioStatus, AudioStatus, Option<MprisTrack>),
@@ -1246,7 +1246,7 @@ impl MoonBeautyShellApp {
         let mut init_tasks = vec![
             Command::done(Message::TickEmailSync),
             Command::perform(async {
-                moon_beauty_shell::libraries::backend::WeatherBackend::fetch().await.ok()
+                moon_beauty_shell::bar::weather::WeatherBackend::fetch().await.ok()
             }, Message::WeatherLoaded)
         ];
 
@@ -1659,7 +1659,7 @@ impl MoonBeautyShellApp {
             Message::EmailSynced => {}
             Message::TickWeather => {
                 return Command::perform(async {
-                    moon_beauty_shell::libraries::backend::WeatherBackend::fetch().await.ok()
+                    moon_beauty_shell::bar::weather::WeatherBackend::fetch().await.ok()
                 }, Message::WeatherLoaded);
             }
             Message::WeatherLoaded(w) => {

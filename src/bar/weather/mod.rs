@@ -1,0 +1,12 @@
+//! Weather capsule + tooltip.
+//!
+//! - `client`  : WeatherBackend (Open-Meteo polling via curl), WeatherData,
+//!               WeatherAlert (danger/warning severity classification)
+//! - `tooltip` : the standalone layer-shell popup spawned by `--weather-tooltip`
+//!               from main.rs when the weather capsule is clicked
+
+pub mod client;
+pub mod tooltip;
+
+pub use client::{WeatherBackend, WeatherData, WeatherAlert};
+pub use tooltip::run as run_weather_tooltip;
