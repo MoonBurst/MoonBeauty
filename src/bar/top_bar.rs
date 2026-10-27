@@ -2,7 +2,7 @@ use iced::widget::{container, row, Row, Stack};
 use iced::{Alignment, Element, Length};
 
 use super::capsules::{CapsuleAction, CapsuleRenderer};
-use crate::libraries::backend::TrayItem;
+use crate::bar::tray::TrayItem;
 use crate::libraries::backend::UnifiedTelemetry;
 use crate::libraries::config::settings::ShellSettings;
 use crate::libraries::config::theme::ShellTheme;

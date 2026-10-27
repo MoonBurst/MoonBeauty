@@ -2,7 +2,7 @@ use iced::widget::{button, column, container, text, Stack};
 use iced::{Element, Length, Task};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use crate::libraries::backend::tray_watcher::TrayMenuItem;
+use crate::bar::tray::watcher::TrayMenuItem;
 use crate::libraries::config::theme::ShellTheme;
 use crate::libraries::config::ShellSettings;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
@@ -46,7 +46,7 @@ impl App {
                 std::thread::spawn(move || {
                     if let Ok(rt) = tokio::runtime::Runtime::new() {
                         rt.block_on(async {
-                            let _ = crate::libraries::backend::tray_watcher::trigger_menu_item(&bus, &menu_path, id).await;
+                            let _ = crate::bar::tray::watcher::trigger_menu_item(&bus, &menu_path, id).await;
                         });
                     }
                 });

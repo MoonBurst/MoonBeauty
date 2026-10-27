@@ -477,9 +477,9 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         let w = args.get(idx + 4).and_then(|s| s.parse().ok()).unwrap_or(250u32);
         let h = args.get(idx + 5).and_then(|s| s.parse().ok()).unwrap_or(400u32);
         if let Ok(json) = std::fs::read_to_string(&json_path) {
-            if let Ok(items) = serde_json::from_str::<Vec<moon_beauty_shell::libraries::backend::TrayMenuItem>>(&json) {
+            if let Ok(items) = serde_json::from_str::<Vec<moon_beauty_shell::bar::tray::TrayMenuItem>>(&json) {
                 let _ = std::fs::remove_file(&json_path);
-                std::process::exit(match moon_beauty_shell::overlays::tray_context::run(items, bus, menu_path, w, h) {
+                std::process::exit(match moon_beauty_shell::bar::tray::context::run(items, bus, menu_path, w, h) {
                     Ok(_) => 0,
                     Err(_) => 1,
                 });
@@ -852,7 +852,7 @@ pub enum Message {
     Lock(LockMessage),
     DismissActiveOverlay,
     CloseShell,
-    TrayItemsLoaded(Vec<moon_beauty_shell::libraries::backend::TrayItem>),
+    TrayItemsLoaded(Vec<moon_beauty_shell::bar::tray::TrayItem>),
     TrayAnimTick,
     CollapseTrayIfGen(u64),
     CollapseTray,
@@ -917,7 +917,7 @@ pub struct MoonBeautyShellApp {
     notif_screen_at_startup: String,
     notif_surface_size: (u32, u32),
     tray_expanded: bool,
-    tray_items: Vec<moon_beauty_shell::libraries::backend::TrayItem>,
+    tray_items: Vec<moon_beauty_shell::bar::tray::TrayItem>,
     tray_anim_width: f32,
     tray_target_width: f32,
     tray_anim_start_width: f32,
@@ -1090,9 +1090,9 @@ impl MoonBeautyShellApp {
         let w = args.get(idx + 4).and_then(|s| s.parse().ok()).unwrap_or(250u32);
         let h = args.get(idx + 5).and_then(|s| s.parse().ok()).unwrap_or(400u32);
         if let Ok(json) = std::fs::read_to_string(&json_path) {
-            if let Ok(items) = serde_json::from_str::<Vec<moon_beauty_shell::libraries::backend::TrayMenuItem>>(&json) {
+            if let Ok(items) = serde_json::from_str::<Vec<moon_beauty_shell::bar::tray::TrayMenuItem>>(&json) {
                 let _ = std::fs::remove_file(&json_path);
-                std::process::exit(match moon_beauty_shell::overlays::tray_context::run(items, bus, menu_path, w, h) {
+                std::process::exit(match moon_beauty_shell::bar::tray::context::run(items, bus, menu_path, w, h) {
                     Ok(_) => 0,
                     Err(_) => 1,
                 });
@@ -1148,7 +1148,7 @@ impl MoonBeautyShellApp {
         let notif_rx = if is_notif_surface {
             let (tx, rx) = std::sync::mpsc::channel();
             moon_beauty_shell::overlays::notifications::spawn(tx);
-            moon_beauty_shell::libraries::backend::tray_watcher::spawn();
+            moon_beauty_shell::bar::tray::watcher::spawn();
             Some(rx)
         } else {
             None
@@ -2022,7 +2022,7 @@ impl MoonBeautyShellApp {
                                 if timeout > 0 {
                                     return Command::batch(vec![
                                         Command::perform(
-                                            moon_beauty_shell::libraries::backend::tray_watcher::fetch_tray_items(),
+                                            moon_beauty_shell::bar::tray::watcher::fetch_tray_items(),
                                             Message::TrayItemsLoaded,
                                         ),
                                         Command::perform(
@@ -2035,7 +2035,7 @@ impl MoonBeautyShellApp {
                                     ]);
                                 }
                                 return Command::perform(
-                                    moon_beauty_shell::libraries::backend::tray_watcher::fetch_tray_items(),
+                                    moon_beauty_shell::bar::tray::watcher::fetch_tray_items(),
                                     Message::TrayItemsLoaded,
                                 );
                             } else {
@@ -2047,7 +2047,7 @@ impl MoonBeautyShellApp {
                             self.close_tray();
                             return Command::perform(
                                 async move {
-                                    let _ = moon_beauty_shell::libraries::backend::tray_watcher::activate_tray_item(&item.bus, &item.path).await;
+                                    let _ = moon_beauty_shell::bar::tray::watcher::activate_tray_item(&item.bus, &item.path).await;
                                 },
                                 |_| Message::TopBar(TopBarMessage::Noop)
                             );
@@ -2055,7 +2055,7 @@ impl MoonBeautyShellApp {
                         CapsuleAction::TrayContextMenu(item) => {
                             let item_clone = item.clone();
                             return Command::perform(async move {
-                                if let Some((menu_path, items)) = moon_beauty_shell::libraries::backend::tray_watcher::get_menu_tree(&item_clone.bus, &item_clone.path).await {
+                                if let Some((menu_path, items)) = moon_beauty_shell::bar::tray::watcher::get_menu_tree(&item_clone.bus, &item_clone.path).await {
                                     let json = serde_json::to_string(&items).unwrap();
                                     let tmp_path = format!("/tmp/mbs-tray-menu-{}.json", std::process::id());
                                     std::fs::write(&tmp_path, json).unwrap();

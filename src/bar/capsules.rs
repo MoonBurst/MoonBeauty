@@ -22,8 +22,8 @@ pub enum CapsuleAction {
     ToggleNotificationDnd,
     ToggleCustomMode,
     ToggleTrayExpanded,
-    TrayActivate(crate::libraries::backend::TrayItem),
-    TrayContextMenu(crate::libraries::backend::TrayItem),
+    TrayActivate(crate::bar::tray::TrayItem),
+    TrayContextMenu(crate::bar::tray::TrayItem),
     CancelTooltip(String),
 }
 
@@ -478,7 +478,7 @@ impl CapsuleRenderer {
     }
 
     pub fn render_tray_expanded<'a, Message: 'static + Clone>(
-        items: &[crate::libraries::backend::TrayItem],
+        items: &[crate::bar::tray::TrayItem],
         theme: &ShellTheme,
         settings: &crate::libraries::config::settings::ShellSettings,
         slant_left: SlantSide,
