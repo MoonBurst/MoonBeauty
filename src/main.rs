@@ -13,10 +13,10 @@ use moon_beauty_shell::bar::geometry::{
 use moon_beauty_shell::bar::outputs::{get_screen_width_for, resolve_primary_output};
 use moon_beauty_shell::libraries::process::resolve_exe;
 
-use moon_beauty_shell::overlays::annotator::Tool;
+use moon_beauty_shell::overlays::screenshot::annotator::Tool;
 
 
-mod screenshot;
+use moon_beauty_shell::overlays::screenshot;
 
 fn detect_notif_surface(args: &[String]) -> bool {
     args.iter().any(|a| a == "--notif-surface")

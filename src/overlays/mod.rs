@@ -1,5 +1,5 @@
 pub mod amogus;
-pub mod annotator;
+pub mod screenshot;
 pub mod plate_watermark;
 pub mod calc;
 pub mod clipboard;
@@ -26,7 +26,7 @@ pub mod tray_popup;
 pub mod tooltip_engine;
 
 pub use amogus::{AmogusMessage, AmogusOverlay};
-pub use annotator::{AnnotatorMessage, AnnotatorOverlay, save_annotated_image, slurp_region, grim_capture};
+pub use screenshot::{AnnotatorMessage, AnnotatorOverlay, save_annotated_image, slurp_region, grim_capture};
 pub use calc::{CalcMessage, CalculatorOverlay};
 pub use clipboard::{ClipboardMessage, ClipboardOverlay};
 pub use dictionary::{DictMessage, DictionaryOverlay};

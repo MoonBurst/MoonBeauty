@@ -1,4 +1,3 @@
-pub mod annotator_ipc;
 pub mod audio;
 pub mod email_client;
 pub mod borg;
