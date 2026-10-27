@@ -1,19 +1,14 @@
+use crate::bar::unified::{BorgStatus, PodmanStatus};
 pub mod audio;
 pub mod email_client;
-pub mod borg;
 pub mod clock;
 pub mod mpris;
-pub mod podman_twitch;
 pub mod system;
-pub mod unified;
 pub mod weather;
 
 pub use audio::{AudioBackend, AudioStatus, play_alarm_sound, resolve_alarm_sound_path};
-pub use borg::{BorgBackend, BorgStatus};
 pub use clock::{CalendarViewData, ClockBackend, WorldZoneColumn};
 pub use mpris::{MprisBackend, MprisTrack};
-pub use podman_twitch::{PodmanBackend, PodmanStatus, WatcherDetails};
-pub use unified::{UnifiedItemStatus, check_unified_items, toggle_item};
 pub use system::{BatteryMetrics, CpuMetrics, GpuInfo, GpuMetrics, NetMetrics, RamMetrics, SystemCollector};
 pub use weather::{WeatherAlert, WeatherBackend, WeatherData};
 

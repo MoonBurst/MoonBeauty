@@ -6,8 +6,8 @@ use iced_layershell::settings::{LayerShellSettings, Settings};
 use std::time::Instant;
 
 use crate::libraries::backend::system::ProcessItem;
-use crate::libraries::backend::{BorgBackend, BorgStatus, ClockBackend, MprisBackend, MprisTrack,
-                     PodmanBackend, PodmanStatus, SystemCollector};
+use crate::bar::unified::{BorgBackend, BorgStatus, PodmanBackend, PodmanStatus};
+use crate::libraries::backend::{ClockBackend, MprisBackend, MprisTrack, SystemCollector};
 use crate::libraries::config::theme::ShellTheme;
 use crate::libraries::config::ShellSettings;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
@@ -20,7 +20,7 @@ const AUTO_MS: u128 = 15_000;
 pub enum InfoData {
     Calendar(crate::libraries::backend::CalendarViewData),
     Music(Option<MprisTrack>),
-    Unified(PodmanStatus, BorgStatus, Vec<crate::libraries::backend::UnifiedItemStatus>),
+    Unified(PodmanStatus, BorgStatus, Vec<crate::bar::unified::UnifiedItemStatus>),
     Net(crate::libraries::backend::NetMetrics),
     Clock(Vec<crate::libraries::backend::WorldZoneColumn>),
     Custom,
@@ -164,7 +164,7 @@ impl App {
             }
             Message::PodmanRestart(cname) => {
                 return Task::perform(async move {
-                    crate::libraries::backend::PodmanBackend::restart(&cname).await;
+                    crate::bar::unified::PodmanBackend::restart(&cname).await;
                 }, |_| Message::Dismiss);
             }
             Message::UnifiedToggle(idx) => {
@@ -172,7 +172,7 @@ impl App {
                 if let Some(item) = s.unified_items.get(idx).cloned() {
                     let mode = self.mode.clone();
                     return Task::perform(async move {
-                        if let Err(e) = crate::libraries::backend::unified::toggle_item(&item).await {
+                        if let Err(e) = crate::bar::unified::checks::toggle_item(&item).await {
                             eprintln!("[unified] toggle '{}' failed: {}", item.name, e);
                         }
                         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -1103,7 +1103,7 @@ async fn fetch_data(mode: String) -> InfoData {
             let p = PodmanBackend::poll().await;
             let b = BorgBackend::poll().await;
             let s = ShellSettings::load();
-            let items = crate::libraries::backend::unified::check_unified_items(&s.unified_items).await;
+            let items = crate::bar::unified::checks::check_unified_items(&s.unified_items).await;
             InfoData::Unified(p, b, items)
         }
         "net" => {
