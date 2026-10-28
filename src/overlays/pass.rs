@@ -1,12 +1,12 @@
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Stack};
-use iced::{Alignment, Color, Element, Length, Padding, Task};
+use iced::{Alignment, Color, Element, Length, Padding};
 use std::path::PathBuf;
 use tokio::process::Command;
 use walkdir::WalkDir;
 
-use crate::config::settings::ShellSettings;
-use crate::config::theme::ShellTheme;
-use crate::style::shape_box::{ShapeBox, ShapeType, SlantSide};
+use crate::libraries::config::settings::ShellSettings;
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
 
 pub const PASS_SEARCH_ID: &str = "pass_search";
 
@@ -31,6 +31,16 @@ impl Default for PassOverlay {
 }
 
 impl PassOverlay {
+    /// Cheap constructor — no filesystem walk. Used when the pass
+    /// overlay is not the target (spawning for another overlay).
+    pub fn empty() -> Self {
+        Self {
+            search_query: String::new(),
+            filtered_keys: Vec::new(),
+            all_keys: Vec::new(),
+        }
+    }
+
     pub fn new() -> Self {
         let all_keys = Self::scan_passwords();
         Self {
@@ -101,7 +111,11 @@ impl PassOverlay {
             .spawn();
     }
 
-    pub fn view<'a>(&'a self, theme: &'a ShellTheme, settings: &ShellSettings) -> Element<'a, PassMessage> {
+    pub fn view<'a>(
+        &'a self,
+        theme: &'a ShellTheme,
+        settings: &ShellSettings,
+    ) -> Element<'a, PassMessage> {
         let (win_w, win_h) = settings.get_window_size("pass", 820, 600);
 
         let cut_f = theme.overlay_cut;
@@ -136,21 +150,24 @@ impl PassOverlay {
         let input = text_input("Search password store...", &self.search_query)
             .id(PASS_SEARCH_ID)
             .on_input(PassMessage::SearchChanged)
-            .on_submit(
-                if let Some(first) = self.filtered_keys.first() {
-                    PassMessage::CopyKey(first.clone())
-                } else {
-                    PassMessage::Dismiss
-                },
-            )
-            .padding(Padding { top: 12.0, right: 24.0, bottom: 12.0, left: 24.0 })
-            .size(theme.font_size_overlay)
+            .on_submit(if let Some(first) = self.filtered_keys.first() {
+                PassMessage::CopyKey(first.clone())
+            } else {
+                PassMessage::Dismiss
+            })
+            .padding(Padding {
+                top: 12.0,
+                right: 24.0,
+                bottom: 12.0,
+                left: 24.0,
+            })
+            .size((theme.font_size_overlay) as f32)
             .width(Length::Fill)
             .style(move |_t, status| text_input::Style {
                 background: iced::Background::Color(theme.surface_alt),
                 border: iced::Border {
                     color: match status {
-                        text_input::Status::Focused => theme.focus,
+                        text_input::Status::Focused { .. } => theme.focus,
                         text_input::Status::Hovered => theme.border,
                         _ => theme.border,
                     },
@@ -163,14 +180,12 @@ impl PassOverlay {
                 selection: theme.focus,
             });
 
-        let input_row = container(input)
-            .width(Length::Fill)
-            .padding(Padding {
-                top: 0.0,
-                right: search_inward,
-                bottom: 0.0,
-                left: search_inward,
-            });
+        let input_row = container(input).width(Length::Fill).padding(Padding {
+            top: 0.0,
+            right: search_inward,
+            bottom: 0.0,
+            left: search_inward,
+        });
 
         // Slanted list of pass entries
         let mut list_col = column![].spacing(6).width(Length::Fill);
@@ -178,7 +193,10 @@ impl PassOverlay {
             let k_clone = key.clone();
 
             let item_bg = ShapeBox::new()
-                .shape(ShapeType::Slant { left: SlantSide::Left, right: SlantSide::Left })
+                .shape(ShapeType::Slant {
+                    left: SlantSide::Left,
+                    right: SlantSide::Left,
+                })
                 .background(theme.background)
                 .border(theme.border, theme.control_border_width)
                 .slant_width(8.0)
@@ -187,11 +205,18 @@ impl PassOverlay {
             let item_content = container(
                 row![
                     text(">").size(16).color(theme.success),
-                    text(key).size(theme.font_size_overlay).color(theme.text),
+                    text(key)
+                        .size((theme.font_size_overlay) as f32)
+                        .color(theme.text),
                 ]
                 .spacing(12)
                 .align_y(Alignment::Center)
-                .padding(Padding { top: 0.0, right: 24.0, bottom: 0.0, left: 24.0 })
+                .padding(Padding {
+                    top: 0.0,
+                    right: 24.0,
+                    bottom: 0.0,
+                    left: 24.0,
+                }),
             )
             .width(Length::Fill)
             .height(Length::Fill)
@@ -203,11 +228,16 @@ impl PassOverlay {
                 .width(Length::Fill)
                 .height(Length::Fixed(48.0))
                 .style(|_t, status| {
-                    let is_hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+                    let is_hovered =
+                        matches!(status, button::Status::Hovered | button::Status::Pressed);
                     button::Style {
                         background: None,
                         border: iced::Border {
-                            color: if is_hovered { Color::WHITE } else { Color::TRANSPARENT },
+                            color: if is_hovered {
+                                Color::WHITE
+                            } else {
+                                Color::TRANSPARENT
+                            },
                             width: 0.0,
                             radius: 0.0.into(),
                         },
@@ -218,15 +248,19 @@ impl PassOverlay {
             list_col = list_col.push(item);
         }
 
-        let list_container = container(scrollable(list_col).height(Length::Fill).width(Length::Fill))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(Padding {
-                top: list_top_inset,
-                right: list_side_inset,
-                bottom: list_bottom_inset,
-                left: list_side_inset,
-            });
+        let list_container = container(
+            scrollable(list_col)
+                .height(Length::Fill)
+                .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(Padding {
+            top: list_top_inset,
+            right: list_side_inset,
+            bottom: list_bottom_inset,
+            left: list_side_inset,
+        });
 
         let footer = container(
             text("Enter to copy  •  ESC to dismiss")
@@ -237,7 +271,10 @@ impl PassOverlay {
         .width(Length::Fill);
 
         let card_bg = ShapeBox::new()
-            .shape(ShapeType::AngledHexagon { cut: cut_f, angle_deg })
+            .shape(ShapeType::AngledHexagon {
+                cut: cut_f,
+                angle_deg,
+            })
             .background(theme.background)
             .border(theme.border, theme.border_width)
             .size(Length::Fixed(win_w), Length::Fixed(win_h));
@@ -259,16 +296,9 @@ impl PassOverlay {
 
         let card = Stack::new().push(card_bg.view()).push(card_content);
 
-        let backdrop = button(container(column![]).width(Length::Fill).height(Length::Fill))
-            .on_press(PassMessage::Dismiss)
-            .style(|_t, _s| button::Style {
-                background: Some(iced::Background::Color(Color::from_rgba8(0, 0, 0, 0.65))),
-                ..Default::default()
-            });
-
-        Stack::new()
-            .push(backdrop)
-            .push(container(card).center_x(Length::Fill).center_y(Length::Fill))
+        container(card)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
             .into()
     }
 }

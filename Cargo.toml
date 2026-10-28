@@ -10,8 +10,9 @@ sha2 = "0.10"
 rand_chacha = "0.3"
 rand = "0.8"
 async-channel = "2"
-iced = { version = "0.13", features = ["advanced", "tokio", "canvas", "image", "svg"] }
-iced_layershell = "0.7"
+iced_futures = "0.14"
+iced = { version = "0.14", features = ["advanced", "tokio", "canvas", "image", "svg", "unconditional-rendering"] }
+iced_layershell = { version = "0.14.2", default-features = false, features = ["tiny-skia", "fira-sans"] }
 tokio = { version = "1.38", features = ["full"] }
 bollard = "0.17"
 futures-util = "0.3"
@@ -21,7 +22,15 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "5.0"
 walkdir = "2.5"
 regex = "1.10"
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-native-tls"] }
+async-imap = { version = "0.10", default-features = false, features = ["runtime-tokio"] }
+async-native-tls = { version = "0.5", default-features = false, features = ["runtime-tokio"] }
+native-tls = "0.2"
+mail-parser = "0.9"
+html2text = "0.12"
+rfd = { version = "0.14", default-features = false, features = ["xdg-portal", "tokio"] }
+pkcs8 = "0.10"
 sysinfo = "0.31"
 zbus = { version = "4.4", features = ["tokio"] }
 wayland-client = "0.31.15"
@@ -32,6 +41,10 @@ smithay-client-toolkit = "0.21.1"
 [profile.release]
 opt-level = 3
 lto = "thin"
-codegen-units = 16
-panic = "abort"
+codegen-units = 1
+panic = "unwind"
 strip = true
+
+[patch.crates-io]
+layershellev = { path = "vendor/layershellev-0.14.2" }
+iced_layershell = { path = "vendor/iced_layershell" }

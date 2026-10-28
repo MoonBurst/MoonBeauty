@@ -1,10 +1,10 @@
 use iced::widget::{button, column, container, text, text_input, Stack};
-use iced::{Alignment, Color, Element, Length};
+use iced::{Alignment, Element, Length};
 use tokio::process::Command;
 
-use crate::config::theme::ShellTheme;
-use crate::style::shape_box::{ShapeBox, ShapeType};
-use crate::style::TextExt;
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
+use crate::libraries::style::TextExt;
 
 #[derive(Debug, Clone)]
 pub enum WebSearchMessage {
@@ -25,7 +25,9 @@ impl Default for WebSearchOverlay {
 
 impl WebSearchOverlay {
     pub fn new() -> Self {
-        Self { query: String::new() }
+        Self {
+            query: String::new(),
+        }
     }
 
     pub fn update(&mut self, message: WebSearchMessage) {
@@ -45,11 +47,17 @@ impl WebSearchOverlay {
         } else if let Some(stripped) = q.strip_prefix("!d ").or_else(|| q.strip_prefix("!ddg ")) {
             ("https://duckduckgo.com/?q=", stripped)
         } else if let Some(stripped) = q.strip_prefix("!w ").or_else(|| q.strip_prefix("!wiki ")) {
-            ("https://en.wikipedia.org/wiki/Special:Search?search=", stripped)
+            (
+                "https://en.wikipedia.org/wiki/Special:Search?search=",
+                stripped,
+            )
         } else if let Some(stripped) = q.strip_prefix("!gh ") {
             ("https://github.com/search?q=", stripped)
         } else if let Some(stripped) = q.strip_prefix("!nix ") {
-            ("https://search.nixos.org/packages?channel=unstable&query=", stripped)
+            (
+                "https://search.nixos.org/packages?channel=unstable&query=",
+                stripped,
+            )
         } else {
             ("https://www.startpage.com/sp/search?query=", q)
         };
@@ -75,7 +83,7 @@ impl WebSearchOverlay {
             .on_input(WebSearchMessage::InputChanged)
             .on_submit(WebSearchMessage::ExecuteSearch)
             .padding(14)
-            .size(theme.font_size_overlay);
+            .size((theme.font_size_overlay) as f32);
 
         let card_bg = ShapeBox::new()
             .shape(ShapeType::Rounded(12))
@@ -91,13 +99,13 @@ impl WebSearchOverlay {
         let card_content = container(
             column![
                 text("🌐 WEB SEARCH")
-                    .size(theme.font_size_overlay)
+                    .size((theme.font_size_overlay) as f32)
                     .color(theme.text)
                     .align_x(Alignment::Center),
                 input,
                 button(
                     text(search_label)
-                        .size(theme.font_size_normal)
+                        .size((theme.font_size_normal) as f32)
                         .color(theme.text)
                         .bold()
                         .align_x(Alignment::Center),
@@ -122,16 +130,9 @@ impl WebSearchOverlay {
 
         let card = Stack::new().push(card_bg.view()).push(card_content);
 
-        let backdrop = button(container(column![]).width(Length::Fill).height(Length::Fill))
-            .on_press(WebSearchMessage::Dismiss)
-            .style(|_t, _s| button::Style {
-                background: Some(iced::Background::Color(Color::from_rgba8(0, 0, 0, 0.6))),
-                ..Default::default()
-            });
-
-        Stack::new()
-            .push(backdrop)
-            .push(container(card).center_x(Length::Fill).center_y(Length::Fill))
+        container(card)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
             .into()
     }
 }

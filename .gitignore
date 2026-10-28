@@ -23,3 +23,12 @@ result-*
 watch.log
 *.log
 moonbeauty.txt
+*.bak
+*.tmp
+mbs-*.txt
+resources/contacts.txt
+resources/drafts.txt
+email.json
+email.enc.json
+email.enc.json.keypath
+test_*.txt

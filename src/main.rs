@@ -1,27 +1,33 @@
-use iced::widget::{container, Stack};
-use iced::{Color, Element, Length, Padding, Task as Command, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use iced_layershell::Application;
-
-use moon_beauty_shell::backend::*;
-use moon_beauty_shell::bar::{CapsuleAction, TopBar, TopBarMessage};
-use moon_beauty_shell::config::{ShellSettings, ShellTheme};
-use moon_beauty_shell::ipc::{send_client_command, IpcCommand, OverlayTarget};
+use moon_beauty_shell::libraries::config::ShellSettings;
+use moon_beauty_shell::libraries::ipc::{IpcCommand, OverlayTarget};
+use moon_beauty_shell::libraries::process::resolve_exe;
 use moon_beauty_shell::overlays::*;
-use moon_beauty_shell::overlays::annotator::Tool;
 
 
-mod screenshot;
+use moon_beauty_shell::overlays::screenshot;
 
-fn detect_notif_surface(args: &[String]) -> bool {
+pub(crate) static TM0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+
+
+mod app;
+
+use app::{Message, MoonBeautyShellApp};
+
+pub(crate) fn detect_notif_surface(args: &[String]) -> bool {
     args.iter().any(|a| a == "--notif-surface")
 }
 
-fn detect_standalone_overlay(args: &[String]) -> Option<OverlayTarget> {
+pub(crate) fn detect_standalone_overlay(args: &[String]) -> Option<OverlayTarget> {
     for (i, arg) in args.iter().enumerate() {
-        if arg == "--lockscreen-instance" { return Some(OverlayTarget::Lockscreen); }
-        if arg == "--annotator-session" { return Some(OverlayTarget::Annotator); }
+        if arg == "--lockscreen-instance" {
+            return Some(OverlayTarget::Lockscreen);
+        }
+        if arg == "--annotator-session" {
+            return Some(OverlayTarget::Annotator);
+        }
         if arg == "--overlay" || arg == "--ipc" {
             if let Some(target_str) = args.get(i + 1) {
                 return OverlayTarget::from_str(target_str);
@@ -54,7 +60,6 @@ fn send_ipc_sync(cmd: &IpcCommand) -> Result<String, Box<dyn std::error::Error +
     Ok(resp)
 }
 
-
 fn notification_candidates(app_name: &str, desktop_entry: Option<&str>) -> Vec<String> {
     use std::collections::HashSet;
     let lower = app_name.to_lowercase();
@@ -71,7 +76,9 @@ fn notification_candidates(app_name: &str, desktop_entry: Option<&str>) -> Vec<S
 }
 
 fn is_app_focused(candidates: &[String]) -> bool {
-    let Some(focused) = focused_app_id() else { return false; };
+    let Some(focused) = focused_app_id() else {
+        return false;
+    };
     candidates.iter().any(|c| focused.eq_ignore_ascii_case(c))
 }
 
@@ -90,15 +97,21 @@ fn focus_notification_app(app_name: &str, desktop_entry: Option<&str>) -> bool {
         cand_set.insert(de_clean.to_lowercase());
     }
     let candidates: Vec<String> = cand_set.into_iter().filter(|s| !s.is_empty()).collect();
-    eprintln!("[focus] app={:?} entry={:?} candidates={:?}", app_name, desktop_entry, candidates);
+    eprintln!(
+        "[focus] app={:?} entry={:?} candidates={:?}",
+        app_name, desktop_entry, candidates
+    );
 
     if std::env::var("SWAYSOCK").is_ok() {
         for cand in &candidates {
             let _ = std::process::Command::new("swaymsg")
-                .args(["-t", "command", &format!("[app_id=\"{}\"] focus", cand.trim())])
+                .args([
+                    "-t",
+                    "command",
+                    &format!("[app_id=\"{}\"] focus", cand.trim()),
+                ])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
-
                 .status();
         }
         if let Some(focused) = focused_app_id() {
@@ -114,12 +127,17 @@ fn focus_notification_app(app_name: &str, desktop_entry: Option<&str>) -> bool {
         let de_clean = de.trim_end_matches(".desktop");
         let ok = std::process::Command::new("gtk-launch")
             .arg(de_clean)
-            .status().map(|s| s.success()).unwrap_or(false);
-        if ok { return true; }
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            return true;
+        }
     }
 
     let _ = std::process::Command::new("gtk-launch")
-        .arg(&candidates[0]).status();
+        .arg(&candidates[0])
+        .status();
     false
 }
 
@@ -127,19 +145,26 @@ fn focused_app_id() -> Option<String> {
     let out = std::process::Command::new("swaymsg")
         .args(["-t", "get_tree", "-r"])
         .stderr(std::process::Stdio::null())
-        .output().ok()?;
-    if !out.status.success() { return None; }
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
     fn walk(node: &serde_json::Value) -> Option<String> {
         if node.get("focused").and_then(|f| f.as_bool()) == Some(true) {
             if let Some(app_id) = node.get("app_id").and_then(|a| a.as_str()) {
-                if !app_id.is_empty() { return Some(app_id.to_string()); }
+                if !app_id.is_empty() {
+                    return Some(app_id.to_string());
+                }
             }
         }
         for key in ["nodes", "floating_nodes"] {
             if let Some(nodes) = node.get(key).and_then(|n| n.as_array()) {
                 for child in nodes {
-                    if let Some(r) = walk(child) { return Some(r); }
+                    if let Some(r) = walk(child) {
+                        return Some(r);
+                    }
                 }
             }
         }
@@ -148,28 +173,47 @@ fn focused_app_id() -> Option<String> {
     walk(&v)
 }
 
-fn resolve_exe() -> std::path::PathBuf {
-    std::env::current_exe()
-        .ok()
-        .map(|p| {
-            let s = p.to_string_lossy().into_owned();
-            // /proc/PID/exe on Linux returns "…/bin (deleted)" after `cargo build`
-            // replaces the running binary. Strip the suffix so spawn still works.
-            if let Some(stripped) = s.strip_suffix(" (deleted)") {
-                std::path::PathBuf::from(stripped)
-            } else {
-                p
-            }
-        })
-        .unwrap_or_else(|| std::path::PathBuf::from("moon-beauty-shell"))
+fn app_theme(_state: &MoonBeautyShellApp) -> iced::Theme {
+    iced::Theme::Dark
+}
+
+fn app_style(_state: &MoonBeautyShellApp, _theme: &iced::Theme) -> iced::theme::Style {
+    iced::theme::Style {
+        background_color: iced::Color::TRANSPARENT,
+        text_color: iced::Color::WHITE,
+    }
 }
 
 pub fn main() -> Result<(), iced_layershell::Error> {
+    TM0.set(std::time::Instant::now()).ok();
     let args: Vec<String> = std::env::args().collect();
 
     // ── Lock auth test mode ──
     if args.iter().any(|a| a == "--test-lock-auth") {
-        moon_beauty_shell::backend::lock_coordinator::LockCoordinator::run_auth_test();
+        moon_beauty_shell::overlays::lockscreen::LockCoordinator::run_auth_test();
+    }
+
+    // ── Email connection test (one-shot diagnostic) ──
+    if args.iter().any(|a| a == "--test-email") {
+        let rt = tokio::runtime::Runtime::new().expect("tokio rt");
+        rt.block_on(async {
+            match moon_beauty_shell::libraries::backend::email_client::test_connection().await {
+                Ok((imap, smtp, report)) => {
+                    println!("{}", report);
+                    if imap && smtp {
+                        println!("\n✅ both imap and smtp OK");
+                        std::process::exit(0);
+                    } else {
+                        println!("\n❌ imap={} smtp={}", imap, smtp);
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("test failed: {}", e);
+                    std::process::exit(2);
+                }
+            }
+        });
     }
 
     // ── Multi-monitor lock coordinator (parent mode) ──
@@ -179,7 +223,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     if args.iter().any(|a| a == "--lockscreen")
         && !args.iter().any(|a| a == "--lockscreen-instance")
     {
-        moon_beauty_shell::backend::lock_coordinator::LockCoordinator::spawn();
+        moon_beauty_shell::overlays::lockscreen::LockCoordinator::spawn();
     }
 
     // --quickshot was replaced by --screenshot --annotate.
@@ -197,27 +241,34 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     if args.iter().any(|a| a == "--activate-latest-notif") {
         let runtime = std::env::var("XDG_RUNTIME_DIR")
             .unwrap_or_else(|_| format!("/tmp/user-{}", std::process::id()));
-        let cmd_path = std::path::PathBuf::from(runtime)
-            .join("moon-beauty-shell-notif-cmd");
+        let cmd_path = std::path::PathBuf::from(runtime).join("moon-beauty-shell-notif-cmd");
         match std::fs::write(&cmd_path, b"activate-latest") {
             Ok(_) => std::process::exit(0),
-            Err(e) => { eprintln!("[activate-latest] write {:?}: {e}", cmd_path); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("[activate-latest] write {:?}: {e}", cmd_path);
+                std::process::exit(1);
+            }
         }
     }
     if args.iter().any(|a| a == "--dismiss-notif") {
         let runtime = std::env::var("XDG_RUNTIME_DIR")
             .unwrap_or_else(|_| format!("/tmp/user-{}", std::process::id()));
-        let cmd_path = std::path::PathBuf::from(runtime)
-            .join("moon-beauty-shell-notif-cmd");
+        let cmd_path = std::path::PathBuf::from(runtime).join("moon-beauty-shell-notif-cmd");
         match std::fs::write(&cmd_path, b"dismiss") {
             Ok(_) => std::process::exit(0),
-            Err(e) => { eprintln!("[dismiss-notif] write {:?}: {e}", cmd_path); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("[dismiss-notif] write {:?}: {e}", cmd_path);
+                std::process::exit(1);
+            }
         }
     }
     if args.iter().any(|a| a == "--notif-history") {
         match send_ipc_sync(&IpcCommand::ToggleHistory) {
             Ok(_) => std::process::exit(0),
-            Err(e) => { eprintln!("[notif-history] IPC failed: {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("[notif-history] IPC failed: {e}");
+                std::process::exit(1);
+            }
         }
     }
 
@@ -230,7 +281,10 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             .args(["-f", "target/release/moon-beauty-shell$"])
             .status();
         let _ = std::process::Command::new("pkill")
-            .args(["-f", "-sys-tooltip|-weather-tooltip|-alarm-tooltip|-tray-popup|-info-tooltip"])
+            .args([
+                "-f",
+                "-sys-tooltip|-weather-tooltip|-alarm-tooltip|-tray-popup|-info-tooltip",
+            ])
             .status();
         std::thread::sleep(std::time::Duration::from_millis(400));
         let exe = resolve_exe();
@@ -270,7 +324,10 @@ pub fn main() -> Result<(), iced_layershell::Error> {
                 match image::load_from_memory(&bytes) {
                     Ok(img) => println!(
                         "captured {}x{} → {} ({} bytes)",
-                        img.width(), img.height(), path, bytes.len()
+                        img.width(),
+                        img.height(),
+                        path,
+                        bytes.len()
                     ),
                     Err(e) => eprintln!("decode: {e}"),
                 }
@@ -300,67 +357,19 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             std::path::PathBuf::from(state_file),
         ) {
             Ok(_) => std::process::exit(0),
-            Err(e) => { eprintln!("[freeze-fragment] {e}"); std::process::exit(1); }
-        }
-    }
-
-    if args.iter().any(|a| a == "--freeze-selector") {
-        let idx = args.iter().position(|a| a == "--freeze-selector").unwrap();
-        let input = args.get(idx + 1).cloned().unwrap_or_default();
-        let output = args.get(idx + 2).cloned().unwrap_or_default();
-        let binded = args.get(idx + 3).cloned();
-        if input.is_empty() || output.is_empty() {
-            eprintln!("usage: --freeze-selector <input.png> <output.png> [output-name]");
-            std::process::exit(2);
-        }
-        match screenshot::selector::run(
-            std::path::PathBuf::from(input),
-            std::path::PathBuf::from(output),
-            binded,
-        ) {
-            Ok(_) => std::process::exit(0),
-            Err(e) => { eprintln!("[freeze-selector] {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("[freeze-fragment] {e}");
+                std::process::exit(1);
+            }
         }
     }
 
     // Orchestrator: capture focused output → spawn child → report crop
-    if args.iter().any(|a| a == "--freeze-test") {
-        let bytes = match screenshot::capture::capture_output(None) {
-            Ok(b) => b,
-            Err(e) => { eprintln!("[freeze] capture failed: {e}"); std::process::exit(1); }
-        };
-        let img = match image::load_from_memory(&bytes) {
-            Ok(i) => i,
-            Err(e) => { eprintln!("[freeze] decode failed: {e}"); std::process::exit(1); }
-        };
-        eprintln!("[freeze] captured {}x{} ({} bytes)", img.width(), img.height(), bytes.len());
-
-        let tmp_in = "/tmp/mbs-freeze-in.png";
-        let tmp_out = "/tmp/mbs-freeze-out.png";
-        std::fs::write(tmp_in, &bytes).ok();
-        let _ = std::fs::remove_file(tmp_out);
-
-        let exe = resolve_exe();
-        let status = std::process::Command::new(exe)
-            .args(["--freeze-selector", tmp_in, tmp_out])
-            .status();
-        match status {
-            Ok(s) if s.success() && std::path::Path::new(tmp_out).exists() => {
-                let cropped = std::fs::read(tmp_out).unwrap_or_default();
-                if let Ok(i) = image::load_from_memory(&cropped) {
-                    eprintln!("[freeze] ✓ cropped {}x{} → {}", i.width(), i.height(), tmp_out);
-                }
-                std::process::exit(0);
-            }
-            Ok(_) => { eprintln!("[freeze] cancelled"); std::process::exit(1); }
-            Err(e) => { eprintln!("[freeze] child spawn failed: {e}"); std::process::exit(1); }
-        }
-    }
-
     if args.iter().any(|a| a == "--screenshot") {
         let quick = args.iter().any(|a| a == "--quick" || a == "--no-annotate");
         let annotate = !quick;
-        let watermark_cli = args.iter()
+        let watermark_cli = args
+            .iter()
             .position(|a| a == "--watermark")
             .and_then(|i| args.get(i + 1).cloned());
         let _ = watermark_cli;
@@ -375,11 +384,17 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
         let full_bytes = match screenshot::capture::capture_output(None) {
             Ok(b) => b,
-            Err(e) => { eprintln!("[screenshot] capture failed: {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("[screenshot] capture failed: {e}");
+                std::process::exit(1);
+            }
         };
         let full_img = match image::load_from_memory(&full_bytes) {
             Ok(i) => i.to_rgba8(),
-            Err(e) => { eprintln!("[screenshot] decode failed: {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("[screenshot] decode failed: {e}");
+                std::process::exit(1);
+            }
         };
 
         // The full image's origin corresponds to (min_x, min_y) in global space.
@@ -401,7 +416,9 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             }
             let crop = image::imageops::crop_imm(&full_img, lx, ly, *w, *h).to_image();
             let local_png = format!("/tmp/mbs-freeze-{}-{}.png", name, pid);
-            if crop.save(&local_png).is_err() { continue; }
+            if crop.save(&local_png).is_err() {
+                continue;
+            }
 
             match std::process::Command::new(&exe)
                 .args([
@@ -428,8 +445,13 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         let mut rect: Option<(i32, i32, i32, i32)> = None;
         loop {
             let (state, sx, sy, cx, cy) = screenshot::fragment::read_state_file(&state_file);
-            if state == "done" { rect = Some((sx, sy, cx, cy)); break; }
-            if state == "cancelled" { break; }
+            if state == "done" {
+                rect = Some((sx, sy, cx, cy));
+                break;
+            }
+            if state == "cancelled" {
+                break;
+            }
             let mut any_alive = false;
             for (_, child) in children.iter_mut() {
                 match child.try_wait() {
@@ -438,7 +460,9 @@ pub fn main() -> Result<(), iced_layershell::Error> {
                     Err(_) => {}
                 }
             }
-            if !any_alive { break; }
+            if !any_alive {
+                break;
+            }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
 
@@ -487,11 +511,14 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             }
         } else {
             let home = std::env::var("HOME").unwrap_or_default();
-            let dir = std::path::PathBuf::from(home).join("Pictures").join("Screenshots");
+            let dir = std::path::PathBuf::from(home)
+                .join("Pictures")
+                .join("Screenshots");
             let _ = std::fs::create_dir_all(&dir);
             let ts = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs()).unwrap_or(0);
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
             let dest = dir.join(format!("shot_{}.png", ts));
             let _ = std::fs::copy(&out_path, &dest);
             eprintln!("[screenshot] saved → {}", dest.display());
@@ -500,9 +527,19 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     }
 
     // CLI Notification Push: moon-beauty-shell --notify "LusterDawn" "Message"
-    if args.len() >= 3 && (args[1] == "--notify" || (args.len() >= 4 && args[1] == "--ipc" && args[2] == "notify")) {
-        let summary = if args[1] == "--notify" { &args[2] } else { &args[3] };
-        let body = if args[1] == "--notify" { args.get(3).map(|s| s.as_str()).unwrap_or("") } else { args.get(4).map(|s| s.as_str()).unwrap_or("") };
+    if args.len() >= 3
+        && (args[1] == "--notify" || (args.len() >= 4 && args[1] == "--ipc" && args[2] == "notify"))
+    {
+        let summary = if args[1] == "--notify" {
+            &args[2]
+        } else {
+            &args[3]
+        };
+        let body = if args[1] == "--notify" {
+            args.get(3).map(|s| s.as_str()).unwrap_or("")
+        } else {
+            args.get(4).map(|s| s.as_str()).unwrap_or("")
+        };
         let _ = std::process::Command::new("notify-send")
             .args(["-a", "Desktop", summary, body])
             .spawn();
@@ -513,15 +550,25 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         let json_path = args.get(idx + 1).cloned().unwrap_or_default();
         let bus = args.get(idx + 2).cloned().unwrap_or_default();
         let menu_path = args.get(idx + 3).cloned().unwrap_or_default();
-        let w = args.get(idx + 4).and_then(|s| s.parse().ok()).unwrap_or(250u32);
-        let h = args.get(idx + 5).and_then(|s| s.parse().ok()).unwrap_or(400u32);
+        let w = args
+            .get(idx + 4)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(250u32);
+        let h = args
+            .get(idx + 5)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(400u32);
         if let Ok(json) = std::fs::read_to_string(&json_path) {
-            if let Ok(items) = serde_json::from_str::<Vec<moon_beauty_shell::backend::TrayMenuItem>>(&json) {
+            if let Ok(items) =
+                serde_json::from_str::<Vec<moon_beauty_shell::bar::tray::TrayMenuItem>>(&json)
+            {
                 let _ = std::fs::remove_file(&json_path);
-                std::process::exit(match moon_beauty_shell::overlays::tray_context::run(items, bus, menu_path, w, h) {
-                    Ok(_) => 0,
-                    Err(_) => 1,
-                });
+                std::process::exit(
+                    match moon_beauty_shell::bar::tray::context::run(items, bus, menu_path, w, h) {
+                        Ok(_) => 0,
+                        Err(_) => 1,
+                    },
+                );
             }
         }
         std::process::exit(1);
@@ -529,6 +576,10 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     let is_notif_surface = detect_notif_surface(&args);
     let standalone_target = detect_standalone_overlay(&args);
+    eprintln!(
+        "[main-v225] standalone_target={:?} is_notif={}",
+        standalone_target, is_notif_surface
+    );
     let settings = ShellSettings::load();
 
     if !is_notif_surface && standalone_target.is_none() {
@@ -537,18 +588,25 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             .status();
         std::thread::sleep(std::time::Duration::from_millis(300));
         let exe = resolve_exe();
-        let _ = std::process::Command::new(exe).arg("--notif-surface").spawn();
+        let _ = std::process::Command::new(exe)
+            .arg("--notif-surface")
+            .spawn();
     }
 
-    let resolved_output: Option<String> = if settings.notif_screen_name != "Auto"
+    // Fast path: bar already set MBS_OUTPUT — child inherits it.
+    let resolved_output: Option<String> = if std::env::var("MBS_OUTPUT").is_ok() {
+        None
+    } else if settings.notif_screen_name != "Auto"
         && settings.notif_screen_name != "Auto (Primary)"
         && !settings.notif_screen_name.is_empty()
     {
         Some(settings.notif_screen_name.clone())
     } else {
-        // Resolve ONCE at startup. Prefer primary; fall back to focused.
-        let primary = std::process::Command::new("swaymsg")
-            .args(["-t", "get_outputs", "-r"]).output().ok()
+        // Single swaymsg call; prefer primary, then focused, in one pass.
+        std::process::Command::new("swaymsg")
+            .args(["-t", "get_outputs", "-r"])
+            .output()
+            .ok()
             .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
             .and_then(|v| {
                 let arr = v.as_array()?;
@@ -557,21 +615,13 @@ pub fn main() -> Result<(), iced_layershell::Error> {
                         return o.get("name").and_then(|n| n.as_str()).map(String::from);
                     }
                 }
-                None
-            });
-        let focused = std::process::Command::new("swaymsg")
-            .args(["-t", "get_outputs", "-r"]).output().ok()
-            .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
-            .and_then(|v| {
-                let arr = v.as_array()?;
                 for o in arr {
                     if o.get("focused").and_then(|f| f.as_bool()) == Some(true) {
                         return o.get("name").and_then(|n| n.as_str()).map(String::from);
                     }
                 }
                 None
-            });
-        primary.or(focused)
+            })
     };
     // Only the top-level bar process resolves MBS_OUTPUT.
     // Child processes (tooltips, notif-surface, standalone overlays) inherit
@@ -582,40 +632,50 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             eprintln!("[bar] resolved binded_output_name → {} (parent)", name);
         }
     } else {
-        eprintln!("[child] MBS_OUTPUT inherited → {:?}", std::env::var("MBS_OUTPUT"));
+        eprintln!(
+            "[child] MBS_OUTPUT inherited → {:?}",
+            std::env::var("MBS_OUTPUT")
+        );
     }
     let binded_output_name = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
 
     if is_notif_surface {
-        eprintln!("[notif-surface] startup binded_output_name={:?}", binded_output_name);
+        eprintln!(
+            "[notif-surface] startup binded_output_name={:?}",
+            binded_output_name
+        );
     }
     let layer_settings = if is_notif_surface {
         let corner = &settings.notif_corner;
         let is_top = corner.contains("top");
         let is_right = corner.contains("right");
         let anchor = match (is_top, is_right) {
-            (true, true)   => Anchor::Top    | Anchor::Right,
-            (true, false)  => Anchor::Top    | Anchor::Left,
-            (false, true)  => Anchor::Bottom | Anchor::Right,
+            (true, true) => Anchor::Top | Anchor::Right,
+            (true, false) => Anchor::Top | Anchor::Left,
+            (false, true) => Anchor::Bottom | Anchor::Right,
             (false, false) => Anchor::Bottom | Anchor::Left,
         };
-        let _strip_w = (settings.notif_card_width as i32
-            + 2 * settings.notif_margin_x + 40).max(200) as u32;
-        let _strip_h = (3 * settings.notif_card_height as i32
-            + 2 * settings.notif_margin_x + 100).max(300) as u32;
+        let _strip_w =
+            (settings.notif_card_width as i32 + 2 * settings.notif_margin_x + 40).max(200) as u32;
+        let _strip_h = (3 * settings.notif_card_height as i32 + 2 * settings.notif_margin_x + 100)
+            .max(300) as u32;
         LayerShellSettings {
             size: Some((1, 1)),
             exclusive_zone: -1,
             anchor,
             layer: Layer::Overlay,
             keyboard_interactivity: KeyboardInteractivity::None,
-            binded_output_name,
+            events_transparent: false,
+            start_mode: binded_output_name
+                .map(iced_layershell::settings::StartMode::TargetScreen)
+                .unwrap_or(iced_layershell::settings::StartMode::Active),
             ..Default::default()
         }
     } else if standalone_target.as_ref() == Some(&OverlayTarget::Lockscreen) {
         // Each lock child is bound to a specific output (or the primary if
         // no arg was provided — single-monitor fallback).
-        let lock_output = std::env::var("MBS_LOCK_OUTPUT").ok()
+        let lock_output = std::env::var("MBS_LOCK_OUTPUT")
+            .ok()
             .filter(|s| !s.is_empty())
             .or(binded_output_name.clone());
         LayerShellSettings {
@@ -624,7 +684,10 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
             layer: Layer::Overlay,
             keyboard_interactivity: KeyboardInteractivity::Exclusive,
-            binded_output_name: lock_output,
+            events_transparent: false,
+            start_mode: (lock_output)
+                .map(iced_layershell::settings::StartMode::TargetScreen)
+                .unwrap_or(iced_layershell::settings::StartMode::Active),
             ..Default::default()
         }
     } else if standalone_target.as_ref() == Some(&OverlayTarget::Annotator) {
@@ -637,7 +700,10 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
             layer: Layer::Overlay,
             keyboard_interactivity: KeyboardInteractivity::Exclusive,
-            binded_output_name,
+            events_transparent: false,
+            start_mode: binded_output_name
+                .map(iced_layershell::settings::StartMode::TargetScreen)
+                .unwrap_or(iced_layershell::settings::StartMode::Active),
             ..Default::default()
         }
     } else if standalone_target.is_some() {
@@ -647,7 +713,10 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
             layer: Layer::Overlay,
             keyboard_interactivity: KeyboardInteractivity::Exclusive,
-            binded_output_name: None,
+            events_transparent: false,
+            start_mode: (None)
+                .map(iced_layershell::settings::StartMode::TargetScreen)
+                .unwrap_or(iced_layershell::settings::StartMode::Active),
             ..Default::default()
         }
     } else {
@@ -657,2167 +726,223 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             anchor: Anchor::Top | Anchor::Left | Anchor::Right,
             layer: Layer::Top,
             keyboard_interactivity: KeyboardInteractivity::None,
-            binded_output_name: match settings.bar_monitor.as_str() { "All" | "" => None, n => Some(n.to_string()) },
+            events_transparent: false,
+            start_mode: match settings.bar_monitor.as_str() {
+                "All" | "" => iced_layershell::settings::StartMode::Active,
+                n => iced_layershell::settings::StartMode::TargetScreen(n.to_string()),
+            },
             ..Default::default()
         }
     };
 
-        if args.iter().any(|a| a == "--sys-tooltip") {
+    if args.iter().any(|a| a == "--sys-tooltip") {
         match moon_beauty_shell::overlays::system_tooltip::run() {
             Ok(()) => std::process::exit(0),
-            Err(e) => { eprintln!("[sys-tooltip] {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("[sys-tooltip] {e}");
+                std::process::exit(1);
+            }
         }
     }
 
-
     if args.iter().any(|a| a == "--weather-tooltip") {
-        match moon_beauty_shell::overlays::weather_tooltip::run() {
+        match moon_beauty_shell::bar::weather::tooltip::run() {
             Ok(()) => std::process::exit(0),
-            Err(e) => { eprintln!("[weather-tooltip] {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("[weather-tooltip] {e}");
+                std::process::exit(1);
+            }
         }
     }
 
     if args.iter().any(|a| a == "--info-tooltip") {
         match moon_beauty_shell::overlays::info_tooltip::run() {
             Ok(()) => std::process::exit(0),
-            Err(e) => { eprintln!("[info-tooltip] {e}"); std::process::exit(1); }
+            Err(e) => {
+                eprintln!("[info-tooltip] {e}");
+                std::process::exit(1);
+            }
         }
     }
 
-    if args.iter().any(|a| a == "--alarm-tooltip") {
-        match moon_beauty_shell::overlays::alarm_tooltip::run() {
-            Ok(()) => std::process::exit(0),
-            Err(e) => { eprintln!("[alarm-tooltip] {e}"); std::process::exit(1); }
-        }
-    }
-
-    MoonBeautyShellApp::run(Settings {
+    let _app = iced_layershell::application(
+        MoonBeautyShellApp::new_app,
+        || "moon-beauty-shell".to_string(),
+        MoonBeautyShellApp::update,
+        MoonBeautyShellApp::view,
+    )
+    .subscription(MoonBeautyShellApp::subscription)
+    .theme(app_theme)
+    .style(app_style)
+    .settings(Settings {
         layer_settings,
         ..Default::default()
+    });
+    _app.run()
+}
+
+fn handle_lock_keypress(
+    event: iced::Event,
+    status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Message> {
+    if status == iced::event::Status::Captured {
+        return None;
+    }
+    let debug = std::env::var_os("MBS_LOCK_DEBUG").is_some();
+    moon_beauty_shell::overlays::lockscreen::resolve_lock_key(event).map(|k| {
+        if debug {
+            eprintln!("[lock-key] resolved: {:?}", k);
+        }
+        Message::Lock(LockMessage::KeyPress(k))
     })
 }
 
-#[derive(Debug, Clone)]
-pub enum Message {
-    TickHardware,
-    TickWeather,
-    WeatherLoaded(Option<moon_beauty_shell::backend::WeatherData>),
-    TickClock,
-    TickToasts,
-    MetricsCollected(CpuMetrics, RamMetrics, GpuMetrics, AudioStatus, AudioStatus, Option<MprisTrack>),
-    IpcReceived(IpcCommand),
-    PollIpc,
-    PollNotifs,
-    ResizeNotifSurface(u32, u32),
-    WindowResized(f32),
-    TopBar(TopBarMessage),
-    Launcher(LauncherMessage),
-    Calc(CalcMessage),
-    Clipboard(ClipboardMessage),
-    Notes(NotesMessage),
-    Pass(PassMessage),
-    Power(PowerMessage),
-    Todo(TodoMessage),
-    Reminders(ReminderMessage),
-    Dict(DictMessage),
-    Unicode(UnicodeMessage),
-    Web(WebSearchMessage),
-    Amogus(AmogusMessage),
-    Annotator(AnnotatorMessage),
-    Rng(RngMessage),
-    Email(EmailMessage),
-    Notif(NotifMessage),
-    Settings(SettingsMessage),
-    Lock(LockMessage),
-    DismissActiveOverlay,
-    CloseShell,
-    TrayItemsLoaded(Vec<moon_beauty_shell::backend::TrayItem>),
-    TrayAnimTick,
-    CollapseTrayIfGen(u64),
-    CollapseTray,
-}
+fn handle_email_keypress(
+    event: iced::Event,
+    status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Message> {
+    let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event
+    else {
+        return None;
+    };
+    use iced::keyboard::{key::Named, Key};
 
-impl TryInto<iced_layershell::actions::LayershellCustomActionsWithInfo<()>> for Message {
-    type Error = Message;
-    fn try_into(
-        self,
-    ) -> Result<iced_layershell::actions::LayershellCustomActionsWithInfo<()>, Self::Error>
-    {
-        match self {
-            Message::ResizeNotifSurface(w, h) => Ok(
-                iced_layershell::actions::LayershellCustomActionsWithInfo::SizeChange((w, h)),
-            ),
-            other => Err(other),
-        }
+    // ---- SEND: three shortcuts to maximize compatibility ----
+    if key == Key::Named(Named::Enter) && (modifiers.control() || modifiers.alt()) {
+        eprintln!("[key] Send triggered via Enter+mod");
+        return Some(Message::Email(EmailMessage::SendMail));
     }
-}
-
-pub struct MoonBeautyShellApp {
-    weather_tooltip_child: Option<std::process::Child>,
-    settings: ShellSettings,
-    theme: ShellTheme,
-    telemetry: UnifiedTelemetry,
-    active_overlay: Option<OverlayTarget>,
-    is_standalone: bool,
-    system_collector: SystemCollector,
-    standalone_child: Option<(OverlayTarget, std::process::Child)>,
-    ipc_rx: std::sync::mpsc::Receiver<IpcCommand>,
-    is_notif_surface: bool,
-    notif_rx: Option<std::sync::mpsc::Receiver<moon_beauty_shell::backend::notif_dbus::IncomingNotification>>,
-    settings_json_mtime: Option<std::time::SystemTime>,
-    window_w: f32,
-    notif_screen_at_startup: String,
-    notif_surface_size: (u32, u32),
-    tray_expanded: bool,
-    tray_items: Vec<moon_beauty_shell::backend::TrayItem>,
-    tray_anim_width: f32,
-    tray_target_width: f32,
-    tray_anim_start_width: f32,
-    tray_anim_started_at: std::time::Instant,
-    tray_anim_duration_ms: u64,
-    tray_timeout_gen: u64,
-    detected_gpus: Vec<moon_beauty_shell::backend::GpuInfo>,
-
-    launcher: AppLauncher,
-    calc: CalculatorOverlay,
-    clipboard: ClipboardOverlay,
-    notes: NotesOverlay,
-    pass: PassOverlay,
-    power: PowerOverlay,
-    todo: TodoOverlay,
-    reminders: RemindersOverlay,
-    dict: DictionaryOverlay,
-    unicode: UnicodeOverlay,
-    web: WebSearchOverlay,
-    amogus: AmogusOverlay,
-    annotator: AnnotatorOverlay,
-    rng: RngOverlay,
-    email: EmailOverlay,
-    notifs: NotificationOverlay,
-    settings_ui: SettingsOverlay,
-    lockscreen: LockscreenOverlay,
-}
-
-impl MoonBeautyShellApp {
-    fn close_tray(&mut self) {
-        if self.tray_expanded {
-            self.tray_expanded = false;
-            self.tray_anim_start_width = self.tray_anim_width;
-            self.tray_anim_started_at = std::time::Instant::now();
-            self.tray_target_width = self.settings.tray_width as f32;
-            self.tray_anim_duration_ms = 180;
+    if let Key::Character(c) = &key {
+        if modifiers.control() && c.to_lowercase() == "s" {
+            eprintln!("[key] Send triggered via Ctrl+S");
+            return Some(Message::Email(EmailMessage::SendMail));
         }
-        // Invalidate any pending timeout timers
-        self.tray_timeout_gen = self.tray_timeout_gen.wrapping_add(1);
-    }
-
-    fn standalone_running(&mut self) -> Option<OverlayTarget> {
-        if let Some((t, child)) = self.standalone_child.as_mut() {
-            if matches!(child.try_wait(), Ok(None)) {
-                return Some(t.clone());
-            }
-        }
-        if self.standalone_child.is_some() {
-            if let Some((_, mut child)) = self.standalone_child.take() {
-                let _ = child.wait();
-            }
-        }
-        None
-    }
-
-    fn kill_standalone(&mut self) {
-        if let Some((_, mut child)) = self.standalone_child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
+        if modifiers.control() && c.to_lowercase() == "o" {
+            eprintln!("[key] Attach triggered via Ctrl+O");
+            return Some(Message::Email(EmailMessage::AddAttachment));
         }
     }
 
-    fn spawn_standalone(&mut self, target: OverlayTarget) {
-        self.kill_standalone();
-        let exe = resolve_exe();
-        let tag = target.as_arg();
-        let log_path = format!("/tmp/mbs-standalone-{}.log", tag);
-        let stderr_file = std::fs::OpenOptions::new()
-            .create(true).truncate(true).write(true)
-            .open(&log_path).ok();
-        let stdout_file = stderr_file.as_ref().and_then(|f| f.try_clone().ok());
+    if key == Key::Named(Named::Tab) {
+        return Some(Message::ComposeTabPressed(modifiers.shift()));
+    }
 
-        let mut cmd = std::process::Command::new(exe);
-        cmd.arg(format!("--{}", tag));
-        if let Some(sf) = stderr_file { cmd.stderr(sf); }
-        if let Some(of) = stdout_file { cmd.stdout(of); }
-
-        match cmd.spawn() {
-            Ok(c) => self.standalone_child = Some((target, c)),
-            Err(e) => eprintln!("[ipc] spawn {:?} failed: {e}", target),
+    if modifiers.alt() {
+        match key {
+            Key::Named(Named::ArrowUp) => {
+                return Some(Message::Email(EmailMessage::SelectFolderPrev))
+            }
+            Key::Named(Named::ArrowDown) => {
+                return Some(Message::Email(EmailMessage::SelectFolderNext))
+            }
+            _ => {}
         }
     }
 
-    fn toggle_standalone(&mut self, target: OverlayTarget) {
-        match self.standalone_running() {
-            Some(ref t) if t == &target => self.kill_standalone(),
-            _ => self.spawn_standalone(target),
-        }
-    }
-}
-
-impl iced_layershell::Application for MoonBeautyShellApp {
-    type Message = Message;
-    type Flags = ();
-    type Theme = Theme;
-    type Executor = iced::executor::Default;
-
-    fn namespace(&self) -> String {
-        "moon-beauty-shell".into()
-    }
-
-    fn new(_flags: Self::Flags) -> (Self, Command<Message>) {
-        let args: Vec<String> = std::env::args().collect();
-        let standalone_target = detect_standalone_overlay(&args);
-        if let Some(idx) = args.iter().position(|a| a == "--tray-context-menu") {
-        let json_path = args.get(idx + 1).cloned().unwrap_or_default();
-        let bus = args.get(idx + 2).cloned().unwrap_or_default();
-        let menu_path = args.get(idx + 3).cloned().unwrap_or_default();
-        let w = args.get(idx + 4).and_then(|s| s.parse().ok()).unwrap_or(250u32);
-        let h = args.get(idx + 5).and_then(|s| s.parse().ok()).unwrap_or(400u32);
-        if let Ok(json) = std::fs::read_to_string(&json_path) {
-            if let Ok(items) = serde_json::from_str::<Vec<moon_beauty_shell::backend::TrayMenuItem>>(&json) {
-                let _ = std::fs::remove_file(&json_path);
-                std::process::exit(match moon_beauty_shell::overlays::tray_context::run(items, bus, menu_path, w, h) {
-                    Ok(_) => 0,
-                    Err(_) => 1,
-                });
-            }
-        }
-        std::process::exit(1);
-    }
-
-    let is_notif_surface = detect_notif_surface(&args);
-        let is_standalone = standalone_target.is_some();
-        let settings = ShellSettings::load();
-        let _tray_width_px = settings.tray_width as f32;
-        eprintln!("[startup] tray_width={} tray_timeout={}s", settings.tray_width, settings.tray_timeout_sec);
-        let theme = ShellTheme::from_settings(&settings);
-
-        let (ipc_tx, ipc_rx) = std::sync::mpsc::channel::<IpcCommand>();
-        if standalone_target.is_none() && !is_notif_surface {
-            std::thread::spawn(move || {
-                use std::io::Read;
-                use std::os::unix::net::UnixListener;
-                let path = moon_beauty_shell::ipc::get_socket_path();
-                let _ = std::fs::remove_file(&path);
-                let listener = match UnixListener::bind(&path) {
-                    Ok(l) => { eprintln!("[ipc] listener bound (sync thread)"); l }
-                    Err(e) => { eprintln!("[ipc] bind failed: {e}"); return; }
-                };
-                loop {
-                    match listener.accept() {
-                        Ok((mut stream, _)) => {
-                            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(3)));
-                            let mut buf = Vec::new();
-                            if let Err(e) = stream.read_to_end(&mut buf) {
-                                eprintln!("[ipc] read error: {e}");
-                                continue;
-                            }
-                            match serde_json::from_slice::<IpcCommand>(&buf) {
-                                Ok(cmd) => {
-                                    eprintln!("[ipc] accepted: {:?}", cmd);
-                                    if ipc_tx.send(cmd).is_err() {
-                                        eprintln!("[ipc] channel closed");
-                                        break;
-                                    }
-                                }
-                                Err(e) => eprintln!("[ipc] deserialize error: {e}"),
-                            }
-                        }
-                        Err(e) => eprintln!("[ipc] accept error: {e}"),
-                    }
-                }
-            });
-        }
-
-        let notif_rx = if is_notif_surface {
-            let (tx, rx) = std::sync::mpsc::channel();
-            moon_beauty_shell::backend::notif_dbus::spawn(tx);
-            moon_beauty_shell::backend::tray_watcher::spawn();
-            Some(rx)
-        } else {
-            None
-        };
-
-        let notif_screen_at_startup = settings.notif_screen_name.clone();
-        let mut app = Self {
-            settings_ui: SettingsOverlay::new(&settings),
-            settings,
-            theme,
-            telemetry: UnifiedTelemetry {
-                cpu: Default::default(),
-                gpu: Default::default(),
-                gpu_selected_idx: 0,
-                ram: Default::default(),
-                net: Default::default(),
-                battery: Default::default(),
-                audio: Default::default(),
-                mic: Default::default(),
-                mpris: None,
-                weather: None,
-                podman: Default::default(),
-                borg: Default::default(),
-                bar_time: ClockBackend::get_bar_time(),
-            },
-            active_overlay: standalone_target,
-            weather_tooltip_child: None,
-            is_standalone,
-            system_collector: SystemCollector::new(),
-            standalone_child: None,
-            ipc_rx,
-            is_notif_surface,
-            notif_rx,
-            settings_json_mtime: std::fs::metadata(ShellSettings::config_path())
-                .ok()
-                .and_then(|m| m.modified().ok()),
-            window_w: 1920.0,
-            notif_screen_at_startup,
-            notif_surface_size: if is_notif_surface { (1, 1) } else { (0, 0) },
-            tray_expanded: false,
-            tray_items: Vec::new(),
-            tray_anim_width: _tray_width_px,
-            tray_target_width: _tray_width_px,
-            tray_anim_start_width: _tray_width_px,
-            tray_anim_started_at: std::time::Instant::now(),
-            tray_anim_duration_ms: 220,
-            tray_timeout_gen: 0,
-            detected_gpus: if is_notif_surface || is_standalone { Vec::new() } else { SystemCollector::list_gpus_sync() },
-
-            launcher: AppLauncher::new(),
-            calc: {
-                if let Ok(expr) = std::env::var("MBS_CALC_EXPR") {
-                    CalculatorOverlay::new_with_input(&expr)
-                } else {
-                    CalculatorOverlay::new()
-                }
-            },
-            clipboard: ClipboardOverlay::new(),
-            notes: NotesOverlay::new(),
-            pass: PassOverlay::new(),
-            power: PowerOverlay::new(),
-            todo: TodoOverlay::new(),
-            reminders: RemindersOverlay::new(),
-            dict: DictionaryOverlay::new(),
-            unicode: UnicodeOverlay::new(),
-            web: WebSearchOverlay::new(),
-            amogus: AmogusOverlay::new(),
-            annotator: {
-                let mut a = AnnotatorOverlay::new();
-                if let Ok(p) = std::env::var("MBS_ANNOTATOR_PATH") {
-                    let pb = std::path::PathBuf::from(&p);
-                    match std::fs::read(&pb) {
-                        Ok(bytes) => {
-                            a.load_image(pb, bytes);
-                            eprintln!("[annotator] loaded capture from {p}");
-                        }
-                        Err(e) => eprintln!("[annotator] failed to read {p}: {e}"),
-                    }
-                }
-                a
-            },
-            rng: RngOverlay::new(),
-            email: EmailOverlay::new(),
-            notifs: NotificationOverlay::new(),
-            lockscreen: LockscreenOverlay::new(),
-        };
-
-        let mut init_tasks = vec![
-            Command::perform(async {
-                moon_beauty_shell::backend::WeatherBackend::fetch().await.ok()
-            }, Message::WeatherLoaded)
-        ];
-
-        if matches!(app.active_overlay, Some(OverlayTarget::Launcher)) {
-            // Immediate focus attempt
-            init_tasks.push(iced::widget::text_input::focus("launcher_search").map(Message::Launcher));
-            // Delayed re-focus — catches compositor focus arriving after map
-            init_tasks.push(Command::perform(
-                async {
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                },
-                |_| Message::Launcher(LauncherMessage::Refocus),
-            ));
-        } else if matches!(app.active_overlay, Some(OverlayTarget::Calc)) {
-            init_tasks.push(
-                iced::widget::text_input::focus(moon_beauty_shell::overlays::calc::CALC_INPUT_ID)
-                    .map(Message::Calc),
-            );
-            init_tasks.push(Command::perform(
-                async {
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                },
-                |_| Message::Calc(CalcMessage::Refocus),
-            ));
-        } else if matches!(app.active_overlay, Some(OverlayTarget::Pass)) {
-            init_tasks.push(
-                iced::widget::text_input::focus(moon_beauty_shell::overlays::pass::PASS_SEARCH_ID)
-                    .map(Message::Pass),
-            );
-            init_tasks.push(Command::perform(
-                async {
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                },
-                |_| Message::Pass(PassMessage::Refocus),
-            ));
-        } else if matches!(app.active_overlay, Some(OverlayTarget::Dictionary)) {
-            init_tasks.push(
-                iced::widget::text_input::focus(moon_beauty_shell::overlays::dictionary::DICT_SEARCH_ID)
-                    .map(Message::Dict),
-            );
-            init_tasks.push(Command::perform(
-                async {
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                },
-                |_| Message::Dict(DictMessage::Refocus),
-            ));
-        } else if matches!(app.active_overlay, Some(OverlayTarget::Lockscreen)) {
-            // No widget to focus — keyboard capture is via subscription
-        } else if matches!(app.active_overlay, Some(OverlayTarget::Clipboard)) {
-            init_tasks.push(Command::perform(
-                ClipboardOverlay::reload(),
-                |entries| Message::Clipboard(ClipboardMessage::Reloaded(entries)),
-            ));
-        }
-        
-        (app, Command::batch(init_tasks))
-    }
-
-    fn style(&self, _theme: &Self::Theme) -> iced_layershell::Appearance {
-        iced_layershell::Appearance {
-            background_color: Color::TRANSPARENT,
-            text_color: self.theme.text,
-        }
-    }
-
-    fn update(&mut self, message: Message) -> Command<Message> {
-        match message {
-            Message::WindowResized(w) => {
-                self.window_w = w;
-            }
-            Message::ResizeNotifSurface(w, h) => {
-                eprintln!("[resize] update caught ({}, {}) — try_into NOT called", w, h);
-            }
-            Message::PollNotifs => {
-                let mtime = std::fs::metadata(ShellSettings::config_path())
-                    .ok()
-                    .and_then(|m| m.modified().ok());
-                if mtime != self.settings_json_mtime {
-                    self.settings_json_mtime = mtime;
-                    self.settings = ShellSettings::load();
-                    self.theme = ShellTheme::from_settings(&self.settings);
-                }
-                if !self.is_notif_surface
-                    && !self.is_standalone
-                    && self.settings.notif_screen_name != self.notif_screen_at_startup
-                {
-                    self.notif_screen_at_startup = self.settings.notif_screen_name.clone();
-                    let _ = std::process::Command::new("pkill")
-                        .args(["-f", "--", "moon-beauty-shell --notif-surface"])
-                        .status();
-                    std::thread::sleep(std::time::Duration::from_millis(300));
-                    let exe = resolve_exe();
-                    let _ = std::process::Command::new(exe).arg("--notif-surface").spawn();
-                }
-                if let Some(rx) = self.notif_rx.as_ref() {
-                    while let Ok(n) = rx.try_recv() {
-                        let is_test = n.app_name == "Diagnostics";
-                        self.notifs.push_notification(
-                            &n.app_name, &n.summary, &n.body, n.is_urgent, is_test,
-                            n.desktop_entry.as_deref(),
-                            n.actions.clone(),
-                            &self.settings,
-                        );
-                    }
-                }
-                if self.is_notif_surface {
-                    // CLI notification control (see --activate-latest-notif / --dismiss-notif)
-                    let runtime = std::env::var("XDG_RUNTIME_DIR")
-                        .unwrap_or_else(|_| format!("/tmp/user-{}", std::process::id()));
-                    let cmd_path = std::path::PathBuf::from(&runtime)
-                        .join("moon-beauty-shell-notif-cmd");
-                    if let Ok(cmd) = std::fs::read_to_string(&cmd_path) {
-                        let _ = std::fs::remove_file(&cmd_path);
-                        match cmd.trim() {
-                            "dismiss" => {
-                                if let Some(first) = self.notifs.active_toasts.first().cloned() {
-                                    self.notifs.update(NotifMessage::DismissToast(first.id));
-                                }
-                            }
-                            "activate-latest" => {
-                                if let Some(t) = self.notifs.active_toasts.last().cloned() {
-                                    let app = t.app_name.clone();
-                                    let entry = t.desktop_entry.clone();
-                                    let nid = t.id;
-                                    self.notifs.update(NotifMessage::DismissToast(t.id));
-                                    std::thread::spawn(move || {
-                                        moon_beauty_shell::backend::notif_dbus::emit_action_invoked(nid, "default");
-                                        std::thread::sleep(std::time::Duration::from_millis(200));
-                                        let matches = notification_candidates(&app, entry.as_deref());
-                                        if !is_app_focused(&matches) {
-                                            let ok = focus_notification_app(&app, entry.as_deref());
-                                            eprintln!("[activate-latest] fallback app={:?} entry={:?} ok={}", app, entry, ok);
-                                        } else {
-                                            eprintln!("[activate-latest] client self-focused app={:?}", app);
-                                        }
-                                    });
-                                } else {
-                                    eprintln!("[activate-latest] no active toast");
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    if !moon_beauty_shell::overlays::notifications::dnd_active() {
-                        let held = moon_beauty_shell::overlays::notifications::take_held_notifs();
-                        if !held.is_empty() {
-                            eprintln!("[dnd] unpaused! releasing {} held toast(s) to screen", held.len());
-                            for mut item in held {
-                                item.created_at = std::time::Instant::now();
-                                item.hold_reset_at = Some(std::time::Instant::now());
-                                item.exit_started_at = None;
-                                item.slot_shift_start = None;
-                                if self.notifs.active_toasts.len() >= 4 {
-                                    self.notifs.active_toasts.remove(0);
-                                }
-                                self.notifs.active_toasts.push(item);
-                            }
-                        }
-                    }
-                    let big_w = (self.settings.notif_card_width as i32
-                        + 2 * self.settings.notif_margin_x + 100)
-                        .max(200) as u32;
-                    let big_h = (3 * self.settings.notif_card_height as i32
-                        + 2 * self.settings.notif_margin_x + 100)
-                        .max(300) as u32;
-                    let want = if self.notifs.active_toasts.is_empty() {
-                        (1u32, 1u32)
-                    } else {
-                        (big_w, big_h)
-                    };
-                    if want != self.notif_surface_size {
-                        self.notif_surface_size = want;
-                        return Command::done(Message::ResizeNotifSurface(want.0, want.1));
-                    }
-                }
-            }
-            Message::TickClock => {
-                self.telemetry.bar_time = ClockBackend::get_bar_time();
-                let now = chrono::Local::now().timestamp();
-                let mut entries = moon_beauty_shell::overlays::reminders::RemindersOverlay::load();
-                let mut changed = false;
-                for e in entries.iter_mut() {
-                    if e.target_epoch <= now && !e.alerted {
-                        e.alerted = true;
-                        changed = true;
-                        let text = if e.text.is_empty() { "Timer Finished!".into() } else { e.text.clone() };
-                        let _ = std::process::Command::new("notify-send")
-                            .args(["-a", "Alarm", "-u", "critical", "⏰ Timer Complete!", &text])
-                            .spawn();
-                            
-                        if let Some(sound) = &self.settings.alarm_sound {
-                            let path = if std::path::Path::new(sound).is_absolute() {
-                                std::path::PathBuf::from(sound)
-                            } else {
-                                std::path::PathBuf::from("resources").join(sound)
-                            };
-                            if path.exists() {
-                                let path_str = path.to_string_lossy().to_string();
-                                let dur = self.settings.alarm_sound_duration_sec;
-                                let vol_pct = self.settings.alarm_sound_volume;
-                                let vol_f = (vol_pct as f32) / 100.0;
-                                let cmd = format!(
-                                    r#"timeout {}s pw-play --volume={:.2} "{}" 2>/dev/null"#,
-                                    dur, vol_f, path_str
-                                );
-                                let _ = std::process::Command::new("sh").arg("-c").arg(cmd).spawn();
-                            }
-                        }
-                    }
-                }
-                if changed {
-                    moon_beauty_shell::overlays::reminders::save_reminders(&entries);
-                }
-            }
-            Message::TickToasts => {
-                self.notifs.tick_toasts(self.settings.notif_hold_duration_sec);
-            }
-            Message::TickWeather => {
-                return Command::perform(async {
-                    moon_beauty_shell::backend::WeatherBackend::fetch().await.ok()
-                }, Message::WeatherLoaded);
-            }
-            Message::WeatherLoaded(w) => {
-                self.telemetry.weather = w;
-            }
-            Message::TickHardware => {
-                self.telemetry.gpu_selected_idx = self.detected_gpus.iter().position(|g| g.card_id == self.settings.gpu_selected_id).unwrap_or(0);
-                let bat = SystemCollector::collect_battery();
-                self.telemetry.battery = bat;
-                self.telemetry.net = self.system_collector.update_net();
-
-                let gpu_id = self.settings.gpu_selected_id.clone();
-
-                return Command::perform(
-                    async move {
-                        let cpu = SystemCollector::collect_cpu().await;
-                        let ram = SystemCollector::collect_ram().await;
-                        let gpu = SystemCollector::collect_gpu_by_card_id(&gpu_id).await;
-                        let audio = AudioBackend::get_sink().await;
-                        let mic = AudioBackend::get_source().await;
-                        let mpris = MprisBackend::poll().await;
-                        (cpu, ram, gpu, audio, mic, mpris)
-                    },
-                    |(cpu, ram, gpu, audio, mic, mpris)| {
-                        Message::MetricsCollected(cpu, ram, gpu, audio, mic, mpris)
-                    },
-                );
-            }
-            Message::MetricsCollected(cpu, ram, gpu, audio, mic, mpris) => {
-                self.telemetry.cpu = cpu;
-                self.telemetry.ram = ram;
-                self.telemetry.gpu = gpu;
-                self.telemetry.audio = audio;
-                self.telemetry.mic = mic;
-                self.telemetry.mpris = mpris;
-            }
-            Message::IpcReceived(cmd) => match cmd {
-                IpcCommand::Toggle(target) => {
-                    // Every overlay runs as a standalone child so it gets
-                    // keyboard=Exclusive from its layer surface. The bar's own
-                    // layer is KeyboardInteractivity::None, so in-bar overlays
-                    // cannot receive keystrokes.
-                    eprintln!("[ipc] toggle {:?} (standalone)", target);
-                    self.toggle_standalone(target);
-                }
-                IpcCommand::Open(target, arg) => {
-                    if matches!(target, OverlayTarget::Launcher | OverlayTarget::Clipboard | OverlayTarget::NotificationsHistory | OverlayTarget::Settings) {
-                        self.spawn_standalone(target);
-                    } else if matches!(target, OverlayTarget::Annotator) {
-                        // Annotator needs fullscreen + exclusive keyboard, which only
-                        // the standalone (--annotator-session) process gets via its
-                        // LayerShellSettings. Spawn a child with the captured path.
-                        let exe = resolve_exe();
-                        let mut cmd = std::process::Command::new(exe);
-                        cmd.arg("--annotator-session");
-                        if let Some(ref p) = arg {
-                            cmd.env("MBS_ANNOTATOR_PATH", p);
-                        }
-                        match cmd.spawn() {
-                            Ok(child) => {
-                                eprintln!("[annotator] spawned pid={}", child.id());
-                                self.standalone_child = Some((OverlayTarget::Annotator, child));
-                            }
-                            Err(e) => eprintln!("[annotator] spawn failed: {e}"),
-                        }
-                    } else {
-                        self.active_overlay = Some(target);
-                    }
-                }
-                IpcCommand::Close(target) => {
-                    if self.active_overlay == Some(target) {
-                        self.active_overlay = None;
-                    }
-                }
-                IpcCommand::CloseAll => {
-                    self.active_overlay = None;
-                }
-                IpcCommand::DismissLatestNotif => {
-                    if let Some(first) = self.notifs.active_toasts.first().cloned() {
-                        self.notifs.update(NotifMessage::DismissToast(first.id));
-                    }
-                }
-                IpcCommand::JumpToLatestNotif => {
-                    self.spawn_standalone(OverlayTarget::NotificationsHistory);
-                }
-                IpcCommand::ToggleHistory => {
-                    self.toggle_standalone(OverlayTarget::NotificationsHistory);
-                }
-                IpcCommand::ReloadSettings => {
-                    self.settings = ShellSettings::load();
-                    self.theme = ShellTheme::from_settings(&self.settings);
-                }
-                IpcCommand::TestNotification => {
-                    for (title, body) in [
-                        ("System Diagnostics #1 (first)", "Verification toast successfully routed."),
-                        ("System Diagnostics #2 (second)", "Background worker service nominal."),
-                        ("System Diagnostics #3 (third)", "Telemetry stream established."),
-                    ] {
-                        let _ = std::process::Command::new("notify-send")
-                            .args(["-a", "Diagnostics", title, body])
-                            .spawn();
-                    }
-                }
-                IpcCommand::IncomingNotif { .. } => {}
-                IpcCommand::Ping => {}
-            },
-            Message::PollIpc => {
-                while let Ok(cmd) = self.ipc_rx.try_recv() {
-                    let _ = self.update(Message::IpcReceived(cmd));
-                }
-            }
-            Message::TopBar(msg) => {
-                if let TopBarMessage::Action(act) = msg {
-                    match act {
-                        CapsuleAction::OpenOverlay(id) => {
-                            eprintln!("[topbar-action] OpenOverlay: id = {:?}", id);
-
-                            // 1. DROPDOWN TOOLTIPS (Alarm, CPU, GPU, RAM, Weather, Tray)
-                            if matches!(id.as_str(), "weather" | "cpu" | "gpu" | "ram" | "alarm" | "calendar" | "music" | "unified" | "net" | "custom") {
-                                // Toggle off if already open
-                                let running = self.weather_tooltip_child.as_mut()
-                                    .and_then(|c| c.try_wait().ok())
-                                    .is_some_and(|status| status.is_none());
-                                if running {
-                                    eprintln!("[tooltip] Already open; toggling off");
-                                    if let Some(mut c) = self.weather_tooltip_child.take() {
-                                        let _ = c.kill();
-                                        let _ = c.wait();
-                                    }
-                                    return Command::none();
-                                }
-                                self.weather_tooltip_child = None;
-
-                                let target_output = if self.settings.notif_screen_name != "Auto"
-                                    && self.settings.notif_screen_name != "Auto (Primary)"
-                                    && !self.settings.notif_screen_name.is_empty() {
-                                    Some(self.settings.notif_screen_name.as_str())
-                                } else { None };
-                                let sw = get_screen_width_for(target_output);
-                                let cx = capsule_center_x(&self.settings, sw, &id);
-                                let exe = resolve_exe();
-                                let mut cmd = std::process::Command::new(&exe);
-
-                                if id == "alarm" {
-                                    cmd.arg("--alarm-tooltip");
-                                } else if id == "weather" {
-                                    cmd.arg("--weather-tooltip");
-                                } else if matches!(id.as_str(), "calendar" | "music" | "unified" | "net" | "custom") {
-                                    cmd.arg("--info-tooltip").env("MBS_INFO_MODE", &id);
-                                } else {
-                                    cmd.arg("--sys-tooltip").env("MBS_SYS_TARGET", &id);
-                                }
-                                let in_left = self.settings.bar_left.contains(&id);
-                                let in_center = self.settings.bar_center.contains(&id);
-                                let in_right = self.settings.bar_right.contains(&id);
-                                let (slant_l, slant_r): (&str, &str) = match self.settings.slant_mode.as_str() {
-                                    "left" => ("L", "L"),
-                                    "right" => ("R", "R"),
-                                    _ => {
-                                        if in_center {
-                                            let vis: Vec<&String> = self.settings.bar_center.iter()
-                                                .filter(|x| self.settings.visible_capsules.get(*x).copied().unwrap_or(true)).collect();
-                                            let k = vis.len() / 2;
-                                            match vis.iter().position(|x| **x == id) {
-                                                Some(i) if i == k => ("L", "R"),
-                                                Some(i) if i < k => ("L", "L"),
-                                                Some(_) => ("R", "R"),
-                                                None => ("L", "R"),
-                                            }
-                                        } else if in_right {
-                                            ("R", "R")
-                                        } else {
-                                            ("L", "L")
-                                        }
-                                    }
-                                };
-                                let cap_w = capsule_actual_width(&id);
-                                eprintln!(
-                                    "[spawn] id={:?} cap_w={:.1} cx={} sw={} in_L={} in_R={} in_C={} slant_mode={:?}",
-                                    id, cap_w, cx, sw,
-                                    self.settings.bar_left.contains(&id),
-                                    self.settings.bar_right.contains(&id),
-                                    self.settings.bar_center.contains(&id),
-                                    self.settings.slant_mode
-                                );
-                                let grow_right = if in_left { true } else if in_right { false } else { cx < (sw as i32) / 2 };
-                                
-                                let (tip_w, tip_h) = self.settings.tooltip_size(&id);
-                                eprintln!("[spawn-size] id={:?} tip_w={} tip_h={} (override={:?})",
-                                    id, tip_w, tip_h, self.settings.tooltip_sizes.get(&id));
-                                let tip_output = if self.settings.bar_monitor != "All"
-                                    && !self.settings.bar_monitor.is_empty()
-                                {
-                                    Some(self.settings.bar_monitor.clone())
-                                } else {
-                                    std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty())
-                                        .or_else(resolve_primary_output)
-                                };
-                                eprintln!("[spawn-output] id={:?} bar_monitor={:?} tip_output={:?}",
-                                    id, self.settings.bar_monitor, tip_output);
-                                if let Some(ref o) = tip_output {
-                                    cmd.env("MBS_OUTPUT", o);
-                                }
-                                                                                                                                cmd
-                                   .env("MBS_TOOLTIP_W", tip_w.max(cap_w as u32).to_string())
-                                   .env("MBS_TOOLTIP_H", tip_h.to_string())
-                                   .env("MBS_TOOLTIP_DROP_MS", self.settings.tooltip_drop_ms.to_string())
-                                   .env("MBS_TOOLTIP_EXPAND_MS", self.settings.tooltip_expand_ms.to_string())
-                                   .env("MBS_SCREEN_W", sw.to_string())
-                                   .env("MBS_SLANT_L", slant_l)
-                                   .env("MBS_SLANT_R", slant_r)
-                                   .env("MBS_GROW_RIGHT", if grow_right { "1" } else { "0" })
-                                   .env("MBS_CAPSULE_CX", cx.to_string())
-                                   .env("MBS_CAPSULE_W", cap_w.to_string());
-
-                                match cmd.spawn() {
-                                    Ok(c) => {
-                                        self.weather_tooltip_child = Some(c);
-                                    }
-                                    Err(e) => eprintln!("[tooltip] Failed to spawn: {e}"),
-                                }
-                                return Command::none();
-                            }
-
-                            // 2. FULLSCREEN / STANDALONE OVERLAYS (Settings, History, Power)
-                            let mapped: Option<OverlayTarget> = match id.as_str() {
-                                "calendar" | "clock" => Some(OverlayTarget::Settings),
-                                "unified" | "net" => Some(OverlayTarget::Settings),
-                                "notify" => Some(OverlayTarget::NotificationsHistory),
-                                "battery" => Some(OverlayTarget::Power),
-                                _ => OverlayTarget::from_str(&id),
-                            };
-                            if let Some(target) = mapped {
-                                if matches!(
-                                    target,
-                                    OverlayTarget::Launcher
-                                        | OverlayTarget::Clipboard
-                                        | OverlayTarget::NotificationsHistory
-                                        | OverlayTarget::Settings
-                                ) {
-                                    self.spawn_standalone(target);
-                                } else {
-                                    self.active_overlay = Some(target);
-                                }
-                            }
-                        }
-                        CapsuleAction::TogglePlayPause => {
-                            return Command::perform(MprisBackend::toggle_play_pause(), |_| Message::TopBar(TopBarMessage::Noop));
-                        }
-                        CapsuleAction::NextTrack => {
-                            return Command::perform(MprisBackend::next(), |_| Message::TopBar(TopBarMessage::Noop));
-                        }
-                        CapsuleAction::PreviousTrack => {
-                            return Command::perform(MprisBackend::previous(), |_| Message::TopBar(TopBarMessage::Noop));
-                        }
-                        CapsuleAction::CycleAudioSink => {
-                            return Command::perform(AudioBackend::cycle_sinks(), |_| Message::TopBar(TopBarMessage::Noop));
-                        }
-                        CapsuleAction::ToggleSinkMute => {
-                            return Command::perform(AudioBackend::toggle_sink_mute(), |_| Message::TopBar(TopBarMessage::Noop));
-                        }
-                        CapsuleAction::ToggleNotificationDnd => {
-                            let paused = moon_beauty_shell::overlays::notifications::toggle_dnd();
-                            self.settings.notifications_enabled = !paused;
-                            let _ = self.settings.save();
-                            eprintln!("[dnd] paused={}", paused);
-
-                            // The notif-surface owns org.freedesktop.Notifications
-                            // and writes held-notifs.json. It must stay alive
-                            // while paused to receive + hold. Only respawn if
-                            // it died for some unrelated reason.
-                            let running = std::process::Command::new("pgrep")
-                                .args(["-f", "--", "moon-beauty-shell --notif-surface"])
-                                .output()
-                                .map(|o| !o.stdout.is_empty())
-                                .unwrap_or(false);
-                            if !running {
-                                let exe = resolve_exe();
-                                let _ = std::process::Command::new(exe).arg("--notif-surface").spawn();
-                                eprintln!("[dnd] respawned notif-surface");
-                            }
-                        }
-                        CapsuleAction::CancelTooltip(id) => {
-                            eprintln!("[topbar] CancelTooltip: {}", id);
-                            if let Some(mut c) = self.weather_tooltip_child.take() {
-                                let _ = c.kill();
-                                let _ = c.wait();
-                            }
-                            // Right-click on alarm capsule: wipe active timers
-                            if id == "alarm" {
-                                let _ = moon_beauty_shell::overlays::reminders::save_reminders(&[]);
-                                eprintln!("[topbar] cleared active timers");
-                            }
-                        }
-                        CapsuleAction::ToggleSourceMute => {
-                            return Command::perform(AudioBackend::toggle_source_mute(), |_| Message::TopBar(TopBarMessage::Noop));
-                        }
-                        CapsuleAction::ToggleTrayExpanded => {
-                            if !self.tray_expanded {
-                                // OPENING
-                                self.tray_timeout_gen = self.tray_timeout_gen.wrapping_add(1);
-                                let my_gen = self.tray_timeout_gen;
-                                
-                                self.tray_expanded = true;
-                                self.tray_anim_start_width = self.tray_anim_width;
-                                self.tray_anim_started_at = std::time::Instant::now();
-                                let expanded_w = moon_beauty_shell::bar::capsules::compute_expanded_visible_width(
-                                    &self.settings, self.tray_items.len()
-                                );
-                                self.tray_target_width = expanded_w;
-                                self.tray_anim_duration_ms = 220;
-
-                                let timeout = self.settings.tray_timeout_sec;
-                                if timeout > 0 {
-                                    return Command::batch(vec![
-                                        Command::perform(
-                                            moon_beauty_shell::backend::tray_watcher::fetch_tray_items(),
-                                            Message::TrayItemsLoaded,
-                                        ),
-                                        Command::perform(
-                                            async move {
-                                                tokio::time::sleep(std::time::Duration::from_secs(timeout as u64)).await;
-                                                my_gen
-                                            },
-                                            Message::CollapseTrayIfGen,
-                                        ),
-                                    ]);
-                                }
-                                return Command::perform(
-                                    moon_beauty_shell::backend::tray_watcher::fetch_tray_items(),
-                                    Message::TrayItemsLoaded,
-                                );
-                            } else {
-                                // CLOSING — bump gen to invalidate any pending timer
-                                self.close_tray();
-                            }
-                        }
-                        CapsuleAction::TrayActivate(item) => {
-                            self.close_tray();
-                            return Command::perform(
-                                async move {
-                                    let _ = moon_beauty_shell::backend::tray_watcher::activate_tray_item(&item.bus, &item.path).await;
-                                },
-                                |_| Message::TopBar(TopBarMessage::Noop)
-                            );
-                        }
-                        CapsuleAction::TrayContextMenu(item) => {
-                            let item_clone = item.clone();
-                            return Command::perform(async move {
-                                if let Some((menu_path, items)) = moon_beauty_shell::backend::tray_watcher::get_menu_tree(&item_clone.bus, &item_clone.path).await {
-                                    let json = serde_json::to_string(&items).unwrap();
-                                    let tmp_path = format!("/tmp/mbs-tray-menu-{}.json", std::process::id());
-                                    std::fs::write(&tmp_path, json).unwrap();
-                                    let exe = resolve_exe();
-                                    let h = (items.len() as u32 * 36).clamp(100, 600) + 40;
-                                    let _ = std::process::Command::new(exe)
-                                        .args(["--tray-context-menu", &tmp_path, &item_clone.bus, &menu_path, "250", &h.to_string()])
-                                        .spawn();
-                                }
-                            }, |_| Message::TopBar(TopBarMessage::Noop));
-                        }
-                        CapsuleAction::CycleGpuTarget => {
-                            let gpus = &self.detected_gpus;
-                            if !gpus.is_empty() {
-                                let current = &self.settings.gpu_selected_id;
-                                let next_idx = gpus
-                                    .iter()
-                                    .position(|g| &g.card_id == current)
-                                    .map(|i| (i + 1) % gpus.len())
-                                    .unwrap_or(0);
-                                self.settings.gpu_selected_id = gpus[next_idx].card_id.clone();
-                                let _ = self.settings.save();
-                                eprintln!("[bar] right-click GPU: switched to {}", self.settings.gpu_selected_id);
-                                return Command::done(Message::TickHardware);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            Message::Launcher(msg) => match msg {
-                LauncherMessage::Dismiss => {
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-                LauncherMessage::ExecuteApp(cmd) => {
-                    // Tab pressed on math row — open calculator with same expression
-                    if cmd == "__tab__" {
-                        // Tab = Enter on currently selected item.
-                        // For a math row, this copies the result.
-                        // For an app row, this launches the app.
-                        if let Some(selected) = self.launcher.filtered_apps.get(self.launcher.selected_index) {
-                            let resolved = selected.exec.clone();
-                            return self.update(Message::Launcher(LauncherMessage::ExecuteApp(resolved)));
-                        }
-                        return Command::none();
-                    }
-                    // Math result — copy to clipboard and close
-                    if let Some(result) = cmd.strip_prefix("math:") {
-                        let result = result.to_string();
-                        eprintln!("[launcher] math result -> wl-copy: {}", result);
-                        let _ = std::process::Command::new("notify-send")
-                            .args(["-a", "Launcher", "Copied", &result])
-                            .spawn();
-                        if self.is_standalone {
-                            let rt = tokio::runtime::Runtime::new().unwrap();
-                            let r = result.clone();
-                            rt.block_on(async move {
-                                let _ = tokio::process::Command::new("wl-copy")
-                                    .arg(&r)
-                                    .status()
-                                    .await;
-                            });
-                            std::process::exit(0);
-                        }
-                        self.active_overlay = None;
-                        return Command::perform(async move {
-                            let _ = tokio::process::Command::new("wl-copy")
-                                .arg(&result)
-                                .status()
-                                .await;
-                        }, |_| Message::DismissActiveOverlay);
-                    }
-
-                    if let Some(definition) = cmd.strip_prefix("dict:") {
-                        // Ignore sentinel entries (pending/hint)
-                        if definition == "__pending__" || definition == "__hint__" {
-                            return Command::none();
-                        }
-                        let def = definition.to_string();
-                        eprintln!("[launcher] dict copy: {}...", &def.chars().take(40).collect::<String>());
-                        let _ = std::process::Command::new("wl-copy").arg(&def).spawn();
-                        let _ = std::process::Command::new("notify-send")
-                            .args(["-a", "Dictionary", "Copied", &def])
-                            .spawn();
-                        if self.is_standalone {
-                            std::process::exit(0);
-                        }
-                        self.active_overlay = None;
-                        return Command::none();
-                    }
-
-                    if let Some(key) = cmd.strip_prefix("pass:") {
-                        eprintln!("[launcher] pass copy: {}", key);
-                        // Detached: `pass -c` may block on GPG pinentry, so we
-                        // spawn it as its own process and exit immediately.
-                        // The `sh -c '... "$1"' -- <key>` pattern prevents shell
-                        // injection when the key has special chars.
-                        let _ = std::process::Command::new("sh")
-                            .arg("-c")
-                            .arg(r#"pass -c "$1" 2>&1 && notify-send -a 'Password Store' 'Copied' "$1""#)
-                            .arg("--")
-                            .arg(key)
-                            .spawn();
-                        if self.is_standalone {
-                            std::process::exit(0);
-                        }
-                        self.active_overlay = None;
-                        return Command::none();
-                    }
-
-                    if let Some(target_str) = cmd.strip_prefix("internal:") {
-                        if let Some(target) = OverlayTarget::from_str(target_str) {
-                            if self.is_standalone {
-                                self.spawn_standalone(target);
-                                std::process::exit(0);
-                            } else {
-                                self.active_overlay = Some(target);
-                                return Command::none();
-                            }
-                        }
-                    }
-                    if self.is_standalone {
-                        tokio::spawn(async move { AppLauncher::launch(&cmd).await; });
-                        std::process::exit(0);
-                    }
-                    self.active_overlay = None;
-                    return Command::perform(async move { AppLauncher::launch(&cmd).await; }, |_| Message::DismissActiveOverlay);
-                }
-                _ => return self.launcher.update(msg).map(Message::Launcher),
-            },
-            Message::Calc(msg) => match msg {
-                CalcMessage::Dismiss => {
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-                CalcMessage::Refocus => {
-                    return iced::widget::text_input::focus(
-                        moon_beauty_shell::overlays::calc::CALC_INPUT_ID,
-                    ).map(Message::Calc);
-                }
-                CalcMessage::CopyResult(val) => {
-                    if self.is_standalone {
-                        // Block on the copy so it completes before exit.
-                        let v = val.clone();
-                        let rt = tokio::runtime::Runtime::new().unwrap();
-                        rt.block_on(async move {
-                            CalculatorOverlay::copy_to_clipboard(&v).await;
-                        });
-                        std::process::exit(0);
-                    }
-                    self.active_overlay = None;
-                    return Command::perform(async move { CalculatorOverlay::copy_to_clipboard(&val).await; }, |_| Message::DismissActiveOverlay);
-                }
-                _ => self.calc.update(msg),
-            },
-            Message::Clipboard(msg) => match msg {
-                ClipboardMessage::Dismiss => {
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-                ClipboardMessage::CopyEntry(id) => {
-                    if self.is_standalone {
-                        let rt = tokio::runtime::Runtime::new().unwrap();
-                        rt.block_on(async move { ClipboardOverlay::copy(id).await; });
-                        std::thread::sleep(std::time::Duration::from_millis(200));
-                        std::process::exit(0);
-                    }
-                    self.active_overlay = None;
-                    return Command::perform(async move { ClipboardOverlay::copy(id).await; }, |_| Message::DismissActiveOverlay);
-                }
-                ClipboardMessage::DeleteEntry(id) => {
-                    return Command::perform(async move { ClipboardOverlay::delete(id).await; }, |_| Message::DismissActiveOverlay);
-                }
-                ClipboardMessage::WipeAll => {
-                    return Command::perform(async move { ClipboardOverlay::wipe().await; }, |_| Message::DismissActiveOverlay);
-                }
-                ClipboardMessage::SearchChanged(q) => {
-                    self.clipboard.search_query = q;
-                }
-                ClipboardMessage::Reloaded(entries) => {
-                    self.clipboard.entries = entries;
-                }
-                ClipboardMessage::SelectNext => {
-                let ids = self.clipboard.filtered_ids();
-                if ids.is_empty() { return Command::none(); }
-                let next_idx = self.clipboard.selected_id.and_then(|sel| ids.iter().position(|&id| id == sel)).map(|p| (p + 1) % ids.len()).unwrap_or(0);
-                let next_id = ids[next_idx];
-                eprintln!("[debug-nav] Down pressed. next_idx: {}, next_id: {}", next_idx, next_id);
-                self.clipboard.selected_id = Some(next_id);
-                return Command::batch([
-                    Command::perform(ClipboardOverlay::load_preview(next_id), |(text, image_path)| Message::Clipboard(ClipboardMessage::PreviewLoaded { text, image_path })),
-                    iced::widget::scrollable::scroll_to(
-                        iced::widget::scrollable::Id::new("clip_list"),
-                        iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: (next_idx as f32 * 64.0 - 200.0).max(0.0) }
-                    )
-                ]);
-            }
-            ClipboardMessage::SelectPrev => {
-                let ids = self.clipboard.filtered_ids();
-                if ids.is_empty() { return Command::none(); }
-                let prev_idx = self.clipboard.selected_id.and_then(|sel| ids.iter().position(|&id| id == sel)).map(|p| (p + ids.len() - 1) % ids.len()).unwrap_or(0);
-                let prev_id = ids[prev_idx];
-                eprintln!("[debug-nav] Up pressed. prev_idx: {}, prev_id: {}", prev_idx, prev_id);
-                self.clipboard.selected_id = Some(prev_id);
-                return Command::batch([
-                    Command::perform(ClipboardOverlay::load_preview(prev_id), |(text, image_path)| Message::Clipboard(ClipboardMessage::PreviewLoaded { text, image_path })),
-                    iced::widget::scrollable::scroll_to(
-                        iced::widget::scrollable::Id::new("clip_list"),
-                        iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: (prev_idx as f32 * 64.0 - 200.0).max(0.0) }
-                    )
-                ]);
-            }
-                        ClipboardMessage::DeleteSelected => {
-                eprintln!("[clip] Delete key pressed. Selected ID: {:?}", self.clipboard.selected_id);
-                if let Some(id) = self.clipboard.selected_id {
-                    let pos = self.clipboard.entries.iter().position(|e| e.id == id);
-
-                    // Matches Lua logic: pipe ID + tab into cliphist delete
-                    if let Ok(mut child) = std::process::Command::new("cliphist")
-                        .arg("delete")
-                        .stdin(std::process::Stdio::piped())
-                        .spawn()
-                    {
-                        use std::io::Write;
-                        if let Some(mut stdin) = child.stdin.take() {
-                            let _ = writeln!(stdin, "{}\t", id);
-                        }
-                        let _ = child.wait();
-                        eprintln!("[clip] Deleted ID {}", id);
-                    }
-
-                    if let Some(idx) = pos {
-                        self.clipboard.entries.remove(idx);
-                        if !self.clipboard.entries.is_empty() {
-                            let next_idx = if idx >= self.clipboard.entries.len() { self.clipboard.entries.len() - 1 } else { idx };
-                            let next_id = self.clipboard.entries[next_idx].id;
-                            self.clipboard.selected_id = Some(next_id);
-                            return Command::batch([
-                                Command::perform(
-                                    ClipboardOverlay::load_preview(next_id),
-                                    |(text, image_path)| Message::Clipboard(ClipboardMessage::PreviewLoaded { text, image_path })
-                                ),
-                                iced::widget::scrollable::scroll_to(
-                                    iced::widget::scrollable::Id::new("clip_list"),
-                                    iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: (next_idx as f32 * 64.0 - 200.0).max(0.0) }
-                                )
-                            ]);
-                        } else {
-                            self.clipboard.selected_id = None;
-                            self.clipboard.preview_text.clear();
-                            self.clipboard.preview_image_path = None;
-                        }
-                    }
-                }
-                return Command::none();
-            }
-            ClipboardMessage::RunOcr(id) => {
-                eprintln!("[ocr] RunOcr triggered for id {}", id);
-                let is_img = self.clipboard.entries.iter().find(|e| e.id == id).map(|e| e.is_image).unwrap_or(false);
-                eprintln!("[ocr] entry found, is_image={}", is_img);
-                let tmp_path = std::env::temp_dir().join(format!("mbs-ocr-{}.png", id));
-                
-                // Do OCR synchronously — it's fast (~1s) and we're about to close anyway
-                if let Ok(out) = std::process::Command::new("cliphist")
-                    .args(["decode", &id.to_string()])
-                    .output()
-                {
-                    if !out.stdout.is_empty() && std::fs::write(&tmp_path, &out.stdout).is_ok() {
-                        // Clear LD_LIBRARY_PATH so tesseract uses its own
-                        // nix-store glibc (2.43) instead of the system glibc (2.42).
-                        // This prevents the 5.5.2-binary / 5.5.3-library mismatch.
-                        let tess_out = std::process::Command::new("tesseract")
-                            .args([tmp_path.to_str().unwrap(), "stdout"])
-                            .env_remove("LD_LIBRARY_PATH")
-                            .output();
-
-                        if let Ok(tess_out) = tess_out {
-                            let text = String::from_utf8_lossy(&tess_out.stdout).trim().to_string();
-                            if !text.is_empty() {
-                                eprintln!("[ocr] {} chars extracted", text.len());
-                                if let Ok(mut child) = std::process::Command::new("wl-copy")
-                                    .stdin(std::process::Stdio::piped())
-                                    .spawn()
-                                {
-                                    use std::io::Write;
-                                    if let Some(mut stdin) = child.stdin.take() {
-                                        let _ = stdin.write_all(text.as_bytes());
-                                    }
-                                    let _ = child.wait();
-                                }
-                            } else {
-                                eprintln!("[ocr] no text found — stderr: {}", String::from_utf8_lossy(&tess_out.stderr));
-                            }
-                        }
-                    }
-                }
-                let _ = std::fs::remove_file(&tmp_path);
-                
-                if self.is_standalone { std::process::exit(0); }
-                self.active_overlay = None;
-                return Command::none();
-            }
-            ClipboardMessage::CopySelected => {
-                if let Some(id) = self.clipboard.selected_id {
-                    if let Ok(out) = std::process::Command::new("cliphist").args(["decode", &id.to_string()]).output() {
-                        if let Ok(mut child) = std::process::Command::new("wl-copy").stdin(std::process::Stdio::piped()).spawn() {
-                            use std::io::Write;
-                            if let Some(mut stdin) = child.stdin.take() { let _ = stdin.write_all(&out.stdout); }
-                        }
-                    }
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-            }
-                        ClipboardMessage::SelectEntry(id) => {
-                    self.clipboard.selected_id = Some(id);
-                    return Command::perform(
-                        ClipboardOverlay::load_preview(id),
-                        |(text, image_path)| Message::Clipboard(ClipboardMessage::PreviewLoaded { text, image_path }),
-                    );
-                }
-                ClipboardMessage::PreviewLoaded { text, image_path } => {
-                    self.clipboard.preview_text = text;
-                    self.clipboard.preview_image_path = image_path;
-                }
-            },
-            Message::Notes(msg) => match msg {
-                NotesMessage::Dismiss => {
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-                _ => self.notes.update(msg),
-            },
-            Message::Pass(msg) => match msg {
-                PassMessage::Dismiss => {
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-                PassMessage::Refocus => {
-                    return iced::widget::text_input::focus(
-                        moon_beauty_shell::overlays::pass::PASS_SEARCH_ID,
-                    ).map(Message::Pass);
-                }
-                PassMessage::CopyKey(k) => {
-                    if self.is_standalone {
-                        // Block on copy so it completes before exit (no orphan tokio task)
-                        let k = k.clone();
-                        let rt = tokio::runtime::Runtime::new().unwrap();
-                        rt.block_on(async move {
-                            PassOverlay::copy_password(&k).await;
-                        });
-                        std::process::exit(0);
-                    }
-                    self.active_overlay = None;
-                    return Command::perform(async move { PassOverlay::copy_password(&k).await; }, |_| Message::DismissActiveOverlay);
-                }
-                _ => self.pass.update(msg),
-            },
-            Message::Power(msg) => match msg {
-                PowerMessage::Dismiss => {
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-                _ => {
-                    self.power.update(msg);
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-            },
-            Message::Todo(msg) => match msg {
-                TodoMessage::Dismiss => {
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-                _ => self.todo.update(msg),
-            },
-            Message::Reminders(msg) => match msg {
-                ReminderMessage::Dismiss => {
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-                _ => self.reminders.update(msg),
-            },
-            Message::Dict(msg) => match msg {
-                DictMessage::Dismiss => {
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-                DictMessage::Refocus => {
-                    return iced::widget::text_input::focus(
-                        moon_beauty_shell::overlays::dictionary::DICT_SEARCH_ID,
-                    ).map(Message::Dict);
-                }
-                DictMessage::SearchWord => {
-                    let w = self.dict.word_query.clone();
-                    // Check cache first
-                    if let Some(cached) = self.dict.cache.get(&w.to_lowercase()).cloned() {
-                        self.dict.update(DictMessage::DefinitionsLoaded(w, cached));
-                        return Command::none();
-                    }
-                    return Command::perform(async move { (w.clone(), DictionaryOverlay::lookup_word(&w).await) }, |(w, defs)| {
-                        Message::Dict(DictMessage::DefinitionsLoaded(w, defs))
-                    });
-                }
-                DictMessage::CopyDefinition(def) => {
-                    if self.is_standalone {
-                        let def = def.clone();
-                        let rt = tokio::runtime::Runtime::new().unwrap();
-                        rt.block_on(async move {
-                            let _ = tokio::process::Command::new("wl-copy").arg(&def).status().await;
-                        });
-                        std::process::exit(0);
-                    }
-                    return Command::perform(async move {
-                        let _ = tokio::process::Command::new("wl-copy").arg(&def).status().await;
-                    }, |_| Message::DismissActiveOverlay);
-                }
-                _ => self.dict.update(msg),
-            },
-            Message::Unicode(msg) => match msg {
-                UnicodeMessage::Dismiss => {
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-                UnicodeMessage::CopySymbol(s) => {
-                    if self.is_standalone {
-                        tokio::spawn(async move { UnicodeOverlay::copy(s).await; });
-                        std::process::exit(0);
-                    }
-                    self.active_overlay = None;
-                    return Command::perform(async move { UnicodeOverlay::copy(s).await; }, |_| Message::DismissActiveOverlay);
-                }
-                _ => self.unicode.update(msg),
-            },
-            Message::Web(msg) => match msg {
-                WebSearchMessage::Dismiss => {
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-                WebSearchMessage::ExecuteSearch => {
-                    if let Some(url) = WebSearchOverlay::build_url(&self.web.query) {
-                        if self.is_standalone {
-                            tokio::spawn(async move { WebSearchOverlay::launch_browser(&url).await; });
-                            std::process::exit(0);
-                        }
-                        self.active_overlay = None;
-                        return Command::perform(async move { WebSearchOverlay::launch_browser(&url).await; }, |_| Message::DismissActiveOverlay);
-                    }
-                }
-                _ => self.web.update(msg),
-            },
-            Message::Annotator(msg) => {
-                let is_text_press = matches!(msg, AnnotatorMessage::Pressed(_)) && self.annotator.tool == Tool::Text;
-                match msg {
-                AnnotatorMessage::ToggleReveal => {
-                    self.annotator.reveal_mode = !self.annotator.reveal_mode;
-                    if !self.annotator.reveal_mode {
-                        self.annotator.status = "Draw · Enter saves & closes · ESC cancels".into();
-                    } else if self.annotator.reveal_bytes.is_some() {
-                        self.annotator.status = "Reveal: watermark amplified".into();
-                    } else if let Some(source) = self.annotator.source_path.clone() {
-                        match std::fs::read(&source)
-                            .map_err(|e| e.to_string())
-                            .and_then(|b| plate_watermark::reveal(&b))
-                        {
-                            Ok(bytes) => {
-                                self.annotator.reveal_handle = Some(iced::widget::image::Handle::from_bytes(bytes.clone()));
-                                self.annotator.reveal_bytes = Some(bytes);
-                                self.annotator.status = "Reveal: watermark amplified".into();
-                            }
-                            Err(e) => {
-                                self.annotator.status = format!("Reveal failed: {e}");
-                                self.annotator.reveal_mode = false;
-                            }
-                        }
-                    } else {
-                        self.annotator.status = "Reveal: no source image".into();
-                        self.annotator.reveal_mode = false;
-                    }
-                }
-                AnnotatorMessage::Save => {
-                if self.annotator.reveal_mode {
-                    if let Some(bytes) = self.annotator.reveal_bytes.clone() {
-                        let save_dir = dirs::picture_dir()
-                            .or_else(|| dirs::home_dir().map(|h| h.join("Pictures")))
-                            .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
-                            .join("Screenshots");
-                        let _ = std::fs::create_dir_all(&save_dir);
-                        let time_str = chrono::Local::now().format("%Y-%m-%d %H-%M").to_string();
-                        let out = save_dir.join(format!("Revealed {}.png", time_str));
-                        
-                        match std::fs::write(&out, &bytes) {
-                            Ok(_) => {
-                                eprintln!("[annotator] saved revealed proof -> {:?}", out);
-
-                                // Copy the revealed image to clipboard and map its name
-                                if let Ok(mut child) = std::process::Command::new("wl-copy")
-                                    .args(["-t", "image/png"])
-                                    .stdin(std::process::Stdio::piped())
-                                    .spawn()
-                                {
-                                    use std::io::Write;
-                                    if let Some(mut stdin) = child.stdin.take() {
-                                        let _ = stdin.write_all(&bytes);
-                                    }
-                                    let _ = child.wait();
-
-                                    let cache_dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
-                                    let map_path = cache_dir.join("mbs-clip-names.txt");
-                                    let filename = out.file_name().unwrap_or_default().to_string_lossy().to_string();
-
-                                    let mut existing_clip_ids = std::collections::HashSet::new();
-                                    if let Ok(list_out) = std::process::Command::new("cliphist").args(["list"]).output() {
-                                        for line in String::from_utf8_lossy(&list_out.stdout).lines() {
-                                            if let Some((id_str, _)) = line.split_once('\t') {
-                                                if let Ok(id) = id_str.parse::<u64>() { existing_clip_ids.insert(id); }
-                                            }
-                                        }
-                                    }
-
-                                    for _ in 0..20 {
-                                        std::thread::sleep(std::time::Duration::from_millis(50));
-                                        if let Ok(list_out) = std::process::Command::new("cliphist").args(["list"]).output() {
-                                            let text = String::from_utf8_lossy(&list_out.stdout);
-                                            for line in text.lines() {
-                                                if let Some((id_str, _)) = line.split_once('\t') {
-                                                    if let Ok(id) = id_str.trim().parse::<u64>() {
-                                                        if !existing_clip_ids.contains(&id) {
-                                                            let entry = format!("{}\t{}\n", id, filename);
-                                                            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&map_path) {
-                                                                let _ = f.write_all(entry.as_bytes());
-                                                            }
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if self.is_standalone { std::process::exit(0); }
-                                self.active_overlay = None;
-                            }
-                            Err(e) => self.annotator.status = format!("Reveal save failed: {e}"),
-                        }
-                    } else {
-                        self.annotator.status = "Reveal not ready".into();
-                    }
-                } else {
-                    let source = self.annotator.source_path.clone();
-                    let annotations = self.annotator.annotations.clone();
-                    let watermark = if self.annotator.watermark_input.is_empty() {
-                        None
-                    } else {
-                        Some(self.annotator.watermark_input.clone())
-                    };
-                    match source {
-                        Some(p) => match save_annotated_image(p, annotations, watermark) {
-                            Ok(paths) => {
-                                eprintln!("[annotator] saved {} file(s)", paths.len());
-                                if self.is_standalone { std::process::exit(0); }
-                                self.active_overlay = None;
-                            }
-                            Err(e) => self.annotator.status = format!("Save failed: {e}"),
-                        },
-                        None => self.annotator.status = "Save failed: no source image".into(),
-                    }
-                }
-                
-            }
-                AnnotatorMessage::Cancel => {
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-                AnnotatorMessage::Saved(_) | AnnotatorMessage::RevealLoaded(_) => {}
-                other => self.annotator.update(other),
-                }
-                if is_text_press {
-                    return iced::window::get_latest().and_then(iced::window::gain_focus);
-                }
-            }
-            Message::Amogus(msg) => match msg {
-                AmogusMessage::Dismiss => {
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-                AmogusMessage::TriggerScan => {
-                    self.amogus.update(AmogusMessage::TriggerScan);
-                    return Command::perform(AmogusOverlay::run_scan(), |cols| Message::Amogus(AmogusMessage::ScanFinished(cols)));
-                }
-                _ => self.amogus.update(msg),
-            },
-            Message::Rng(msg) => match msg {
-                RngMessage::Dismiss => {
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-                _ => self.rng.update(msg),
-            },
-            Message::Email(msg) => match msg {
-                EmailMessage::Dismiss => {
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-                _ => self.email.update(msg),
-            },
-            Message::Notif(msg) => match msg {
-                NotifMessage::DismissDrawer => {
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                }
-                NotifMessage::ActivateToast(id) => {
-                    if let Some(t) = self.notifs.active_toasts.iter().find(|t| t.id == id).cloned() {
-                        let app = t.app_name.clone();
-                        let entry = t.desktop_entry.clone();
-                        let nid = t.id;
-                        self.notifs.update(NotifMessage::DismissToast(id));
-                        std::thread::spawn(move || {
-                            moon_beauty_shell::backend::notif_dbus::emit_action_invoked(nid, "default");
-                            std::thread::sleep(std::time::Duration::from_millis(200));
-                            let matches = notification_candidates(&app, entry.as_deref());
-                            if !is_app_focused(&matches) {
-                                let ok = focus_notification_app(&app, entry.as_deref());
-                                eprintln!("[activate-toast] fallback app={:?} entry={:?} ok={}", app, entry, ok);
-                            } else {
-                                eprintln!("[activate-toast] client self-focused app={:?}", app);
-                            }
-                        });
-                    }
-                }
-                _ => self.notifs.update(msg),
-            },
-            Message::Settings(msg) => {
-                {
-                    let s = format!("{:?}", msg);
-                    let truncated = if s.len() > 120 { format!("{}…", &s[..120]) } else { s };
-                    let ts = self.settings.tooltip_sizes.len();
-                    let bm = &self.settings.bar_monitor;
-                }
-                let is_test = matches!(msg, SettingsMessage::TestNotification);
-
-                if is_test {
-                    for (title, body) in [
-                        ("System Diagnostics #1 (first)", "Verification toast successfully routed."),
-                        ("System Diagnostics #2 (second)", "Background worker service nominal."),
-                        ("System Diagnostics #3 (third)", "Telemetry stream established."),
-                    ] {
-                        let _ = std::process::Command::new("notify-send")
-                            .args(["-a", "Diagnostics", title, body])
-                            .spawn();
-                    }
-                } else if matches!(msg, SettingsMessage::Dismiss) {
-                    // Persist before closing / exiting the settings process.
-                    let _ = self.settings.save();
-                    if self.is_standalone { std::process::exit(0); }
-                    self.active_overlay = None;
-                } else {
-                    self.settings_ui.update(msg, &mut self.settings);
-                    self.theme = ShellTheme::from_settings(&self.settings);
-
-                    if self.is_standalone {
-                        tokio::spawn(async {
-                            let _ = send_client_command(IpcCommand::ReloadSettings).await;
-                        });
-                    }
-                }
-            }
-            Message::Lock(msg) => match msg {
-                LockMessage::KeyPress(key) => {
-                    self.lockscreen.forward_key(&key);
-                    return Command::none();
-                }
-                LockMessage::PollIpc => {
-                    if let Some(effect) = self.lockscreen.drain_ipc() {
-                        match effect {
-                            LockMessage::AuthSuccess => {
-                                eprintln!("[lock] coordinator signaled success — exiting");
-                                std::process::exit(0);
-                            }
-                            _ => {}
-                        }
-                    }
-                    return Command::none();
-                }
+    if modifiers.control() {
+        if let Key::Character(c) = &key {
+            match c.to_lowercase().as_str() {
+                "n" | "j" => return Some(Message::Email(EmailMessage::SelectMailNext)),
+                "p" | "k" => return Some(Message::Email(EmailMessage::SelectMailPrev)),
                 _ => {}
-            },
-            Message::CollapseTray => {
-                self.close_tray();
             }
-            Message::CollapseTrayIfGen(gen) => {
-                if gen == self.tray_timeout_gen && self.tray_expanded {
-                    self.close_tray();
-                }
-            }
-            Message::TrayAnimTick => {
-                let elapsed_ms = self.tray_anim_started_at.elapsed().as_millis() as f32;
-                let t = (elapsed_ms / self.tray_anim_duration_ms.max(1) as f32).clamp(0.0, 1.0);
-
-                // Expand: ease-out-cubic (fast start, smooth settle)
-                // Collapse: ease-in-cubic (slow start, snap finish)
-                let expanding = self.tray_target_width > self.tray_anim_start_width;
-                let eased = if expanding {
-                    1.0 - (1.0 - t).powi(3)
-                } else {
-                    t * t * t
-                };
-
-                let delta = self.tray_target_width - self.tray_anim_start_width;
-                self.tray_anim_width = self.tray_anim_start_width + delta * eased;
-
-                if t >= 1.0 {
-                    self.tray_anim_width = self.tray_target_width;
-                }
-            }
-            Message::TrayItemsLoaded(items) => {
-                self.tray_items = items;
-                if self.tray_expanded {
-                    let new_target = moon_beauty_shell::bar::capsules::compute_expanded_visible_width(
-                        &self.settings, self.tray_items.len()
-                    );
-                    // Re-anchor if target changed mid-animation
-                    if (new_target - self.tray_target_width).abs() > 1.0 {
-                        self.tray_anim_start_width = self.tray_anim_width;
-                        self.tray_anim_started_at = std::time::Instant::now();
-                        self.tray_target_width = new_target;
-                    }
-                }
-            }
-            Message::DismissActiveOverlay => {
-                // Persist if we're closing the Settings overlay via Esc.
-                if matches!(self.active_overlay, Some(OverlayTarget::Settings)) {
-                    let _ = self.settings.save();
-                }
-                if self.is_standalone {
-                    std::thread::spawn(|| {
-                        std::thread::sleep(std::time::Duration::from_millis(200));
-                        std::process::exit(0);
-                    });
-                    return Command::none();
-                }
-                self.active_overlay = None;
-            }
-            Message::CloseShell => {
-                std::process::exit(0);
-            }
-        }
-        Command::none()
-    }
-
-    fn subscription(&self) -> iced::Subscription<Message> {
-        let clock_sub = iced::time::every(std::time::Duration::from_millis(1000)).map(|_| Message::TickClock);
-        let toast_sub = if self.is_notif_surface && !self.notifs.active_toasts.is_empty() {
-            iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::TickToasts)
-        } else {
-            iced::Subscription::none()
-        };
-        let hw_sub = iced::time::every(std::time::Duration::from_millis(self.settings.hardware_poll_interval_ms)).map(|_| Message::TickHardware);
-        let weather_sub = iced::time::every(std::time::Duration::from_secs(900)).map(|_| Message::TickWeather);
-
-        let clip_sub = if matches!(self.active_overlay, Some(OverlayTarget::Clipboard)) {
-            iced::keyboard::on_key_press(|key, _mods| match key {
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => Some(Message::Clipboard(ClipboardMessage::SelectPrev)),
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => Some(Message::Clipboard(ClipboardMessage::SelectNext)),
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => Some(Message::Clipboard(ClipboardMessage::CopySelected)),
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Delete) => Some(Message::Clipboard(ClipboardMessage::DeleteSelected)),
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => Some(Message::Clipboard(ClipboardMessage::DeleteSelected)),
-                _ => None,
-            })
-        } else {
-            iced::Subscription::none()
-        };
-
-        let text_typing_sub = if self.annotator.text_editing.is_some() {
-            iced::keyboard::on_key_press(|key, _mods| {
-                match key {
-                iced::keyboard::Key::Character(c) => {
-                    match c.as_str() {
-                        "[" => Some(Message::Annotator(AnnotatorMessage::FontSizeDown)),
-                        "]" => Some(Message::Annotator(AnnotatorMessage::FontSizeUp)),
-                        _ => Some(Message::Annotator(AnnotatorMessage::CharacterInput(c.to_string()))),
-                    }
-                }
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Space) => {
-                    Some(Message::Annotator(AnnotatorMessage::CharacterInput(" ".into())))
-                }
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => {
-                    Some(Message::Annotator(AnnotatorMessage::BackspacePressed))
-                }
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
-                    if _mods.control() {
-                        Some(Message::Annotator(AnnotatorMessage::NewLinePressed))
-                    } else {
-                        Some(Message::Annotator(AnnotatorMessage::ConfirmText))
-                    }
-                }
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::F2) => {
-                    Some(Message::Annotator(AnnotatorMessage::ConfirmText))
-                }
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
-                    Some(Message::Annotator(AnnotatorMessage::CancelText))
-                }
-                _ => None,
-                }
-            })
-        } else {
-            iced::Subscription::none()
-        };
-
-        let launcher_sub = if matches!(self.active_overlay, Some(OverlayTarget::Launcher)) {
-            // Use listen_with (not on_key_press) so Left/Right events reach us
-            // even though text_input consumes them for cursor movement.
-            iced::event::listen_with(|event, status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event else {
-                    return None;
-                };
-                let shift = modifiers.shift();
-
-                // Debug: log arrow keys with their capture status
-                if matches!(
-                    key,
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft)
-                        | iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight)
-                ) {
-                    eprintln!("[launcher-key] arrow status={:?}", status);
-                }
-
-                match key {
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
-                        Some(Message::Launcher(LauncherMessage::SelectUp))
-                    }
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => {
-                        Some(Message::Launcher(LauncherMessage::SelectDown))
-                    }
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight) => {
-                        Some(Message::Launcher(LauncherMessage::SelectNext))
-                    }
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft) => {
-                        Some(Message::Launcher(LauncherMessage::SelectPrev))
-                    }
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab) if shift => {
-                        Some(Message::Launcher(LauncherMessage::SelectPrev))
-                    }
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab) => {
-                        Some(Message::Launcher(LauncherMessage::SelectNext))
-                    }
-                    _ => None,
-                }
-            })
-        } else {
-            iced::Subscription::none()
-        };
-
-        let lock_key_sub = if matches!(self.active_overlay, Some(OverlayTarget::Lockscreen)) {
-            iced::keyboard::on_key_press(|key, mods| {
-                let mods_str = format!(
-                    "shift={} ctrl={} alt={} logo={}",
-                    mods.shift(), mods.control(), mods.alt(), mods.logo()
-                );
-                // Log EVERY key press that reaches the lockscreen. If a key
-                // you typed doesn't show up here, the loss is upstream of our
-                // code (compositor, surface focus, subscription registration).
-                eprintln!("[lock-key-raw] {:?} mods({})", key, mods_str);
-
-                match &key {
-                    iced::keyboard::Key::Character(c) => {
-                        // Normalize shift+lowercase-ASCII → uppercase. Iced on
-                        // layer-shell surfaces sometimes reports the unshifted
-                        // character even though mods.shift() is true (known
-                        // bug in the winit→iced KeyboardEvent path). This is
-                        // idempotent if iced already applied shift:
-                        // `"P".to_uppercase() == "P"`.
-                        let normalized: String = if mods.shift()
-                            && !c.is_empty()
-                            && c.chars().all(|ch| ch.is_ascii_lowercase())
-                        {
-                            c.to_uppercase()
-                        } else {
-                            c.to_string()
-                        };
-                        eprintln!(
-                            "[lock-key] Character({:?}) shift={} → sending {:?}",
-                            c, mods.shift(), normalized
-                        );
-                        Some(Message::Lock(LockMessage::KeyPress(
-                            iced::keyboard::Key::Character(normalized.into()),
-                        )))
-                    }
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => {
-                        eprintln!("[lock-key] Backspace → send");
-                        Some(Message::Lock(LockMessage::KeyPress(key.clone())))
-                    }
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
-                        eprintln!("[lock-key] Enter → SUBMIT");
-                        Some(Message::Lock(LockMessage::KeyPress(key.clone())))
-                    }
-                    other => {
-                        eprintln!("[lock-key] ignoring {:?}", other);
-                        None
-                    }
-                }
-            })
-        } else {
-            iced::Subscription::none()
-        };
-
-        let lock_ipc_sub = if matches!(self.active_overlay, Some(OverlayTarget::Lockscreen)) {
-            iced::time::every(std::time::Duration::from_millis(16))
-                .map(|_| Message::Lock(LockMessage::PollIpc))
-        } else {
-            iced::Subscription::none()
-        };
-
-        let esc_sub = if self.annotator.text_editing.is_some() {
-            iced::keyboard::on_key_press(|key, _mods| match key {
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
-                    Some(Message::Annotator(AnnotatorMessage::CancelText))
-                }
-                _ => None,
-            })
-        } else if matches!(self.active_overlay, Some(OverlayTarget::Lockscreen)) {
-            // Lock screen cannot be dismissed with Escape
-            iced::Subscription::none()
-        } else {
-            iced::keyboard::on_key_press(|key, _modifiers| {
-                if key == iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) {
-                    Some(Message::DismissActiveOverlay)
-                } else {
-                    None
-                }
-            })
-        };
-
-        // Enter → save when annotator overlay is active.
-        let annotator_sub = if matches!(self.active_overlay, Some(OverlayTarget::Annotator)) && self.annotator.text_editing.is_none() {
-            iced::keyboard::on_key_press(|key, _mods| match key {
-                iced::keyboard::Key::Character(c) => match c.as_str() {
-                    "r" | "R" => Some(Message::Annotator(AnnotatorMessage::SetTool(Tool::Rect))),
-                    "o" | "O" | "c" | "C" => Some(Message::Annotator(AnnotatorMessage::SetTool(Tool::Ellipse))),
-                    "a" | "A" => Some(Message::Annotator(AnnotatorMessage::SetTool(Tool::Arrow))),
-                    "p" | "P" => Some(Message::Annotator(AnnotatorMessage::SetTool(Tool::Pen))),
-                    "t" | "T" => Some(Message::Annotator(AnnotatorMessage::SetTool(Tool::Text))),
-                    "n" | "N" => Some(Message::Annotator(AnnotatorMessage::SetTool(Tool::Counter))),
-                    _ => None,
-                },
-                _ => None,
-            })
-        } else {
-            iced::Subscription::none()
-        };
-
-        let enter_sub = if matches!(self.active_overlay, Some(OverlayTarget::Annotator)) && self.annotator.text_editing.is_none() {
-            iced::keyboard::on_key_press(|key, _mods| match key {
-                iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
-                    Some(Message::Annotator(AnnotatorMessage::Save))
-                }
-                _ => None,
-            })
-        } else {
-            iced::Subscription::none()
-        };
-
-        let ipc_sub = if self.is_standalone || self.is_notif_surface {
-            iced::Subscription::none()
-        } else {
-            iced::time::every(std::time::Duration::from_millis(50))
-                .map(|_| Message::PollIpc)
-        };
-
-        let notif_sub = if self.is_notif_surface {
-            iced::time::every(std::time::Duration::from_millis(50))
-                .map(|_| Message::PollNotifs)
-        } else if !self.is_standalone {
-            iced::time::every(std::time::Duration::from_millis(500))
-                .map(|_| Message::PollNotifs)
-        } else {
-            iced::Subscription::none()
-        };
-        let resize_sub = iced::window::resize_events()
-            .map(|(_id, size)| Message::WindowResized(size.width));
-        let elapsed = self.tray_anim_started_at.elapsed().as_millis() as u64;
-        let anim_active = elapsed < self.tray_anim_duration_ms
-            && (self.tray_anim_width - self.tray_target_width).abs() > 0.01;
-        let anim_sub = if anim_active {
-            iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::TrayAnimTick)
-        } else {
-            iced::Subscription::none()
-        };
-        iced::Subscription::batch(vec![clock_sub, toast_sub, hw_sub, weather_sub, anim_sub, esc_sub,
-            enter_sub, ipc_sub, notif_sub, resize_sub, clip_sub, annotator_sub, text_typing_sub,
-            launcher_sub, lock_key_sub, lock_ipc_sub])
-    }
-
-    fn view(&self) -> Element<'_, Message> {
-        {
-            static ONCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-            if !ONCE.swap(true, std::sync::atomic::Ordering::Relaxed) {
-            }
-        }
-        if self.is_notif_surface {
-            let is_right_corner = self.settings.notif_corner.contains("right");
-            let is_top_corner = self.settings.notif_corner.contains("top");
-            let pad_top = if is_top_corner { self.settings.notif_baseline_y as f32 } else { 0.0 };
-            let pad_bottom = if !is_top_corner { self.settings.notif_baseline_y as f32 } else { 0.0 };
-            let pad_right = if is_right_corner { self.settings.notif_margin_x.max(16) as f32 } else { 0.0 };
-            let pad_left = if !is_right_corner { self.settings.notif_margin_x.max(16) as f32 } else { 0.0 };
-            return container(self.notifs.view_toasts(&self.theme, &self.settings, self.window_w).map(Message::Notif))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .align_x(if is_right_corner {
-                    iced::alignment::Horizontal::Right
-                } else {
-                    iced::alignment::Horizontal::Left
-                })
-                .align_y(if is_top_corner {
-                    iced::alignment::Vertical::Top
-                } else {
-                    iced::alignment::Vertical::Bottom
-                })
-                .padding(Padding { top: pad_top, right: pad_right, bottom: pad_bottom, left: pad_left })
-                .into();
-        }
-        let is_right_corner = self.settings.notif_corner.contains("right");
-        let is_top_corner = self.settings.notif_corner.contains("top");
-
-        let pad_top = if is_top_corner { self.settings.notif_baseline_y as f32 } else { 0.0 };
-        let pad_bottom = if !is_top_corner { self.settings.notif_baseline_y as f32 } else { 0.0 };
-        let pad_right = if is_right_corner { self.settings.notif_margin_x.max(16) as f32 } else { 0.0 };
-        let pad_left = if !is_right_corner { self.settings.notif_margin_x.max(16) as f32 } else { 0.0 };
-
-        let notifs_view = container(self.notifs.view_toasts(&self.theme, &self.settings, self.window_w).map(Message::Notif))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(if is_right_corner { iced::alignment::Horizontal::Right } else { iced::alignment::Horizontal::Left })
-            .align_y(if is_top_corner { iced::alignment::Vertical::Top } else { iced::alignment::Vertical::Bottom })
-            .padding(Padding {
-                top: pad_top,
-                right: pad_right,
-                bottom: pad_bottom,
-                left: pad_left,
-            });
-
-        let overlay_element: Option<Element<'_, Message>> = match &self.active_overlay {
-            Some(OverlayTarget::Launcher) => Some(self.launcher.view(&self.theme, &self.settings).map(Message::Launcher)),
-            Some(OverlayTarget::Calc) => Some(self.calc.view(&self.theme, &self.settings).map(Message::Calc)),
-            Some(OverlayTarget::Clipboard) => Some(self.clipboard.view(&self.theme, &self.settings).map(Message::Clipboard)),
-            Some(OverlayTarget::Notes) => Some(self.notes.view(&self.theme).map(Message::Notes)),
-            Some(OverlayTarget::Pass) => Some(self.pass.view(&self.theme, &self.settings).map(Message::Pass)),
-            Some(OverlayTarget::Power) => Some(self.power.view(&self.theme).map(Message::Power)),
-            Some(OverlayTarget::Todo) => Some(self.todo.view(&self.theme).map(Message::Todo)),
-            Some(OverlayTarget::Reminders) => Some(self.reminders.view(&self.theme).map(Message::Reminders)),
-            Some(OverlayTarget::Dictionary) => Some(self.dict.view(&self.theme, &self.settings).map(Message::Dict)),
-            Some(OverlayTarget::Unicode) => Some(self.unicode.view(&self.theme).map(Message::Unicode)),
-            Some(OverlayTarget::Web) => Some(self.web.view(&self.theme).map(Message::Web)),
-            Some(OverlayTarget::Amogus) => Some(self.amogus.view(&self.theme).map(Message::Amogus)),
-            Some(OverlayTarget::Rng) => Some(self.rng.view(&self.theme).map(Message::Rng)),
-            Some(OverlayTarget::Email) => Some(self.email.view(&self.theme).map(Message::Email)),
-            Some(OverlayTarget::NotificationsHistory) => Some(self.notifs.view_history(&self.theme).map(Message::Notif)),
-            Some(OverlayTarget::Settings) => Some(self.settings_ui.view(&self.settings, &self.theme).map(Message::Settings)),
-            Some(OverlayTarget::Lockscreen) => Some(self.lockscreen.view(&self.theme).map(Message::Lock)),
-            Some(OverlayTarget::Annotator) => Some(self.annotator.view().map(Message::Annotator)),
-            None => None,
-        };
-
-        if self.is_standalone {
-            if let Some(overlay) = overlay_element {
-                return Stack::new().push(overlay).push(notifs_view).into();
-            } else {
-                eprintln!("[FATAL-EXIT] is_standalone=true but overlay_element=None");
-                eprintln!("[FATAL-EXIT] active_overlay = {:?}", self.active_overlay);
-                eprintln!("[FATAL-EXIT] is_notif_surface = {}", self.is_notif_surface);
-                std::process::exit(0);
-            }
-        }
-
-        let bar_view = TopBar::view(&self.settings, &self.theme, &self.telemetry, self.tray_expanded, &self.tray_items, self.tray_anim_width).map(Message::TopBar);
-        let base_content = Stack::new().push(bar_view);
-
-        if let Some(overlay) = overlay_element {
-            Stack::new().push(base_content).push(overlay).into()
-        } else {
-            base_content.into()
         }
     }
 
-    fn theme(&self) -> Self::Theme {
-        Theme::Dark
+    if matches!(key, Key::Character(_))
+        && status == iced::event::Status::Captured
+        && !modifiers.control()
+    {
+        return None;
+    }
+
+    match key {
+        Key::Named(Named::ArrowUp) => Some(Message::Email(EmailMessage::SelectMailPrev)),
+        Key::Named(Named::ArrowDown) => Some(Message::Email(EmailMessage::SelectMailNext)),
+        Key::Named(Named::Enter) => Some(Message::Email(EmailMessage::OpenSelected)),
+        Key::Named(Named::Delete) => Some(Message::Email(EmailMessage::DeleteSelected)),
+        Key::Character(c) if c == "n" && !modifiers.control() => {
+            Some(Message::Email(EmailMessage::OpenComposer))
+        }
+        Key::Character(c) if c == "s" && !modifiers.control() => {
+            Some(Message::Email(EmailMessage::ToggleStar))
+        }
+        Key::Character(c) if c == "d" && !modifiers.control() => {
+            Some(Message::Email(EmailMessage::DeleteSelected))
+        }
+        Key::Character(c) if c == "c" && !modifiers.control() => {
+            Some(Message::Email(EmailMessage::SaveContact))
+        }
+        _ => None,
     }
 }
 
+/// Keyboard handler for annotator text-annotation mode. Forwards printable
+/// characters, Enter, and Backspace to the annotator's text buffer. Modifier
+/// combos fall through (they're reserved for tool shortcuts / global binds);
+/// events already captured by a focused widget (e.g. the watermark
+/// text_input) are skipped so we don't double-handle them.
+fn handle_annotator_text_input(
+    event: iced::Event,
+    status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Message> {
+    let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+        modified_key,
+        text,
+        modifiers,
+        ..
+    }) = event
+    else {
+        return None;
+    };
+    use iced::keyboard::{key::Named, Key};
 
-fn capsule_min_width(id: &str) -> f32 {
-    match id {
-        "calendar" => 110.0,
-        "music" => 140.0,
-        "alarm" => 90.0,
-        "weather" => 95.0,
-        "unified" => 80.0,
-        "notify" => 120.0,
-        "clock" => 85.0,
-        "audio" => 95.0,
-        "mic" => 80.0,
-        "net" => 145.0,
-        "cpu" => 115.0,
-        "gpu" => 150.0,
-        "ram" => 105.0,
-        "battery" => 85.0,
-        _ => 80.0,
+    if modifiers.control() || modifiers.alt() || modifiers.logo() {
+        return None;
     }
-}
+    if status == iced::event::Status::Captured {
+        return None;
+    }
 
-fn capsule_actual_width(id: &str) -> f32 {
-    moon_beauty_shell::bar::capsules::lookup_width(id).unwrap_or_else(|| capsule_min_width(id))
-}
-
-fn row_width(items: &[&String], sp: f32) -> f32 {
-    let n = items.len();
-    items.iter().enumerate().map(|(i, id)| {
-        let w = capsule_actual_width(id.as_str());
-        if i + 1 < n { w + sp } else { w }
-    }).sum()
-}
-
-fn resolve_primary_output() -> Option<String> {
-    let out = std::process::Command::new("swaymsg")
-        .args(["-t", "get_outputs", "-r"]).output().ok()?;
-    if !out.status.success() { return None; }
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
-    let arr = v.as_array()?;
-    // Prefer the output marked "primary"
-    for o in arr {
-        if o.get("primary").and_then(|p| p.as_bool()) == Some(true) {
-            if let Some(name) = o.get("name").and_then(|n| n.as_str()) {
-                return Some(name.to_string());
+    // Named keys first (Enter's `text` is Some("\r"), a control char —
+    // must be intercepted here before the printable filter below).
+    if let Key::Named(named) = &modified_key {
+        match named {
+            Named::Enter => {
+                return Some(Message::Annotator(AnnotatorMessage::NewLinePressed));
             }
+            Named::Backspace => {
+                return Some(Message::Annotator(AnnotatorMessage::BackspacePressed));
+            }
+            _ => {}
         }
     }
-    // Fallback: focused
-    for o in arr {
-        if o.get("focused").and_then(|f| f.as_bool()) == Some(true) {
-            if let Some(name) = o.get("name").and_then(|n| n.as_str()) {
-                return Some(name.to_string());
-            }
+
+    // Printable: prefer `text` (respects IME, layout, shift/caps). Convert
+    // SmolStr → String because AnnotatorMessage::CharacterInput takes String.
+    if let Some(t) = text {
+        if !t.is_empty() && !t.chars().any(|c| c.is_control()) {
+            return Some(Message::Annotator(AnnotatorMessage::CharacterInput(
+                t.to_string(),
+            )));
         }
     }
+
+    // Fallback: modified_key.
+    if let Key::Character(c) = modified_key {
+        if !c.is_empty() {
+            return Some(Message::Annotator(AnnotatorMessage::CharacterInput(
+                c.to_string(),
+            )));
+        }
+    }
+
     None
 }
 
-fn capsule_center_x(s: &ShellSettings, sw: u32, target: &str) -> i32 {
-    let sw_f = sw as f32;
-    let sp = s.capsule_spacing as f32;
-    let pad = 16.0;
+impl MoonBeautyShellApp {}
 
-    let visible = |id: &String| s.visible_capsules.get(id).copied().unwrap_or(true);
-    let left_items: Vec<&String> = s.bar_left.iter().filter(|id| visible(id)).collect();
-    let center_items: Vec<&String> = s.bar_center.iter().filter(|id| visible(id)).collect();
-    let right_items: Vec<&String> = s.bar_right.iter().filter(|id| visible(id)).collect();
-
-    // 1. bar_left
-    let mut x = pad;
-    for (i, id) in left_items.iter().enumerate() {
-        let w = capsule_actual_width(id.as_str());
-        if id.as_str() == target { return (x + w / 2.0) as i32; }
-        x += w + if i + 1 < left_items.len() { sp } else { 0.0 };
-    }
-
-    // 2. bar_center — account for asymmetric left/right widths
-    let left_w = row_width(&left_items, sp);
-    let right_w = row_width(&right_items, sp);
-    let center_w = row_width(&center_items, sp);
-    let avail = sw_f - 2.0 * pad;
-    let fill_w = ((avail - left_w - center_w - right_w) / 2.0).max(0.0);
-    let mut x = pad + left_w + fill_w;
-    for (i, id) in center_items.iter().enumerate() {
-        let w = capsule_actual_width(id.as_str());
-        if id.as_str() == target { return (x + w / 2.0) as i32; }
-        x += w + if i + 1 < center_items.len() { sp } else { 0.0 };
-    }
-
-    // 3. bar_right
-    let mut x = pad + avail - right_w;
-    for (i, id) in right_items.iter().enumerate() {
-        let w = capsule_actual_width(id.as_str());
-        if id.as_str() == target { return (x + w / 2.0) as i32; }
-        x += w + if i + 1 < right_items.len() { sp } else { 0.0 };
-    }
-
-    200
-}
-
-fn get_screen_width_for(output: Option<&str>) -> u32 {
-    if let Ok(o) = std::process::Command::new("swaymsg")
-        .args(["-t", "get_outputs", "-r"]).output()
-    {
-        if o.status.success() {
-            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&o.stdout) {
-                if let Some(arr) = v.as_array() {
-                    if let Some(name) = output {
-                        for out in arr {
-                            if out.get("name").and_then(|n| n.as_str()) == Some(name) {
-                                if let Some(w) = out.get("rect").and_then(|r| r.get("width")).and_then(|w| w.as_u64()) {
-                                    return if w > 0 { w as u32 } else { 1920 };
-                                }
-                            }
-                        }
-                    }
-                    for out in arr {
-                        if out.get("focused").and_then(|f| f.as_bool()) == Some(true) {
-                            if let Some(w) = out.get("rect").and_then(|r| r.get("width")).and_then(|w| w.as_u64()) {
-                                return if w > 0 { w as u32 } else { 1920 };
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    1920
-}
+impl MoonBeautyShellApp {}

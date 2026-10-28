@@ -1,15 +1,15 @@
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Stack};
-use iced::{Alignment, Color, Element, Length, Padding};
+use iced::{Alignment, Element, Length, Padding};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use tokio::process::Command;
 
-use crate::config::settings::ShellSettings;
-use crate::config::theme::ShellTheme;
-use crate::style::shape_box::{ShapeBox, ShapeType, SlantSide};
-use crate::style::TextExt;
+use crate::libraries::config::settings::ShellSettings;
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
+use crate::libraries::style::TextExt;
 
 pub const DICT_SEARCH_ID: &str = "dict_search";
 
@@ -65,6 +65,10 @@ impl DictionaryOverlay {
             active_definitions: Vec::new(),
             cache: Self::load_cache(),
         }
+    }
+
+    pub fn empty() -> Self {
+        Self { word_query: String::new(), active_definitions: Vec::new(), cache: HashMap::new() }
     }
 
     fn cache_path() -> PathBuf {
@@ -155,7 +159,11 @@ impl DictionaryOverlay {
         results
     }
 
-    pub fn view<'a>(&'a self, theme: &'a ShellTheme, settings: &ShellSettings) -> Element<'a, DictMessage> {
+    pub fn view<'a>(
+        &'a self,
+        theme: &'a ShellTheme,
+        settings: &ShellSettings,
+    ) -> Element<'a, DictMessage> {
         let (win_w, win_h) = settings.get_window_size("dictionary", 820, 600);
 
         let cut_f = theme.overlay_cut;
@@ -190,14 +198,19 @@ impl DictionaryOverlay {
             .id(DICT_SEARCH_ID)
             .on_input(DictMessage::InputChanged)
             .on_submit(DictMessage::SearchWord)
-            .padding(Padding { top: 12.0, right: 24.0, bottom: 12.0, left: 24.0 })
-            .size(theme.font_size_overlay)
+            .padding(Padding {
+                top: 12.0,
+                right: 24.0,
+                bottom: 12.0,
+                left: 24.0,
+            })
+            .size((theme.font_size_overlay) as f32)
             .width(Length::Fill)
             .style(move |_t, status| text_input::Style {
                 background: iced::Background::Color(theme.surface_alt),
                 border: iced::Border {
                     color: match status {
-                        text_input::Status::Focused => theme.focus,
+                        text_input::Status::Focused { .. } => theme.focus,
                         text_input::Status::Hovered => theme.border,
                         _ => theme.border,
                     },
@@ -210,14 +223,12 @@ impl DictionaryOverlay {
                 selection: theme.focus,
             });
 
-        let input_row = container(input)
-            .width(Length::Fill)
-            .padding(Padding {
-                top: 0.0,
-                right: search_inward,
-                bottom: 0.0,
-                left: search_inward,
-            });
+        let input_row = container(input).width(Length::Fill).padding(Padding {
+            top: 0.0,
+            right: search_inward,
+            bottom: 0.0,
+            left: search_inward,
+        });
 
         // Slanted definition rows
         let mut list_col = column![].spacing(6).width(Length::Fill);
@@ -225,7 +236,10 @@ impl DictionaryOverlay {
             let def_clone = item.definition.clone();
 
             let item_bg = ShapeBox::new()
-                .shape(ShapeType::Slant { left: SlantSide::Left, right: SlantSide::Left })
+                .shape(ShapeType::Slant {
+                    left: SlantSide::Left,
+                    right: SlantSide::Left,
+                })
                 .background(theme.background)
                 .border(theme.border, theme.control_border_width)
                 .slant_width(8.0)
@@ -238,13 +252,18 @@ impl DictionaryOverlay {
                         .color(theme.warning)
                         .bold(),
                     text(&item.definition)
-                        .size(theme.font_size_normal)
+                        .size((theme.font_size_normal) as f32)
                         .color(theme.text)
                         .width(Length::Fill),
                 ]
                 .spacing(10)
                 .align_y(Alignment::Center)
-                .padding(Padding { top: 0.0, right: 20.0, bottom: 0.0, left: 20.0 })
+                .padding(Padding {
+                    top: 0.0,
+                    right: 20.0,
+                    bottom: 0.0,
+                    left: 20.0,
+                }),
             )
             .width(Length::Fill)
             .height(Length::Fill)
@@ -255,20 +274,27 @@ impl DictionaryOverlay {
                 .padding(0)
                 .width(Length::Fill)
                 .height(Length::Fixed(60.0))
-                .style(|_t, _s| button::Style { background: None, ..Default::default() });
+                .style(|_t, _s| button::Style {
+                    background: None,
+                    ..Default::default()
+                });
 
             list_col = list_col.push(item_btn);
         }
 
-        let list_container = container(scrollable(list_col).height(Length::Fill).width(Length::Fill))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(Padding {
-                top: list_top_inset,
-                right: list_side_inset,
-                bottom: list_bottom_inset,
-                left: list_side_inset,
-            });
+        let list_container = container(
+            scrollable(list_col)
+                .height(Length::Fill)
+                .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(Padding {
+            top: list_top_inset,
+            right: list_side_inset,
+            bottom: list_bottom_inset,
+            left: list_side_inset,
+        });
 
         let footer = container(
             text("Enter to search  •  Click definition to copy  •  ESC dismiss")
@@ -279,7 +305,10 @@ impl DictionaryOverlay {
         .width(Length::Fill);
 
         let card_bg = ShapeBox::new()
-            .shape(ShapeType::AngledHexagon { cut: cut_f, angle_deg })
+            .shape(ShapeType::AngledHexagon {
+                cut: cut_f,
+                angle_deg,
+            })
             .background(theme.background)
             .border(theme.border, theme.border_width)
             .size(Length::Fixed(win_w), Length::Fixed(win_h));
@@ -301,16 +330,9 @@ impl DictionaryOverlay {
 
         let card = Stack::new().push(card_bg.view()).push(card_content);
 
-        let backdrop = button(container(column![]).width(Length::Fill).height(Length::Fill))
-            .on_press(DictMessage::Dismiss)
-            .style(|_t, _s| button::Style {
-                background: Some(iced::Background::Color(Color::from_rgba8(0, 0, 0, 0.65))),
-                ..Default::default()
-            });
-
-        Stack::new()
-            .push(backdrop)
-            .push(container(card).center_x(Length::Fill).center_y(Length::Fill))
+        container(card)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
             .into()
     }
 }

@@ -1,5 +1,5 @@
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Stack, Row};
-use iced::{Alignment, Color, Element, Length, Padding};
+use iced::widget::{button, column, container, row, scrollable, text, text_input, Row, Stack};
+use iced::{Alignment, Element, Length, Padding};
 use std::fs;
 use std::path::PathBuf;
 use tokio::process::Command;
@@ -7,10 +7,10 @@ use tokio::process::Command;
 use super::calc::CalculatorOverlay;
 use super::dictionary::{DictionaryOverlay, MeaningEntry};
 use super::pass::PassOverlay;
-use crate::config::settings::ShellSettings;
-use crate::config::theme::ShellTheme;
-use crate::style::shape_box::{ShapeBox, ShapeType};
-use crate::style::{shell_font, TextExt};
+use crate::libraries::config::settings::ShellSettings;
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
+use crate::libraries::style::{shell_font, TextExt};
 
 #[derive(Debug, Clone)]
 pub struct AppEntry {
@@ -52,19 +52,82 @@ impl Default for AppLauncher {
 }
 
 impl AppLauncher {
+    /// Cheap constructor — no scan. Used by processes that never open the
+    /// launcher (notif-surface). Saves ~200 file reads per startup.
+    pub fn new_empty() -> Self {
+        Self {
+            search_query: String::new(),
+            all_apps: Vec::new(),
+            filtered_apps: Vec::new(),
+            focus_requested: false,
+            selected_index: 0,
+            dict_cache: std::collections::HashMap::new(),
+            dict_pending: None,
+        }
+    }
+
     pub fn new() -> Self {
         let mut all_apps = vec![
-            AppEntry { name: "Settings & Options".into(), exec: "internal:settings".into(), icon: "⚙".into(), icon_path: None },
-            AppEntry { name: "Clipboard Manager".into(), exec: "internal:clip".into(), icon: "📋".into(), icon_path: None },
-            AppEntry { name: "Quick Notes".into(), exec: "internal:notes".into(), icon: "📝".into(), icon_path: None },
-            AppEntry { name: "Password Store".into(), exec: "internal:pass".into(), icon: "🔑".into(), icon_path: None },
-            AppEntry { name: "Power & Session".into(), exec: "internal:power".into(), icon: "⚡".into(), icon_path: None },
-            AppEntry { name: "Tasks & Todos".into(), exec: "internal:todo".into(), icon: "✅".into(), icon_path: None },
-            AppEntry { name: "Reminders & Alarms".into(), exec: "internal:reminders".into(), icon: "⏰".into(), icon_path: None },
-            AppEntry { name: "Dictionary Lookup".into(), exec: "internal:dict".into(), icon: "📖".into(), icon_path: None },
-            AppEntry { name: "Unicode Glyphs".into(), exec: "internal:unicode".into(), icon: "🔣".into(), icon_path: None },
-            AppEntry { name: "Web Search".into(), exec: "internal:web".into(), icon: "🌐".into(), icon_path: None },
-            AppEntry { name: "Screenshot (Quickshot)".into(), exec: "moon-beauty-shell --screenshot --annotate".into(), icon: "📷".into(), icon_path: None },
+            AppEntry {
+                name: "Settings & Options".into(),
+                exec: "internal:settings".into(),
+                icon: "⚙".into(),
+                icon_path: None,
+            },
+            AppEntry {
+                name: "Clipboard Manager".into(),
+                exec: "internal:clip".into(),
+                icon: "📋".into(),
+                icon_path: None,
+            },
+            AppEntry {
+                name: "Quick Notes".into(),
+                exec: "internal:notes".into(),
+                icon: "📝".into(),
+                icon_path: None,
+            },
+            AppEntry {
+                name: "Password Store".into(),
+                exec: "internal:pass".into(),
+                icon: "🔑".into(),
+                icon_path: None,
+            },
+            AppEntry {
+                name: "Power & Session".into(),
+                exec: "internal:power".into(),
+                icon: "⚡".into(),
+                icon_path: None,
+            },
+            AppEntry {
+                name: "Tasks & Todos".into(),
+                exec: "internal:todo".into(),
+                icon: "✅".into(),
+                icon_path: None,
+            },
+            AppEntry {
+                name: "Reminders & Alarms".into(),
+                exec: "internal:reminders".into(),
+                icon: "⏰".into(),
+                icon_path: None,
+            },
+            AppEntry {
+                name: "Unicode Glyphs".into(),
+                exec: "internal:unicode".into(),
+                icon: "🔣".into(),
+                icon_path: None,
+            },
+            AppEntry {
+                name: "Web Search".into(),
+                exec: "internal:web".into(),
+                icon: "🌐".into(),
+                icon_path: None,
+            },
+            AppEntry {
+                name: "Screenshot (Quickshot)".into(),
+                exec: "moon-beauty-shell --screenshot --annotate".into(),
+                icon: "📷".into(),
+                icon_path: None,
+            },
         ];
         all_apps.extend(Self::scan_desktop_files());
 
@@ -76,33 +139,6 @@ impl AppLauncher {
             selected_index: 0,
             dict_cache: DictionaryOverlay::load_cache(),
             dict_pending: None,
-        }
-    }
-
-    /// If `query` looks like a math expression or unit conversion, evaluate
-    /// it via the existing CalculatorOverlay. Returns None for non-math input
-    /// so the launcher doesn't show a bogus "= firefox" row.
-    fn compute_math_result(query: &str) -> Option<String> {
-        let q = query.trim();
-        if q.is_empty() {
-            return None;
-        }
-        // Require at least one operator or a unit-conversion phrase.
-        // Pure numbers ("123") are treated as search queries.
-        let has_operator = q.contains('+')
-            || q.contains('-')
-            || q.contains('*')
-            || q.contains('/')
-            || q.contains('(');
-        let has_unit = q.contains(" in ") || q.contains(" to ");
-        if !has_operator && !has_unit {
-            return None;
-        }
-        let result = CalculatorOverlay::evaluate(q);
-        if result.is_empty() || result == "Syntax Error" {
-            None
-        } else {
-            Some(result)
         }
     }
 
@@ -119,11 +155,17 @@ impl AppLauncher {
                 best_end = i;
             }
         }
-        if best_end == 0 { return None; }
+        if best_end == 0 {
+            return None;
+        }
         let num: f64 = q[..best_end].parse().ok()?;
         let rest = q[best_end..].trim();
-        if rest.is_empty() { return None; }
-        if rest.contains(char::is_whitespace) { return None; }
+        if rest.is_empty() {
+            return None;
+        }
+        if rest.contains(char::is_whitespace) {
+            return None;
+        }
         Some((num, rest.to_lowercase()))
     }
 
@@ -137,7 +179,13 @@ impl AppLauncher {
     }
 
     fn convert_temp(value: f64, from: char) -> Vec<(String, String)> {
-        let from_label = match from { 'C' => "°C", 'F' => "°F", 'K' => "K", 'R' => "°R", _ => "?" };
+        let from_label = match from {
+            'C' => "°C",
+            'F' => "°F",
+            'K' => "K",
+            'R' => "°R",
+            _ => "?",
+        };
         let celsius = match from {
             'C' => value,
             'F' => (value - 32.0) * 5.0 / 9.0,
@@ -148,7 +196,9 @@ impl AppLauncher {
         let units = [('C', "°C"), ('F', "°F"), ('K', "K"), ('R', "°R")];
         let mut out = Vec::new();
         for (u, label) in units {
-            if u == from { continue; }
+            if u == from {
+                continue;
+            }
             let converted = match u {
                 'C' => celsius,
                 'F' => celsius * 9.0 / 5.0 + 32.0,
@@ -163,12 +213,20 @@ impl AppLauncher {
         out
     }
 
-    fn convert_linear(value: f64, unit: &str, units: &[(&str, &str, f64)]) -> Option<Vec<(String, String)>> {
-        let (_, from_label, from_factor) = units.iter().find(|(k, _, _)| k.eq_ignore_ascii_case(unit))?;
+    fn convert_linear(
+        value: f64,
+        unit: &str,
+        units: &[(&str, &str, f64)],
+    ) -> Option<Vec<(String, String)>> {
+        let (_, from_label, from_factor) = units
+            .iter()
+            .find(|(k, _, _)| k.eq_ignore_ascii_case(unit))?;
         let base = value * from_factor;
         let mut out = Vec::new();
         for (key, label, factor) in units {
-            if key.eq_ignore_ascii_case(unit) { continue; }
+            if key.eq_ignore_ascii_case(unit) {
+                continue;
+            }
             let converted = base / factor;
             let result = format!("{} {}", Self::fmt_num(converted), label);
             let display = format!("{} {} = {}", Self::fmt_num(value), from_label, result);
@@ -186,7 +244,9 @@ impl AppLauncher {
         keys.sort();
         let mut out = Vec::new();
         for to_code in keys {
-            if to_code == upper { continue; }
+            if to_code == upper {
+                continue;
+            }
             let to_rate = rates.get(&to_code)?;
             let converted = usd * to_rate;
             let result = format!("{:.2} {}", converted, to_code);
@@ -238,45 +298,82 @@ impl AppLauncher {
         }
         // Distance
         const DISTANCE: &[(&str, &str, f64)] = &[
-            ("mm", "mm", 0.001), ("cm", "cm", 0.01), ("m", "m", 1.0),
-            ("km", "km", 1000.0), ("in", "in", 0.0254), ("ft", "ft", 0.3048),
-            ("yd", "yd", 0.9144), ("mi", "mi", 1609.344), ("nmi", "nmi", 1852.0),
+            ("mm", "mm", 0.001),
+            ("cm", "cm", 0.01),
+            ("m", "m", 1.0),
+            ("km", "km", 1000.0),
+            ("in", "in", 0.0254),
+            ("ft", "ft", 0.3048),
+            ("yd", "yd", 0.9144),
+            ("mi", "mi", 1609.344),
+            ("nmi", "nmi", 1852.0),
         ];
-        if let Some(r) = Self::convert_linear(num, unit, DISTANCE) { return Some(r); }
+        if let Some(r) = Self::convert_linear(num, unit, DISTANCE) {
+            return Some(r);
+        }
         // Weight
         const WEIGHT: &[(&str, &str, f64)] = &[
-            ("mg", "mg", 0.000001), ("g", "g", 0.001), ("kg", "kg", 1.0),
-            ("t", "t", 1000.0), ("oz", "oz", 0.0283495), ("lb", "lb", 0.453592),
+            ("mg", "mg", 0.000001),
+            ("g", "g", 0.001),
+            ("kg", "kg", 1.0),
+            ("t", "t", 1000.0),
+            ("oz", "oz", 0.0283495),
+            ("lb", "lb", 0.453592),
             ("st", "st", 6.35029),
         ];
-        if let Some(r) = Self::convert_linear(num, unit, WEIGHT) { return Some(r); }
+        if let Some(r) = Self::convert_linear(num, unit, WEIGHT) {
+            return Some(r);
+        }
         // Volume
         const VOLUME: &[(&str, &str, f64)] = &[
-            ("ml", "mL", 0.001), ("l", "L", 1.0), ("cup", "cups", 0.236588),
-            ("pt", "pt", 0.473176), ("qt", "qt", 0.946353), ("gal", "gal", 3.78541),
+            ("ml", "mL", 0.001),
+            ("l", "L", 1.0),
+            ("cup", "cups", 0.236588),
+            ("pt", "pt", 0.473176),
+            ("qt", "qt", 0.946353),
+            ("gal", "gal", 3.78541),
             ("floz", "fl oz", 0.0295735),
         ];
-        if let Some(r) = Self::convert_linear(num, unit, VOLUME) { return Some(r); }
+        if let Some(r) = Self::convert_linear(num, unit, VOLUME) {
+            return Some(r);
+        }
         // Data
         const DATA: &[(&str, &str, f64)] = &[
-            ("b", "B", 1.0), ("kb", "KB", 1024.0), ("mb", "MB", 1048576.0),
-            ("gb", "GB", 1073741824.0), ("tb", "TB", 1099511627776.0),
+            ("b", "B", 1.0),
+            ("kb", "KB", 1024.0),
+            ("mb", "MB", 1048576.0),
+            ("gb", "GB", 1073741824.0),
+            ("tb", "TB", 1099511627776.0),
         ];
-        if let Some(r) = Self::convert_linear(num, unit, DATA) { return Some(r); }
+        if let Some(r) = Self::convert_linear(num, unit, DATA) {
+            return Some(r);
+        }
         // Time
         const TIME: &[(&str, &str, f64)] = &[
-            ("s", "s", 1.0), ("min", "min", 60.0), ("h", "h", 3600.0),
-            ("d", "d", 86400.0), ("w", "wk", 604800.0), ("y", "yr", 31536000.0),
+            ("s", "s", 1.0),
+            ("min", "min", 60.0),
+            ("h", "h", 3600.0),
+            ("d", "d", 86400.0),
+            ("w", "wk", 604800.0),
+            ("y", "yr", 31536000.0),
         ];
-        if let Some(r) = Self::convert_linear(num, unit, TIME) { return Some(r); }
+        if let Some(r) = Self::convert_linear(num, unit, TIME) {
+            return Some(r);
+        }
         // Speed
         const SPEED: &[(&str, &str, f64)] = &[
-            ("ms", "m/s", 1.0), ("kmh", "km/h", 0.277778),
-            ("mph", "mph", 0.44704), ("kn", "kn", 0.514444),
+            ("ms", "m/s", 1.0),
+            ("kmh", "km/h", 0.277778),
+            ("mph", "mph", 0.44704),
+            ("kn", "kn", 0.514444),
         ];
-        if let Some(r) = Self::convert_linear(num, unit, SPEED) { return Some(r); }
+        if let Some(r) = Self::convert_linear(num, unit, SPEED) {
+            return Some(r);
+        }
         // Currency
-        if let Some(r) = Self::convert_currency(num, unit) { return Some(r); }
+        if let Some(r) = Self::convert_currency(num, unit) {
+            return Some(r);
+        }
         None
     }
 
@@ -304,7 +401,7 @@ impl AppLauncher {
             return None;
         };
 
-        let word = word_part.trim().split_whitespace().next().unwrap_or("");
+        let word = word_part.split_whitespace().next().unwrap_or("");
         if word.len() < 2 {
             return Some(vec![AppEntry {
                 name: "Dictionary — type a word after 'def '".to_string(),
@@ -315,21 +412,25 @@ impl AppLauncher {
         }
 
         if let Some(defs) = self.dict_cache.get(word) {
-            return Some(defs.iter().map(|d| {
-                let truncated = if d.definition.chars().count() > 80 {
-                    let mut s: String = d.definition.chars().take(77).collect();
-                    s.push_str("...");
-                    s
-                } else {
-                    d.definition.clone()
-                };
-                AppEntry {
-                    name: format!("[{}] {}", d.part_of_speech, truncated),
-                    exec: format!("dict:{}", d.definition),
-                    icon: ">".to_string(),
-                    icon_path: None,
-                }
-            }).collect());
+            return Some(
+                defs.iter()
+                    .map(|d| {
+                        let truncated = if d.definition.chars().count() > 80 {
+                            let mut s: String = d.definition.chars().take(77).collect();
+                            s.push_str("...");
+                            s
+                        } else {
+                            d.definition.clone()
+                        };
+                        AppEntry {
+                            name: format!("[{}] {}", d.part_of_speech, truncated),
+                            exec: format!("dict:{}", d.definition),
+                            icon: ">".to_string(),
+                            icon_path: None,
+                        }
+                    })
+                    .collect(),
+            );
         }
 
         // Not cached — show pending placeholder
@@ -344,21 +445,28 @@ impl AppLauncher {
     fn dict_word_to_lookup(&self, query: &str) -> Option<String> {
         let q = query.trim_start();
         let lower = q.to_lowercase();
-        let word_part = lower.strip_prefix("def ")
+        let word_part = lower
+            .strip_prefix("def ")
             .or_else(|| lower.strip_prefix("define "))
             .or_else(|| lower.strip_prefix("dict "))
             .or_else(|| lower.strip_prefix("dictionary "))?;
-        let word = word_part.trim().split_whitespace().next().unwrap_or("");
-        if word.len() < 2 { return None; }
-        if self.dict_cache.contains_key(word) { return None; }
-        if self.dict_pending.as_deref() == Some(word) { return None; }
+        let word = word_part.split_whitespace().next().unwrap_or("");
+        if word.len() < 2 {
+            return None;
+        }
+        if self.dict_cache.contains_key(word) {
+            return None;
+        }
+        if self.dict_pending.as_deref() == Some(word) {
+            return None;
+        }
         Some(word.to_string())
     }
 
     /// Cached pass-store entries — reads the filesystem once per launcher session.
     fn get_pass_keys() -> &'static Vec<String> {
         static CACHE: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
-        CACHE.get_or_init(|| PassOverlay::scan_passwords())
+        CACHE.get_or_init(PassOverlay::scan_passwords)
     }
 
     /// If the query starts with a pass-prefix keyword (`pass`, `passw`, `password`,
@@ -367,9 +475,19 @@ impl AppLauncher {
     /// Query `pass` alone → all entries (capped at 30).
     fn compute_pass_entries(query: &str) -> Option<Vec<(String, String)>> {
         let q = query.trim().to_lowercase();
-        let filter_term: &str = if matches!(q.as_str(),
-            "pass" | "passw" | "password" | "pw" | "passwd"
-            | "cred" | "creds" | "credential" | "credentials" | "secret" | "secrets"
+        let filter_term: &str = if matches!(
+            q.as_str(),
+            "pass"
+                | "passw"
+                | "password"
+                | "pw"
+                | "passwd"
+                | "cred"
+                | "creds"
+                | "credential"
+                | "credentials"
+                | "secret"
+                | "secrets"
         ) {
             ""
         } else if let Some(rest) = q.strip_prefix("pass ") {
@@ -392,14 +510,14 @@ impl AppLauncher {
             rest.trim()
         } else if let Some(rest) = q.strip_prefix("secret ") {
             rest.trim()
-        } else if let Some(rest) = q.strip_prefix("secrets ") {
-            rest.trim()
         } else {
-            return None;
+            let rest = q.strip_prefix("secrets ")?;
+            rest.trim()
         };
 
         let keys = Self::get_pass_keys();
-        let results: Vec<(String, String)> = keys.iter()
+        let results: Vec<(String, String)> = keys
+            .iter()
             .filter(|k| filter_term.is_empty() || k.to_lowercase().contains(filter_term))
             .take(30)
             .map(|k| (k.clone(), format!("pass:{}", k)))
@@ -424,8 +542,14 @@ impl AppLauncher {
         }
         // 2. Fall back to single math expression
         let q = query.trim();
-        if q.is_empty() { return vec![]; }
-        let has_operator = q.contains('+') || q.contains('-') || q.contains('*') || q.contains('/') || q.contains('(');
+        if q.is_empty() {
+            return vec![];
+        }
+        let has_operator = q.contains('+')
+            || q.contains('-')
+            || q.contains('*')
+            || q.contains('/')
+            || q.contains('(');
         let has_unit_phrase = q.contains(" in ") || q.contains(" to ");
         if !has_operator && !has_unit_phrase {
             return vec![];
@@ -444,87 +568,223 @@ impl AppLauncher {
     pub fn scan_desktop_files() -> Vec<AppEntry> {
         let mut apps = Vec::new();
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-        let dirs = [
+        let user = std::env::var("USER").unwrap_or_else(|_| "user".into());
+
+        let mut dirs: Vec<PathBuf> = vec![
             PathBuf::from("/usr/share/applications"),
             PathBuf::from("/usr/local/share/applications"),
-            home.join(".local/share/applications"),
             PathBuf::from("/run/current-system/sw/share/applications"),
+            PathBuf::from("/etc/profiles/per-user")
+                .join(&user)
+                .join("share/applications"),
             home.join(".nix-profile/share/applications"),
+            PathBuf::from("/var/lib/flatpak/exports/share/applications"),
+            home.join(".local/share/flatpak/exports/share/applications"),
+            PathBuf::from("/run/flatpak/exports/share/applications"),
+            PathBuf::from("/var/lib/snapd/desktop/applications"),
+            home.join(".local/share/applications"),
         ];
+
+        if let Ok(xdg) = std::env::var("XDG_DATA_DIRS") {
+            for d in xdg.split(':') {
+                if !d.is_empty() {
+                    dirs.push(PathBuf::from(d).join("applications"));
+                }
+            }
+        }
+
+        let debug = std::env::var_os("MBS_LAUNCHER_DEBUG").is_some();
+        let current_de = std::env::var("XDG_CURRENT_DESKTOP")
+            .unwrap_or_default()
+            .to_lowercase();
 
         let mut seen = std::collections::HashSet::new();
         let mut total_files = 0usize;
         let mut hidden = 0usize;
+        let mut no_exec = 0usize;
+        let mut de_filtered = 0usize;
 
         for dir in &dirs {
-            if let Ok(entries) = fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().and_then(|s| s.to_str()) == Some("desktop") {
-                        total_files += 1;
-                        if let Ok(content) = fs::read_to_string(&path) {
-                            let mut name = None;
-                            let mut exec = None;
-                            let mut icon_name: Option<String> = None;
-                            let mut nodisplay = false;
+            if !dir.exists() {
+                continue;
+            }
+            let entries = match fs::read_dir(dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            let mut dir_count = 0usize;
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) != Some("desktop") {
+                    continue;
+                }
+                total_files += 1;
+                dir_count += 1;
 
-                            for line in content.lines() {
-                                if line.starts_with("Name=") && name.is_none() {
-                                    name = Some(line["Name=".len()..].trim().to_string());
-                                } else if line.starts_with("Exec=") && exec.is_none() {
-                                    let raw_exec = line["Exec=".len()..].trim();
-                                    let cleaned = raw_exec
-                                        .split('%')
-                                        .next()
-                                        .unwrap_or(raw_exec)
-                                        .trim()
-                                        .to_string();
-                                    exec = Some(cleaned);
-                                } else if line.starts_with("Icon=") && icon_name.is_none() {
-                                    icon_name = Some(line["Icon=".len()..].trim().to_string());
-                                } else if line.eq_ignore_ascii_case("NoDisplay=true") {
-                                    nodisplay = true;
-                                }
-                            }
+                let Ok(content) = fs::read_to_string(&path) else {
+                    continue;
+                };
 
-                            if nodisplay { hidden += 1; continue; }
-                            if let (Some(n), Some(e)) = (name, exec) {
-                                let key = format!("{}|{}", n.to_lowercase(), e.to_lowercase());
-                                if !seen.contains(&key) {
-                                    seen.insert(key);
-                                    let icon_path = icon_name
-                                        .as_deref()
-                                        .and_then(Self::resolve_icon);
-                                    apps.push(AppEntry {
-                                        name: n,
-                                        exec: e,
-                                        icon: "🚀".to_string(),
-                                        icon_path,
-                                    });
-                                }
-                            }
+                let mut name = None;
+                let mut exec = None;
+                let mut icon_name: Option<String> = None;
+                let mut nodisplay = false;
+                let mut hidden_flag = false;
+                let mut only_show_in = String::new();
+                let mut not_show_in = String::new();
+                let mut try_exec: Option<String> = None;
+                let mut in_main_section = false;
+
+                for line in content.lines() {
+                    let line = line.trim();
+                    if line.starts_with('[') {
+                        in_main_section = line.eq_ignore_ascii_case("[Desktop Entry]");
+                        continue;
+                    }
+                    if !in_main_section {
+                        continue;
+                    }
+                    if let Some(v) = line.strip_prefix("Name=") {
+                        if name.is_none() {
+                            name = Some(v.trim().to_string());
                         }
+                    } else if let Some(v) = line.strip_prefix("Exec=") {
+                        if exec.is_none() {
+                            let raw = v.trim();
+                            let cleaned = raw.split('%').next().unwrap_or(raw).trim().to_string();
+                            exec = Some(cleaned);
+                        }
+                    } else if let Some(v) = line.strip_prefix("Icon=") {
+                        if icon_name.is_none() {
+                            icon_name = Some(v.trim().to_string());
+                        }
+                    } else if let Some(v) = line.strip_prefix("OnlyShowIn=") {
+                        only_show_in = v.trim().to_lowercase();
+                    } else if let Some(v) = line.strip_prefix("NotShowIn=") {
+                        not_show_in = v.trim().to_lowercase();
+                    } else if let Some(v) = line.strip_prefix("TryExec=") {
+                        if try_exec.is_none() {
+                            try_exec = Some(v.trim().to_string());
+                        }
+                    } else if line.eq_ignore_ascii_case("NoDisplay=true") {
+                        nodisplay = true;
+                    } else if line.eq_ignore_ascii_case("Hidden=true") {
+                        hidden_flag = true;
                     }
                 }
+
+                if nodisplay || hidden_flag {
+                    hidden += 1;
+                    if debug {
+                        eprintln!(
+                            "[launcher-scan]   skip hidden: {:?}",
+                            path.file_name().unwrap_or_default()
+                        );
+                    }
+                    continue;
+                }
+
+                if !only_show_in.is_empty() && !current_de.is_empty() {
+                    let allowed = only_show_in
+                        .split(';')
+                        .any(|d| !d.trim().is_empty() && current_de.contains(d.trim()));
+                    if !allowed {
+                        de_filtered += 1;
+                        if debug {
+                            eprintln!(
+                                "[launcher-scan]   skip OnlyShowIn: {:?}",
+                                path.file_name().unwrap_or_default()
+                            );
+                        }
+                        continue;
+                    }
+                }
+                if !not_show_in.is_empty() && !current_de.is_empty() {
+                    let denied = not_show_in
+                        .split(';')
+                        .any(|d| !d.trim().is_empty() && current_de.contains(d.trim()));
+                    if denied {
+                        de_filtered += 1;
+                        if debug {
+                            eprintln!(
+                                "[launcher-scan]   skip NotShowIn: {:?}",
+                                path.file_name().unwrap_or_default()
+                            );
+                        }
+                        continue;
+                    }
+                }
+
+                if let Some(te) = &try_exec {
+                    let te_path = std::path::Path::new(te);
+                    if te_path.is_absolute() && !te_path.exists() {
+                        no_exec += 1;
+                        if debug {
+                            eprintln!(
+                                "[launcher-scan]   skip TryExec missing: {:?} -> {}",
+                                path.file_name().unwrap_or_default(),
+                                te
+                            );
+                        }
+                        continue;
+                    }
+                }
+
+                if let (Some(n), Some(e)) = (name.clone(), exec.clone()) {
+                    if e.is_empty() {
+                        no_exec += 1;
+                        continue;
+                    }
+                    let key = format!("{}|{}", n.to_lowercase(), e.to_lowercase());
+                    if !seen.contains(&key) {
+                        seen.insert(key);
+                        let icon_path = icon_name.as_deref().and_then(Self::resolve_icon);
+                        apps.push(AppEntry {
+                            name: n,
+                            exec: e,
+                            icon: "🚀".to_string(),
+                            icon_path,
+                        });
+                        if debug {
+                            eprintln!(
+                                "[launcher-scan]   ✓ {:?}",
+                                path.file_name().unwrap_or_default()
+                            );
+                        }
+                    }
+                } else {
+                    no_exec += 1;
+                }
+            }
+            if debug && dir_count > 0 {
+                eprintln!("[launcher-scan] {:?}: {} files", dir, dir_count);
             }
         }
 
         apps.sort_by_key(|a| a.name.to_lowercase());
         let with_icons = apps.iter().filter(|a| a.icon_path.is_some()).count();
-        eprintln!(
-            "[launcher] {} .desktop files scanned ({} hidden), {} apps loaded, {} with icons",
-            total_files, hidden, apps.len(), with_icons,
-        );
+
+        if (debug || std::env::var_os("MBS_DEBUG").is_some()) && total_files != 63 {
+            eprintln!(
+                "[launcher] {} .desktop files across {} dirs, {} hidden, {} tryExec-missing, {} de-filtered, {} apps, {} with icons",
+                total_files, dirs.len(), hidden, no_exec, de_filtered, apps.len(), with_icons
+            );
+        }
+
         apps
     }
 
     fn resolve_icon(icon_name: &str) -> Option<String> {
         use std::path::Path;
-        if icon_name.is_empty() { return None; }
+        if icon_name.is_empty() {
+            return None;
+        }
         if icon_name.starts_with('/') {
             return if Path::new(icon_name).exists() {
                 Some(icon_name.to_string())
-            } else { None };
+            } else {
+                None
+            };
         }
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
         let roots = [
@@ -534,12 +794,16 @@ impl AppLauncher {
             home.join(".local/share/icons/hicolor"),
             home.join(".nix-profile/share/icons/hicolor"),
         ];
-        let sizes = ["48x48", "64x64", "128x128", "256x256", "512x512", "scalable", "symbolic"];
+        let sizes = [
+            "48x48", "64x64", "128x128", "256x256", "512x512", "scalable", "symbolic",
+        ];
         let exts = ["png", "svg", "xpm"];
         for root in &roots {
             for size in &sizes {
                 for ext in &exts {
-                    let p = root.join(size).join("apps")
+                    let p = root
+                        .join(size)
+                        .join("apps")
                         .join(format!("{}.{}", icon_name, ext));
                     if p.exists() {
                         return Some(p.to_string_lossy().into_owned());
@@ -561,7 +825,7 @@ impl AppLauncher {
     pub fn update(&mut self, message: LauncherMessage) -> iced::Task<LauncherMessage> {
         match message {
             LauncherMessage::Refocus => {
-                return iced::widget::text_input::focus(LAUNCHER_SEARCH_ID);
+                return iced::widget::operation::focus(LAUNCHER_SEARCH_ID);
             }
             LauncherMessage::SelectNext => {
                 if !self.filtered_apps.is_empty() {
@@ -577,7 +841,11 @@ impl AppLauncher {
                 return iced::Task::none();
             }
             LauncherMessage::DictLookupReady(word, defs) => {
-                eprintln!("[launcher-dict] lookup done: {:?} → {} definitions", word, defs.len());
+                eprintln!(
+                    "[launcher-dict] lookup done: {:?} → {} definitions",
+                    word,
+                    defs.len()
+                );
                 self.dict_cache.insert(word.clone(), defs);
                 if self.dict_pending.as_deref() == Some(&word) {
                     self.dict_pending = None;
@@ -587,19 +855,34 @@ impl AppLauncher {
             }
             LauncherMessage::SelectDown => {
                 if !self.filtered_apps.is_empty() {
-                    let math_count = self.filtered_apps.iter()
-                        .filter(|a| a.exec.starts_with("math:")).count();
+                    let math_count = self
+                        .filtered_apps
+                        .iter()
+                        .filter(|a| a.exec.starts_with("math:"))
+                        .count();
                     // Grid row = +3, app list = +1
-                    let step = if math_count > 0 && self.selected_index < math_count { 3 } else { 1 };
-                    self.selected_index = (self.selected_index + step).min(self.filtered_apps.len() - 1);
+                    let step = if math_count > 0 && self.selected_index < math_count {
+                        3
+                    } else {
+                        1
+                    };
+                    self.selected_index =
+                        (self.selected_index + step).min(self.filtered_apps.len() - 1);
                 }
                 return iced::Task::none();
             }
             LauncherMessage::SelectUp => {
                 if !self.filtered_apps.is_empty() {
-                    let math_count = self.filtered_apps.iter()
-                        .filter(|a| a.exec.starts_with("math:")).count();
-                    let step = if math_count > 0 && self.selected_index < math_count { 3 } else { 1 };
+                    let math_count = self
+                        .filtered_apps
+                        .iter()
+                        .filter(|a| a.exec.starts_with("math:"))
+                        .count();
+                    let step = if math_count > 0 && self.selected_index < math_count {
+                        3
+                    } else {
+                        1
+                    };
                     self.selected_index = self.selected_index.saturating_sub(step);
                 }
                 return iced::Task::none();
@@ -644,9 +927,7 @@ impl AppLauncher {
                         let w1 = word.clone();
                         let w2 = word.clone();
                         return iced::Task::perform(
-                            async move {
-                                DictionaryOverlay::lookup_word(&w1).await
-                            },
+                            async move { DictionaryOverlay::lookup_word(&w1).await },
                             move |defs| LauncherMessage::DictLookupReady(w2.clone(), defs),
                         );
                     }
@@ -655,14 +936,15 @@ impl AppLauncher {
                 // Password store search — takes priority if the query starts with a pass-prefix
                 if let Some(pass_entries) = Self::compute_pass_entries(&q) {
                     eprintln!("[launcher-pass] {:?} → {} entries", q, pass_entries.len());
-                    let mut pass_items: Vec<AppEntry> = pass_entries.into_iter().map(|(name, exec)| {
-                        AppEntry {
+                    let mut pass_items: Vec<AppEntry> = pass_entries
+                        .into_iter()
+                        .map(|(name, exec)| AppEntry {
                             name,
                             exec,
                             icon: ">".to_string(),
                             icon_path: None,
-                        }
-                    }).collect();
+                        })
+                        .collect();
                     pass_items.append(&mut filtered);
                     filtered = pass_items;
                 }
@@ -671,14 +953,15 @@ impl AppLauncher {
                 let conversions = Self::compute_multi_conversions(&q);
                 if !conversions.is_empty() {
                     eprintln!("[launcher-multi] {:?} → {} results", q, conversions.len());
-                    let mut math_entries: Vec<AppEntry> = conversions.into_iter().map(|(label, exec)| {
-                        AppEntry {
+                    let mut math_entries: Vec<AppEntry> = conversions
+                        .into_iter()
+                        .map(|(label, exec)| AppEntry {
                             name: label,
                             exec,
                             icon: "=".to_string(),
                             icon_path: None,
-                        }
-                    }).collect();
+                        })
+                        .collect();
                     math_entries.append(&mut filtered);
                     filtered = math_entries;
                 } else {
@@ -700,69 +983,54 @@ impl AppLauncher {
     fn routing_alias(query: &str) -> Option<AppEntry> {
         let (name, exec) = match query {
             // Settings
-            "cfg" | "set" | "settings" | "config" | "prefs" | "preferences"
-            | "options" | "settings & options" | "preference" | "configuration" => {
+            "cfg" | "set" | "settings" | "config" | "prefs" | "preferences" | "options"
+            | "settings & options" | "preference" | "configuration" => {
                 ("Settings & Options", "internal:settings")
             }
             // Clipboard
-            "clip" | "clipboard" | "clipboard manager" | "clipboard history" | "paste" | "pastebin" => {
-                ("Clipboard Manager", "internal:clip")
-            }
+            "clip" | "clipboard" | "clipboard manager" | "clipboard history" | "paste"
+            | "pastebin" => ("Clipboard Manager", "internal:clip"),
             // Todo
             "todo" | "td" | "task" | "tasks" | "tasks & todos" | "task list" => {
                 ("Tasks & Todos", "internal:todo")
             }
             // Notes
-            "note" | "notes" | "quick notes" | "quicknote" => {
-                ("Quick Notes", "internal:notes")
-            }
+            "note" | "notes" | "quick notes" | "quicknote" => ("Quick Notes", "internal:notes"),
             // Power
-            "power" | "pwr" | "session" | "power & session" | "logout"
-            | "reboot" | "shutdown" | "lock" | "lockscreen" => {
-                ("Power & Session", "internal:power")
-            }
+            "power" | "pwr" | "session" | "power & session" | "logout" | "reboot" | "shutdown"
+            | "lock" | "lockscreen" => ("Power & Session", "internal:power"),
             // Reminders
-            "remind" | "reminder" | "reminders" | "alarm" | "alarms"
-            | "reminders & alarms" | "timer" | "timers" => {
-                ("Reminders & Alarms", "internal:reminders")
-            }
-            // Dictionary
-            "dict" | "def" | "dictionary" | "dictionary lookup" | "word"
-            | "lookup" | "define" | "defn" => {
-                ("Dictionary", "internal:dict")
-            }
+            "remind" | "reminder" | "reminders" | "alarm" | "alarms" | "reminders & alarms"
+            | "timer" | "timers" => ("Reminders & Alarms", "internal:reminders"),
             // Unicode
-            "unicode" | "glyph" | "glyphs" | "symbol" | "symbols"
-            | "emoji" | "emojis" | "unicode glyphs" => {
-                ("Unicode", "internal:unicode")
-            }
+            "unicode" | "glyph" | "glyphs" | "symbol" | "symbols" | "emoji" | "emojis"
+            | "unicode glyphs" => ("Unicode", "internal:unicode"),
             // Email
-            "email" | "mail" | "em" | "mail client" | "inbox" => {
-                ("Email", "internal:email")
-            }
+            "email" | "mail" | "em" | "mail client" | "inbox" => ("Email", "internal:email"),
             // RNG / Dice
-            "rng" | "dice" | "roll" | "random" | "rand" | "d20" => {
-                ("RNG / Dice", "internal:rng")
-            }
+            "rng" | "dice" | "roll" | "random" | "rand" | "d20" => ("RNG / Dice", "internal:rng"),
             // Web search
             "web" | "search" | "web search" | "google" | "ddg" | "duckduckgo" => {
                 ("Web Search", "internal:web")
             }
             // Amogus
-            "amogus" | "amongus" | "among us" | "sus" => {
-                ("Among Us", "internal:amogus")
-            }
+            "amogus" | "amongus" | "among us" | "sus" => ("Among Us", "internal:amogus"),
             // Screenshot
             "shot" | "screenshot" | "capture" | "screenshot (quickshot)" => {
                 ("Screenshot", "moon-beauty-shell --screenshot --annotate")
             }
             _ => return None,
         };
-        Some(AppEntry { name: name.into(), exec: exec.into(), icon: ">".into(), icon_path: None })
+        Some(AppEntry {
+            name: name.into(),
+            exec: exec.into(),
+            icon: ">".into(),
+            icon_path: None,
+        })
     }
 
     pub fn focus_search(&mut self) -> iced::Task<LauncherMessage> {
-        iced::widget::text_input::focus(LAUNCHER_SEARCH_ID)
+        iced::widget::operation::focus(LAUNCHER_SEARCH_ID)
     }
 
     pub async fn launch(exec: &str) {
@@ -770,11 +1038,23 @@ impl AppLauncher {
             return;
         }
         let _ = Command::new("systemd-run")
-            .args(["--user", "--collect", "--quiet", "--slice=app.slice", "sh", "-c", exec])
+            .args([
+                "--user",
+                "--collect",
+                "--quiet",
+                "--slice=app.slice",
+                "sh",
+                "-c",
+                exec,
+            ])
             .spawn();
     }
 
-    pub fn view<'a>(&'a self, theme: &'a ShellTheme, settings: &ShellSettings) -> Element<'a, LauncherMessage> {
+    pub fn view<'a>(
+        &'a self,
+        theme: &'a ShellTheme,
+        settings: &ShellSettings,
+    ) -> Element<'a, LauncherMessage> {
         let (win_w, win_h) = settings.get_window_size("launcher", 840, 650);
 
         let cut_f = theme.overlay_cut;
@@ -828,48 +1108,57 @@ impl AppLauncher {
                 },
             )
             .padding(14)
-            .size(theme.font_size_overlay)
+            .size((theme.font_size_overlay) as f32)
             .width(Length::Fill)
             .style(move |_t, status| {
-        let border_color = match status {
-            text_input::Status::Focused => theme.focus,
-            text_input::Status::Hovered => theme.border,
-            _ => theme.border,
-        };
-        let border_width = match status {
-            text_input::Status::Focused => theme.control_border_width + 0.5,
-            _ => theme.control_border_width,
-        };
-        text_input::Style {
-            background: iced::Background::Color(theme.surface_alt),
-            border: iced::Border {
-                color: border_color,
-                width: border_width,
-                radius: 8.0.into(),
-            },
-            icon: theme.muted,
-            placeholder: theme.muted,
-            value: theme.text,
-            selection: theme.focus,
-        }
-    });
-
-        let input_row = container(input)
-            .width(Length::Fill)
-            .padding(Padding {
-                top: 0.0,
-                right: search_inward,
-                bottom: 0.0,
-                left: search_inward,
+                let border_color = match status {
+                    text_input::Status::Focused { .. } => theme.focus,
+                    text_input::Status::Hovered => theme.border,
+                    _ => theme.border,
+                };
+                let border_width = match status {
+                    text_input::Status::Focused { .. } => theme.control_border_width + 0.5,
+                    _ => theme.control_border_width,
+                };
+                text_input::Style {
+                    background: iced::Background::Color(theme.surface_alt),
+                    border: iced::Border {
+                        color: border_color,
+                        width: border_width,
+                        radius: 8.0.into(),
+                    },
+                    icon: theme.muted,
+                    placeholder: theme.muted,
+                    value: theme.text,
+                    selection: theme.focus,
+                }
             });
 
+        let input_row = container(input).width(Length::Fill).padding(Padding {
+            top: 0.0,
+            right: search_inward,
+            bottom: 0.0,
+            left: search_inward,
+        });
+
         // Split math results from apps — math gets hex grid, apps get list
-        let math_count = self.filtered_apps.iter()
-            .filter(|a| a.exec.starts_with("math:")).count();
-        let math_items: Vec<&AppEntry> = self.filtered_apps.iter()
-            .filter(|a| a.exec.starts_with("math:")).take(40).collect();
-        let app_items: Vec<&AppEntry> = self.filtered_apps.iter()
-            .filter(|a| !a.exec.starts_with("math:")).take(40).collect();
+        let math_count = self
+            .filtered_apps
+            .iter()
+            .filter(|a| a.exec.starts_with("math:"))
+            .count();
+        let math_items: Vec<&AppEntry> = self
+            .filtered_apps
+            .iter()
+            .filter(|a| a.exec.starts_with("math:"))
+            .take(40)
+            .collect();
+        let app_items: Vec<&AppEntry> = self
+            .filtered_apps
+            .iter()
+            .filter(|a| !a.exec.starts_with("math:"))
+            .take(40)
+            .collect();
 
         let mut content_col = column![].spacing(10).width(Length::Fill);
 
@@ -898,8 +1187,16 @@ impl AppLauncher {
                         item.name.split(" = ").next().unwrap_or("").to_string()
                     };
 
-                    let bg = if is_selected { theme.surface_alt } else { theme.background };
-                    let border_c = if is_selected { theme.text } else { theme.border };
+                    let bg = if is_selected {
+                        theme.surface_alt
+                    } else {
+                        theme.background
+                    };
+                    let border_c = if is_selected {
+                        theme.text
+                    } else {
+                        theme.border
+                    };
 
                     let tile_bg = ShapeBox::new()
                         .shape(ShapeType::Hexagon { cut: 8 })
@@ -910,19 +1207,19 @@ impl AppLauncher {
                     let tile_content = container(
                         column![
                             text(copy_val)
-                                .size(theme.font_size_overlay + 1)
+                                .size((theme.font_size_overlay + 1) as f32)
                                 .bold()
                                 .color(theme.text_strong)
                                 .align_x(Alignment::Center)
                                 .wrapping(iced::widget::text::Wrapping::None),
                             text(input_part)
-                                .size(theme.font_size_normal.saturating_sub(2))
+                                .size((theme.font_size_normal.saturating_sub(2)) as f32)
                                 .color(theme.muted)
                                 .align_x(Alignment::Center)
                                 .wrapping(iced::widget::text::Wrapping::None),
                         ]
                         .spacing(2)
-                        .align_x(Alignment::Center)
+                        .align_x(Alignment::Center),
                     )
                     .width(Length::Fill)
                     .height(Length::Fill)
@@ -930,24 +1227,30 @@ impl AppLauncher {
                     .center_y(Length::Fill)
                     .padding([0, 20]);
 
-                    let tile_inner = container(
-                        Stack::new().push(tile_bg.view()).push(tile_content)
-                    )
-                    .width(Length::Fixed(tile_w))
-                    .height(Length::Fixed(tile_h))
-                    .clip(true);
+                    let tile_inner =
+                        container(Stack::new().push(tile_bg.view()).push(tile_content))
+                            .width(Length::Fixed(tile_w))
+                            .height(Length::Fixed(tile_h))
+                            .clip(true);
 
                     let tile = button(tile_inner)
                         .on_press(LauncherMessage::ExecuteApp(exec_cmd))
                         .padding(0)
                         .width(Length::Fixed(tile_w))
                         .height(Length::Fixed(tile_h))
-                        .style(|_t, _s| button::Style { background: None, ..Default::default() });
+                        .style(|_t, _s| button::Style {
+                            background: None,
+                            ..Default::default()
+                        });
 
                     grid_row = grid_row.push(tile);
                 }
                 for _ in chunk.len()..3 {
-                    grid_row = grid_row.push(container("").width(Length::Fixed(tile_w)).height(Length::Fixed(tile_h)));
+                    grid_row = grid_row.push(
+                        container("")
+                            .width(Length::Fixed(tile_w))
+                            .height(Length::Fixed(tile_h)),
+                    );
                 }
                 grid_col = grid_col.push(grid_row);
             }
@@ -956,101 +1259,188 @@ impl AppLauncher {
 
         // App rows (unchanged logic, but global index offset by math_count)
         if !app_items.is_empty() {
-            let mut list_col = column![].spacing(6).width(Length::Fill);
-            for (rel_idx, app) in app_items.iter().enumerate() {
-                let idx = math_count + rel_idx;
+            // One app per row. Each row is an extended hexagon "bar"
+            // containing the icon (in its own small hexagon) on the
+            // left and the app name + exec path on the right.
+            let gap = 12.0;
+            let inner_pad_x = 20.0;
+            let inner_pad_y = 10.0;
+
+            // Icon size comes from Settings → Overlays & Windows.
+            // The hexagon must be big enough that its cut corners don't
+            // clip the icon's own corners.
+            //   interior_width = hex_size - 2*cut
+            //   need interior_width ≥ icon_size
+            //   cut = 10% of hex_size  →  interior = 0.80 * hex_size
+            //   so hex_size ≥ icon_size / 0.80 = 1.25 * icon_size.
+            // Use 1.40 to give visible margin + clamp cut to ≥ 8px so
+            // it stays visibly octagonal at the smallest slider values.
+            let icon_size = settings.launcher_icon_size as f32;
+            let icon_hex_size = icon_size * 1.40;
+            let icon_hex_cut: u16 = ((icon_hex_size * 0.10) as u16).max(8);
+            let row_h = icon_hex_size + inner_pad_y * 2.0;
+
+            let row_w = win_w - list_side_inset * 2.0;
+
+            let mut grid_col = column![].spacing(gap);
+
+            for (idx_offset, app) in app_items.iter().enumerate() {
+                let idx = math_count + idx_offset;
                 let exec_cmd = app.exec.clone();
-                let icon_str = if app.exec.starts_with("internal:") { ">" } else { ">" };
-                let icon_elem: Element<'_, LauncherMessage> = if let Some(ref path) = app.icon_path {
-                    iced::widget::image(iced::widget::image::Handle::from_path(path.clone()))
-                        .width(Length::Fixed(24.0))
-                        .height(Length::Fixed(24.0))
-                        .into()
+                let is_selected = idx == self.selected_index;
+
+                // Row-level extended hexagon bar
+                let row_bg = ShapeBox::new()
+                    .shape(ShapeType::Hexagon { cut: 18 })
+                    .background(if is_selected {
+                        theme.surface_alt
+                    } else {
+                        theme.background
+                    })
+                    .border(
+                        if is_selected {
+                            theme.text
+                        } else {
+                            theme.border
+                        },
+                        theme.control_border_width,
+                    )
+                    .size(Length::Fixed(row_w), Length::Fixed(row_h));
+
+                // Icon rendering (SVG-aware)
+                let icon_elem: Element<'_, LauncherMessage> = if let Some(ref path) = app.icon_path
+                {
+                    if path.ends_with(".svg") {
+                        iced::widget::svg(iced::widget::svg::Handle::from_path(path.clone()))
+                            .width(Length::Fixed(icon_size))
+                            .height(Length::Fixed(icon_size))
+                            .into()
+                    } else {
+                        iced::widget::image(iced::widget::image::Handle::from_path(path.clone()))
+                            .width(Length::Fixed(icon_size))
+                            .height(Length::Fixed(icon_size))
+                            .content_fit(iced::ContentFit::Contain)
+                            .into()
+                    }
                 } else {
-                    text(icon_str).size(16).into()
+                    container(text(&app.icon).size(64))
+                        .width(Length::Fixed(icon_size))
+                        .height(Length::Fixed(icon_size))
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill)
+                        .into()
                 };
 
-                let is_selected = idx == self.selected_index;
-                let row_item = button(
-                    row![
-                        icon_elem,
-                        column![
-                            text(&app.name)
-                                .size(theme.font_size_overlay)
-                                .bold(),
-                            text(&app.exec)
-                                .size(theme.font_size_normal.saturating_sub(2))
-                                .shell()
-                                .color(theme.muted),
-                        ]
-                        .spacing(2)
-                        .width(Length::Fill),
-                    ]
-                    .spacing(12)
-                    .align_y(Alignment::Center),
-                )
-                .on_press(LauncherMessage::ExecuteApp(exec_cmd))
-                .padding([8, 14])
-                .width(Length::Fill)
-                .style(move |_t, status| {
-                    let is_hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-                    let bg = if is_hovered || is_selected {
-                        Some(iced::Background::Color(theme.surface_alt))
-                    } else {
-                        None
-                    };
-                    let border_color = if is_hovered {
-                        theme.focus
-                    } else if is_selected {
-                        theme.text
-                    } else {
-                        Color::TRANSPARENT
-                    };
-                    button::Style {
-                        background: bg,
-                        border: iced::Border {
-                            color: border_color,
-                            width: if is_hovered || is_selected {
-                                theme.control_border_width
-                            } else {
-                                0.0
-                            },
-                            radius: 6.0.into(),
-                        },
-                        text_color: if is_selected || is_hovered {
-                            theme.text_strong
-                        } else {
+                // Small hexagon wrapping the icon
+                let icon_bg = ShapeBox::new()
+                    .shape(ShapeType::Hexagon { cut: icon_hex_cut })
+                    .background(theme.background)
+                    .border(
+                        if is_selected {
                             theme.text
+                        } else {
+                            theme.border
                         },
-                        ..Default::default()
-                    }
+                        theme.control_border_width,
+                    )
+                    .size(Length::Fixed(icon_hex_size), Length::Fixed(icon_hex_size));
+
+                let icon_stack = Stack::new().push(icon_bg.view()).push(
+                    container(icon_elem)
+                        .width(Length::Fixed(icon_hex_size))
+                        .height(Length::Fixed(icon_hex_size))
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill),
+                );
+
+                // Name + exec on the right
+                let name_txt = text(&app.name).size(18.0).bold().color(if is_selected {
+                    theme.text_strong
+                } else {
+                    theme.text
                 });
 
-                list_col = list_col.push(row_item);
+                let exec_txt = text(&app.exec)
+                    .size(12.0)
+                    .font(iced::Font::MONOSPACE)
+                    .color(theme.muted);
+
+                let info_col = column![name_txt, exec_txt]
+                    .spacing(4)
+                    .align_x(Alignment::Start)
+                    .width(Length::Fill);
+
+                let row_inner = row![
+                    icon_stack,
+                    container(info_col)
+                        .width(Length::Fill)
+                        .padding(iced::Padding {
+                            top: 0.0,
+                            right: 20.0,
+                            bottom: 0.0,
+                            left: 20.0,
+                        }),
+                ]
+                .spacing(0)
+                .align_y(iced::alignment::Vertical::Center)
+                .width(Length::Fill);
+
+                let row_content = container(row_inner)
+                    .width(Length::Fixed(row_w))
+                    .height(Length::Fixed(row_h))
+                    .padding(iced::Padding {
+                        top: inner_pad_y,
+                        right: inner_pad_x,
+                        bottom: inner_pad_y,
+                        left: inner_pad_x,
+                    });
+
+                let row_stack = Stack::new().push(row_bg.view()).push(row_content);
+
+                let row_btn = button(row_stack)
+                    .on_press(LauncherMessage::ExecuteApp(exec_cmd))
+                    .padding(0)
+                    .width(Length::Fixed(row_w))
+                    .height(Length::Fixed(row_h))
+                    .style(|_t, _s| button::Style {
+                        background: None,
+                        ..Default::default()
+                    });
+
+                grid_col = grid_col.push(row_btn);
             }
-            content_col = content_col.push(list_col);
+
+            content_col = content_col.push(grid_col);
         }
 
         if math_items.is_empty() && app_items.is_empty() {
             content_col = content_col.push(
-                container(text("No results").size(theme.font_size_overlay).color(theme.muted))
-                    .width(Length::Fill)
-                    .center_x(Length::Fill)
-                    .padding(20),
+                container(
+                    text("No results")
+                        .size((theme.font_size_overlay) as f32)
+                        .color(theme.muted),
+                )
+                .width(Length::Fill)
+                .center_x(Length::Fill)
+                .padding(20),
             );
         }
 
-        let list_container = container(scrollable(content_col).height(Length::Fill).width(Length::Fill))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(Padding {
-                top: 0.0,
-                right: list_side_inset,
-                bottom: 0.0,
-                left: list_side_inset,
-            });
+        let list_container = container(
+            scrollable(content_col)
+                .height(Length::Fill)
+                .width(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .padding(Padding {
+            top: 0.0,
+            right: list_side_inset,
+            bottom: 0.0,
+            left: list_side_inset,
+        });
 
-                let bottom_footer = container(
+        let bottom_footer = container(
             text("↑↓ Row  •  Tab Cycle  •  Alt+←→ Tile  •  Enter Select  •  ESC Dismiss")
                 .size(11)
                 .shell()
@@ -1066,20 +1456,19 @@ impl AppLauncher {
         });
 
         let card_bg = ShapeBox::new()
-            .shape(ShapeType::AngledHexagon { cut: cut_f, angle_deg })
+            .shape(ShapeType::AngledHexagon {
+                cut: cut_f,
+                angle_deg,
+            })
             .background(theme.background)
             .border(theme.border, theme.border_width)
             .size(Length::Fixed(win_w), Length::Fixed(win_h));
 
         let card_content = container(
-            column![
-                input_row,
-                list_container,
-                bottom_footer,
-            ]
-            .spacing(12)
-            .width(Length::Fill)
-            .height(Length::Fill),
+            column![input_row, list_container, bottom_footer,]
+                .spacing(12)
+                .width(Length::Fill)
+                .height(Length::Fill),
         )
         .padding(Padding {
             top: pad_top,
@@ -1092,16 +1481,9 @@ impl AppLauncher {
 
         let card = Stack::new().push(card_bg.view()).push(card_content);
 
-        let backdrop = button(container(column![]).width(Length::Fill).height(Length::Fill))
-            .on_press(LauncherMessage::Dismiss)
-            .style(|_t, _s| button::Style {
-                background: Some(iced::Background::Color(Color::from_rgba8(0, 0, 0, 0.65))),
-                ..Default::default()
-            });
-
-        Stack::new()
-            .push(backdrop)
-            .push(container(card).center_x(Length::Fill).center_y(Length::Fill))
+        container(card)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
             .into()
     }
 }
