@@ -14,7 +14,7 @@ use crate::{
     proxy::IcedProxy,
     settings::Settings,
 };
-use futures::{FutureExt, StreamExt, future::LocalBoxFuture};
+use futures::{FutureExt, future::LocalBoxFuture};
 #[cfg(not(all(feature = "linux-theme-detection", target_os = "linux")))]
 use iced::theme::Mode;
 use iced::{

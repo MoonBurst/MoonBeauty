@@ -186,12 +186,34 @@ fn app_style(_state: &MoonBeautyShellApp, _theme: &iced::Theme) -> iced::theme::
 
 pub fn main() -> Result<(), iced_layershell::Error> {
     TM0.set(std::time::Instant::now()).ok();
-    eprintln!("[startup-m] process+0ms: entered main");
     let args: Vec<String> = std::env::args().collect();
 
     // ── Lock auth test mode ──
     if args.iter().any(|a| a == "--test-lock-auth") {
         moon_beauty_shell::overlays::lockscreen::LockCoordinator::run_auth_test();
+    }
+
+    // ── Email connection test (one-shot diagnostic) ──
+    if args.iter().any(|a| a == "--test-email") {
+        let rt = tokio::runtime::Runtime::new().expect("tokio rt");
+        rt.block_on(async {
+            match moon_beauty_shell::libraries::backend::email_client::test_connection().await {
+                Ok((imap, smtp, report)) => {
+                    println!("{}", report);
+                    if imap && smtp {
+                        println!("\n✅ both imap and smtp OK");
+                        std::process::exit(0);
+                    } else {
+                        println!("\n❌ imap={} smtp={}", imap, smtp);
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("test failed: {}", e);
+                    std::process::exit(2);
+                }
+            }
+        });
     }
 
     // ── Multi-monitor lock coordinator (parent mode) ──
@@ -558,9 +580,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         "[main-v225] standalone_target={:?} is_notif={}",
         standalone_target, is_notif_surface
     );
-    eprintln!("[startup-m] process+{}ms: after arg parsing", crate::TM0.get().map(|t| t.elapsed().as_millis()).unwrap_or(0));
     let settings = ShellSettings::load();
-    eprintln!("[startup-m] process+{}ms: after ShellSettings::load", crate::TM0.get().map(|t| t.elapsed().as_millis()).unwrap_or(0));
 
     if !is_notif_surface && standalone_target.is_none() {
         let _ = std::process::Command::new("pkill")
@@ -617,7 +637,6 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             std::env::var("MBS_OUTPUT")
         );
     }
-    eprintln!("[startup-m] process+{}ms: after resolved_output (swaymsg)", crate::TM0.get().map(|t| t.elapsed().as_millis()).unwrap_or(0));
     let binded_output_name = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
 
     if is_notif_surface {
@@ -759,7 +778,6 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         layer_settings,
         ..Default::default()
     });
-    eprintln!("[startup-m] process+{}ms: before app.run()", crate::TM0.get().map(|t| t.elapsed().as_millis()).unwrap_or(0));
     _app.run()
 }
 
