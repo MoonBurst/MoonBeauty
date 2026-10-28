@@ -48,6 +48,7 @@ fn watermark_text(text: &str) -> String {
 
 /// Add the watermark. Matches QuickshotEngine.lua's apply_watermark exactly:
 ///
+/// ```text
 ///     convert raw.png \
 ///       ( -size 240x220 xc:none -fill "rgba(100,0,255,0.008)" \
 ///         -font Liberation-Sans-Bold -pointsize 20 -gravity Center \
@@ -56,6 +57,7 @@ fn watermark_text(text: &str) -> String {
 ///       ( +clone -tile mpr:text -draw "color 0,0 reset" ) \
 ///       -compose Over -composite \
 ///       -define png:compression-level=1 out.png
+/// ```
 pub fn add_plate_watermark(bytes: &[u8], name: &str) -> Result<Vec<u8>, String> {
     let bin = magick_or_convert().ok_or("ImageMagick not installed")?;
 
@@ -144,10 +146,12 @@ pub fn add_plate_watermark(bytes: &[u8], name: &str) -> Result<Vec<u8>, String> 
 ///
 /// Exact port of QuickshotEngine.lua's C.reveal():
 ///
+/// ```text
 ///     magick crop.png -channel B -separate \
 ///       ( +clone -blur 0x2 ) \
 ///       -compose Subtract -composite \
 ///       -auto-level -define png:compression-level=1 out.png
+/// ```
 ///
 /// The plate is purple (100, 0, 255) at 0.008 alpha → ~2 units of blue
 /// offset per tile pixel. The blur removes low-frequency background;
