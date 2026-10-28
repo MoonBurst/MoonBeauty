@@ -432,6 +432,11 @@ pub struct ShellSettings {
     pub overlay_angle: u32,
     #[serde(default)]
     pub attachment_download_dir: String,
+
+    /// Emails from a single sender that trigger automatic folder creation.
+    /// 0 disables auto-sort entirely.
+    #[serde(default = "default_email_auto_sort_threshold", alias = "emailAutoSortThreshold")]
+    pub email_auto_sort_threshold: usize,
 }
 
 fn default_bar_height() -> u32 {
@@ -576,6 +581,10 @@ fn default_excluded() -> String {
 fn default_alarm_sound_duration() -> u32 {
     5
 }
+fn default_email_auto_sort_threshold() -> usize {
+    10
+}
+
 fn default_alarm_sound_volume() -> u32 {
     100
 }
@@ -710,6 +719,7 @@ impl Default for ShellSettings {
             palette: Base16Palette::default(),
             tts_command: None,
             attachment_download_dir: String::new(),
+            email_auto_sort_threshold: default_email_auto_sort_threshold(),
             overlay_cut: default_overlay_cut(),
             overlay_angle: default_overlay_angle(),
         }

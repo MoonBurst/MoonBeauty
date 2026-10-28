@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod clock;
 pub mod email_client;
+pub mod local_sort;
 pub mod mpris;
 pub mod system;
 

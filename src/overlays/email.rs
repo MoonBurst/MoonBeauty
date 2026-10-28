@@ -15,8 +15,9 @@ pub const COMPOSE_MANUAL_ATTACH_ID: &str = "compose_manual_attach";
 pub enum EmailMessage {
     SelectFolder(String),
     SelectMail(String),
-    EnvelopesLoaded(Vec<crate::libraries::backend::email_client::NativeEnvelope>),
-    NetworkEnvelopesLoaded(Vec<crate::libraries::backend::email_client::NativeEnvelope>),
+    EnvelopesLoaded(String, Vec<crate::libraries::backend::email_client::NativeEnvelope>),
+    NetworkEnvelopesLoaded(String, Vec<crate::libraries::backend::email_client::NativeEnvelope>),
+    FoldersLoaded(Vec<String>),
     SyncDone,
     MessageLoaded(crate::libraries::backend::email_client::ParsedEmail),
     Error(String),
@@ -66,6 +67,7 @@ pub enum EmailMessage {
     SubmitAddFolder,
     RemoveFolder(String),
     SaveAttachment(String),
+    CopyGmailFilter,
 }
 
 pub struct EmailOverlay {
@@ -111,8 +113,14 @@ impl EmailOverlay {
     /// Cheap constructor — skips config/contacts load. Used when the
     /// email overlay is not the target (spawning for another overlay).
     pub fn empty() -> Self {
+        let mut folders: Vec<String> = vec!["INBOX".into()];
+        for f in crate::libraries::backend::email_client::load_folders_cache() {
+            if !f.is_empty() && !folders.contains(&f) {
+                folders.push(f);
+            }
+        }
         Self {
-            folders: vec!["INBOX".into()],
+            folders,
             active_folder: "INBOX".into(),
             active_folder_idx: 0,
             envelopes: Vec::new(),
@@ -147,16 +155,22 @@ impl EmailOverlay {
 
     pub fn new() -> Self {
         let is_logging_in = !crate::libraries::backend::email_client::config_exists();
+        let mut folders: Vec<String> = vec![
+            "INBOX".into(),
+            "Unread".into(),
+            "Starred".into(),
+            "Sent".into(),
+            "Drafts".into(),
+            "Trash".into(),
+            "Spam".into(),
+        ];
+        for f in crate::libraries::backend::email_client::load_folders_cache() {
+            if !f.is_empty() && !folders.contains(&f) {
+                folders.push(f);
+            }
+        }
         Self {
-            folders: vec![
-                "INBOX".into(),
-                "Unread".into(),
-                "Starred".into(),
-                "Sent".into(),
-                "Drafts".into(),
-                "Trash".into(),
-                "Spam".into(),
-            ],
+            folders,
             active_folder: "INBOX".into(),
             active_folder_idx: 0,
             envelopes: Vec::new(),
@@ -217,12 +231,34 @@ impl EmailOverlay {
                 self.active_mail_id = Some(id);
                 self.parsed_email = None; // Show loading state
             }
-            EmailMessage::EnvelopesLoaded(envs) | EmailMessage::NetworkEnvelopesLoaded(envs) => {
+            EmailMessage::EnvelopesLoaded(_, envs) | EmailMessage::NetworkEnvelopesLoaded(_, envs) => {
                 self.envelopes = envs;
                 self.is_loading = false;
                 self.imap_error = None;
             }
             EmailMessage::SyncDone => {}
+            EmailMessage::FoldersLoaded(raw) => {
+                let aliases = ["INBOX", "Unread", "Starred", "Sent", "Drafts", "Trash", "Spam"];
+                let mut merged: Vec<String> = aliases.iter().map(|s| s.to_string()).collect();
+                let mut user_folders: Vec<String> = raw
+                    .into_iter()
+                    .filter(|f| !f.is_empty()
+                        && f != "INBOX"
+                        && !f.starts_with("[Gmail]")
+                        && !aliases.contains(&f.as_str()))
+                    .collect();
+                user_folders.sort();
+                user_folders.dedup();
+                merged.extend(user_folders.clone());
+                if let Some(idx) = merged.iter().position(|f| f == &self.active_folder) {
+                    self.active_folder_idx = idx;
+                } else {
+                    self.active_folder = "INBOX".into();
+                    self.active_folder_idx = 0;
+                }
+                crate::libraries::backend::email_client::save_folders_cache(&user_folders);
+                self.folders = merged;
+            }
             EmailMessage::MessageLoaded(b) => {
                 self.parsed_email = Some(b);
             }
@@ -350,6 +386,14 @@ impl EmailOverlay {
                 let name = self.new_folder_name.trim().to_string();
                 if !name.is_empty() && !self.folders.contains(&name) {
                     self.folders.push(name);
+                    let aliases = ["INBOX", "Unread", "Starred", "Sent", "Drafts", "Trash", "Spam"];
+                    let user_folders: Vec<String> = self
+                        .folders
+                        .iter()
+                        .filter(|f| !aliases.contains(&f.as_str()))
+                        .cloned()
+                        .collect();
+                    crate::libraries::backend::email_client::save_folders_cache(&user_folders);
                 }
                 self.is_adding_folder = false;
             }
@@ -485,6 +529,7 @@ impl EmailOverlay {
                 }
             }
             EmailMessage::DeleteSelected | EmailMessage::SaveContact => {}
+            EmailMessage::CopyGmailFilter => { /* handled in app/update.rs for clipboard access */ }
             EmailMessage::DraftSaved => {
                 self.imap_error =
                     Some("Draft saved to ~/.local/share/moon-beauty-shell/drafts.txt".into());
@@ -710,7 +755,20 @@ impl EmailOverlay {
                 .padding(8)
                 .width(Length::FillPortion(1));
 
-            folder_col = folder_col.push(row![add_btn, rem_btn].spacing(4));
+            let copy_filter_btn = button(
+                text("📋")
+                    .size(fs_main)
+                    .color(theme.background)
+            )
+            .on_press(EmailMessage::CopyGmailFilter)
+            .style(move |_t, _s| button::Style {
+                background: Some(iced::Background::Color(theme.text)),
+                ..Default::default()
+            })
+            .padding(8)
+            .width(Length::FillPortion(1));
+
+            folder_col = folder_col.push(row![add_btn, rem_btn, copy_filter_btn].spacing(4));
         }
 
         let folder_border = if self.focus_pane == 0 {

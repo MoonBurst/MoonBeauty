@@ -2,9 +2,6 @@ use super::*;
 
 impl MoonBeautyShellApp {
     pub fn new_app() -> (Self, Command<Message>) {
-        eprintln!("[startup-t] process+{}ms: entered new_app", crate::TM0.get().map(|t| t.elapsed().as_millis()).unwrap_or(0));
-        let _t0 = std::time::Instant::now();
-        eprintln!("[startup-t] t+0ms: entered new_app");
         let args: Vec<String> = std::env::args().collect();
         let standalone_target = detect_standalone_overlay(&args);
         if let Some(idx) = args.iter().position(|a| a == "--tray-context-menu") {
@@ -40,7 +37,6 @@ impl MoonBeautyShellApp {
         let is_notif_surface = detect_notif_surface(&args);
         let is_standalone = standalone_target.is_some();
         let settings = ShellSettings::load();
-        eprintln!("[startup-t] t+{}ms: ShellSettings::load done", _t0.elapsed().as_millis());
         let _tray_width_px = settings.tray_width as f32;
         eprintln!(
             "[startup] tray_width={} tray_timeout={}s",
@@ -101,9 +97,7 @@ impl MoonBeautyShellApp {
             None
         };
 
-        eprintln!("[startup-t] t+{}ms: theme + IPC thread done", _t0.elapsed().as_millis());
         let notif_screen_at_startup = settings.notif_screen_name.clone();
-        eprintln!("[startup-t] t+{}ms: pre-Self", _t0.elapsed().as_millis());
         let app = Self {
             settings_ui: if is_notif_surface
                 || (is_standalone && !matches!(standalone_target, Some(OverlayTarget::Settings)))
@@ -224,7 +218,6 @@ impl MoonBeautyShellApp {
             last_active_pending_written: None,
             last_lockscreen_check: std::time::Instant::now(),
         };
-        eprintln!("[startup-t] t+{}ms: Self constructed", _t0.elapsed().as_millis());
 
         // Bar-only init tasks. Overlays (--notes, --clipboard, --settings,
         // …) and the notif-surface don't render weather/tray/email — the
@@ -347,11 +340,20 @@ impl MoonBeautyShellApp {
             init_tasks.push(Command::done(Message::Email(EmailMessage::SetLoading)));
             init_tasks.push(Command::perform(
                 async {
+                    moon_beauty_shell::libraries::backend::email_client::fetch_folder_list().await
+                },
+                |res| match res {
+                    Ok(folders) => Message::Email(EmailMessage::FoldersLoaded(folders)),
+                    Err(_) => Message::Email(EmailMessage::SyncDone),
+                },
+            ));
+            init_tasks.push(Command::perform(
+                async {
                     moon_beauty_shell::libraries::backend::email_client::fetch_envelopes("INBOX")
                         .await
                 },
                 |res| match res {
-                    Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(envs)),
+                    Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded("INBOX".to_string(), envs)),
                     Err(e) => Message::Email(EmailMessage::Error(e)),
                 },
             ));
@@ -398,7 +400,6 @@ impl MoonBeautyShellApp {
             }
         }
 
-        eprintln!("[startup-t] t+{}ms: about to return", _t0.elapsed().as_millis());
         (app, Command::batch(init_tasks))
     }
 }

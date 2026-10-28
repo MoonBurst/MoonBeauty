@@ -1,7 +1,10 @@
 use lettre::message::Mailbox;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
+use async_imap::types::Fetch as AsyncFetch;
+use futures_util::TryStreamExt;
 use mail_parser::MimeHeaders;
+use tokio::net::TcpStream;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
@@ -103,6 +106,32 @@ pub fn resolve_password(cfg: &EmailConfig) -> String {
         pass = cfg.password.clone().unwrap_or_default();
     }
     pass.replace(" ", "").trim().to_string()
+}
+
+async fn connect_and_login(
+    host: &str,
+    port: u16,
+    user: &str,
+    pass: &str,
+) -> Result<async_imap::Session<async_native_tls::TlsStream<TcpStream>>, String> {
+    let tcp = TcpStream::connect((host, port))
+        .await
+        .map_err(|e| format!("TCP connect to {host}:{port}: {e}"))?;
+    let tls = async_native_tls::TlsConnector::new();
+    let tls_stream = tls
+        .connect(host, tcp)
+        .await
+        .map_err(|e| format!("TLS handshake with {host}: {e}"))?;
+    let mut client = async_imap::Client::new(tls_stream);
+    match client.read_response().await {
+        Some(Ok(_)) => {}
+        Some(Err(e)) => return Err(format!("IMAP greeting: {e}")),
+        None => return Err("IMAP server closed before greeting".into()),
+    }
+    client
+        .login(user, pass)
+        .await
+        .map_err(|(e, _client)| e.to_string())
 }
 
 fn find_sops() -> String {
@@ -405,133 +434,165 @@ pub async fn fetch_envelopes(folder: &str) -> Result<Vec<NativeEnvelope>, String
     Ok(envs)
 }
 
+/// One-shot IMAP + SMTP diagnostic. Called by `--test-email`.
+/// Returns (imap_ok, smtp_ok, human_report).
+pub async fn test_connection() -> Result<(bool, bool, String), String> {
+    let cfg = load_config();
+    let mut r = String::new();
+    r.push_str(&format!("config:  {}\n", config_path().display()));
+    r.push_str(&format!("  user:  {}\n", cfg.email));
+    r.push_str(&format!("  imap:  {}:{}\n", cfg.imap_host, cfg.imap_port));
+    r.push_str(&format!("  smtp:  {}:{}\n", cfg.smtp_host, cfg.smtp_port));
+    r.push_str(&format!("  sops key set: {}\n", cfg.sops_key.is_some()));
+
+    let pass = resolve_password(&cfg);
+    r.push_str(&format!("  password length: {}\n", pass.len()));
+    if pass.is_empty() {
+        r.push_str("\n⚠️  password empty — set app-password in email.json or password_cmd\n");
+        return Ok((false, false, r));
+    }
+
+    // IMAP: connect + login + select
+    r.push_str("\nimap:\n");
+    let imap_ok = match connect_and_login(&cfg.imap_host, cfg.imap_port, &cfg.email, &pass).await {
+        Ok(mut session) => {
+            r.push_str("  ✅ TCP+TLS+greeting+login\n");
+            match session.select("INBOX").await {
+                Ok(_) => {
+                    r.push_str("  ✅ INBOX select\n");
+                    let _ = session.logout().await;
+                    true
+                }
+                Err(e) => {
+                    r.push_str(&format!("  ❌ INBOX select: {}\n", e));
+                    false
+                }
+            }
+        }
+        Err(e) => {
+            r.push_str(&format!("  ❌ {}\n", e));
+            false
+        }
+    };
+
+    // SMTP: build only (no send — we don't want to spam)
+    r.push_str("\nsmtp:\n");
+    let smtp_ok = match lettre::AsyncSmtpTransport::<lettre::Tokio1Executor>::relay(&cfg.smtp_host) {
+        Ok(builder) => {
+            let _mailer: lettre::AsyncSmtpTransport<lettre::Tokio1Executor> = builder
+                .port(cfg.smtp_port)
+                .credentials(lettre::transport::smtp::authentication::Credentials::new(
+                    cfg.email.clone(), pass))
+                .build();
+            r.push_str("  ✅ builder configured (not sent)\n");
+            true
+        }
+        Err(e) => {
+            r.push_str(&format!("  ❌ builder: {}\n", e));
+            false
+        }
+    };
+
+    Ok((imap_ok, smtp_ok, r))
+}
+
 pub async fn fetch_from_network(folder: &str) -> Result<Vec<NativeEnvelope>, String> {
     if std::env::var_os("MBS_DEBUG").is_some() {
         eprintln!("[sync] fetch_from_network called for {}", folder);
     }
     let cfg = load_config();
-    let folder = folder.to_string();
-    let res = tokio::task::spawn_blocking(move || {
-        let pass = resolve_password(&cfg);
-        let tls = native_tls::TlsConnector::builder()
-            .build()
-            .map_err(|e| e.to_string())?;
-        let client = imap::connect(
-            (cfg.imap_host.as_str(), cfg.imap_port),
-            cfg.imap_host.as_str(),
-            &tls,
-        )
+    let pass = resolve_password(&cfg);
+    let mut session = connect_and_login(&cfg.imap_host, cfg.imap_port, &cfg.email, &pass).await?;
+    session
+        .select(map_gmail_folder(folder))
+        .await
         .map_err(|e| e.to_string())?;
-        let mut session = client
-            .login(&cfg.email, &pass)
-            .map_err(|e| e.0.to_string())?;
-        session
-            .select(map_gmail_folder(&folder))
-            .map_err(|e| e.to_string())?;
-        let fetches = session
-            .uid_fetch(
-                "1:*",
-                "(FLAGS BODY.PEEK[HEADER.FIELDS (SUBJECT FROM DATE)])",
-            )
-            .map_err(|e| e.to_string())?;
+    let fetches: Vec<AsyncFetch> = session
+        .uid_fetch("1:*", "(FLAGS BODY.PEEK[HEADER.FIELDS (SUBJECT FROM DATE)])")
+        .await
+        .map_err(|e| e.to_string())?
+        .try_collect()
+        .await
+        .map_err(|e| e.to_string())?;
 
-        let mut envs = Vec::new();
-        for fetch in fetches.iter().rev() {
-            let is_starred = fetch
-                .flags()
-                .iter()
-                .any(|f| matches!(f, imap::types::Flag::Flagged));
-            if let Some(header) = fetch.header() {
-                if let Some(parsed) = mail_parser::MessageParser::default().parse(header) {
-                    let subj = parsed.subject().unwrap_or("(No Subject)").to_string();
-                    let from_obj = parsed.from().and_then(|f| match f {
-                        mail_parser::Address::List(list) => list.iter().next(),
-                        mail_parser::Address::Group(groups) => {
-                            groups.first().and_then(|g| g.addresses.first())
-                        }
-                    });
-                    let from_name = from_obj
-                        .and_then(|a| a.name())
-                        .unwrap_or_default()
-                        .to_string();
-                    let from_email = from_obj.and_then(|a| a.address()).unwrap_or("").to_string();
-                    let uid_str = fetch
-                        .uid
-                        .map(|u| u.to_string())
-                        .unwrap_or_else(|| fetch.message.to_string());
-                    let is_read = fetch
-                        .flags()
-                        .iter()
-                        .any(|f| matches!(f, imap::types::Flag::Seen));
-                    let sender_display = if !from_name.trim().is_empty() {
-                        from_name
-                    } else if !from_email.trim().is_empty() {
-                        from_email.clone()
-                    } else {
-                        "Unknown".to_string()
-                    };
-                    envs.push(NativeEnvelope {
-                        id: uid_str,
-                        subject: subj,
-                        sender: sender_display,
-                        sender_email: from_email,
-                        is_starred,
-                        is_read,
-                    });
-                }
+    let mut envs = Vec::new();
+    for fetch in fetches.iter().rev() {
+        let is_starred = fetch
+            .flags()
+            .any(|f| matches!(f, async_imap::types::Flag::Flagged));
+        if let Some(header) = fetch.header() {
+            if let Some(parsed) = mail_parser::MessageParser::default().parse(header) {
+                let subj = parsed.subject().unwrap_or("(No Subject)").to_string();
+                let from_obj = parsed.from().and_then(|f| match f {
+                    mail_parser::Address::List(list) => list.iter().next(),
+                    mail_parser::Address::Group(groups) => {
+                        groups.first().and_then(|g| g.addresses.first())
+                    }
+                });
+                let from_name = from_obj
+                    .and_then(|a| a.name())
+                    .unwrap_or_default()
+                    .to_string();
+                let from_email = from_obj.and_then(|a| a.address()).unwrap_or("").to_string();
+                let uid_str = fetch
+                    .uid
+                    .map(|u| u.to_string())
+                    .unwrap_or_else(|| fetch.message.to_string());
+                let is_read = fetch
+                    .flags()
+                    .any(|f| matches!(f, async_imap::types::Flag::Seen));
+                let sender_display = if !from_name.trim().is_empty() {
+                    from_name
+                } else if !from_email.trim().is_empty() {
+                    from_email.clone()
+                } else {
+                    "Unknown".to_string()
+                };
+                envs.push(NativeEnvelope {
+                    id: uid_str,
+                    subject: subj,
+                    sender: sender_display,
+                    sender_email: from_email,
+                    is_starred,
+                    is_read,
+                });
             }
         }
-        let _ = session.logout();
-        let mut final_envs = envs;
-        if folder == "Unread" {
-            final_envs.retain(|e| !e.is_read);
-        }
-        Ok(final_envs)
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-    res
+    }
+    let _ = session.logout().await;
+    if folder == "Unread" {
+        envs.retain(|e| !e.is_read);
+    }
+    Ok(envs)
 }
 
 async fn fetch_raw_message(id: &str, folder: &str) -> Result<Vec<u8>, String> {
     let cfg = load_config();
-    let id = id.to_string();
-    let folder = folder.to_string();
-    tokio::task::spawn_blocking(move || {
-        let pass = resolve_password(&cfg);
-        let tls = native_tls::TlsConnector::builder().build().unwrap();
-        let client = imap::connect(
-            (cfg.imap_host.as_str(), cfg.imap_port),
-            cfg.imap_host.as_str(),
-            &tls,
-        )
+    let pass = resolve_password(&cfg);
+    let mut session = connect_and_login(&cfg.imap_host, cfg.imap_port, &cfg.email, &pass).await?;
+    session
+        .select(map_gmail_folder(folder))
+        .await
         .map_err(|e| e.to_string())?;
-        let mut session = client
-            .login(&cfg.email, &pass)
-            .map_err(|e| e.0.to_string())?;
-        session
-            .select(map_gmail_folder(&folder))
-            .map_err(|e| e.to_string())?;
-        let fetches = session
-            .uid_fetch(&id, "(BODY.PEEK[])")
-            .map_err(|e| e.to_string())?;
-        if let Some(fetch) = fetches.first() {
-            if let Some(body) = fetch.body() {
-                return Ok(body.to_vec());
-            }
+    let fetches: Vec<AsyncFetch> = session
+        .uid_fetch(id, "(BODY.PEEK[])")
+        .await
+        .map_err(|e| e.to_string())?
+        .try_collect()
+        .await
+        .map_err(|e| e.to_string())?;
+    if let Some(fetch) = fetches.first() {
+        if let Some(body) = fetch.body() {
+            return Ok(body.to_vec());
         }
-        Err("No body".into())
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    }
+    Err("No body".into())
 }
 
 pub async fn sync_bodies_background(folder: String) {
     let lock_path = dirs::runtime_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
         .join("mbs_email_sync.lock");
-
-    // Try to create the lock file. If it already exists, another process is syncing.
     let _lock_file = match std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -546,7 +607,6 @@ pub async fn sync_bodies_background(folder: String) {
         }
     };
 
-    // Ensure the lock is removed when we finish or panic
     struct LockGuard(std::path::PathBuf);
     impl Drop for LockGuard {
         fn drop(&mut self) {
@@ -567,51 +627,49 @@ pub async fn sync_bodies_background(folder: String) {
         );
     }
     let cfg = load_config();
-
-    tokio::task::spawn_blocking(move || {
-        if std::env::var_os("MBS_DEBUG").is_some() {
-            eprintln!("[sync] connecting to IMAP...");
+    let pass = resolve_password(&cfg);
+    let mut session = match connect_and_login(&cfg.imap_host, cfg.imap_port, &cfg.email, &pass).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[sync] connect failed: {e}");
+            return;
         }
-        let pass = resolve_password(&cfg);
-        let tls = native_tls::TlsConnector::builder().build().unwrap();
-        let client = imap::connect(
-            (cfg.imap_host.as_str(), cfg.imap_port),
-            cfg.imap_host.as_str(),
-            &tls,
-        )
-        .unwrap();
-        let mut session = client.login(&cfg.email, &pass).unwrap();
+    };
+    let imap_folder = map_gmail_folder(&folder);
+    if let Err(e) = session.select(&imap_folder).await {
+        eprintln!("[sync] select {} failed: {e}", imap_folder);
+        return;
+    }
 
-        let imap_folder = map_gmail_folder(&folder);
-        session.select(&imap_folder).unwrap();
-
-        let mut count = 0;
-        let total = envs.len();
-
-        for env in envs {
-            let cache_file = get_cache_dir(&folder).join(format!("{}.eml", env.id));
-            if !cache_file.exists() {
-                std::thread::sleep(std::time::Duration::from_secs(12));
-                if let Ok(fetches) = session.uid_fetch(&env.id, "(BODY.PEEK[])") {
-                    if let Some(fetch) = fetches.first() {
-                        if let Some(body) = fetch.body() {
-                            let _ = std::fs::write(&cache_file, body);
-                            count += 1;
-                            if std::env::var_os("MBS_DEBUG").is_some() {
-                                eprintln!("[sync] downloaded {}/{}: {}", count, total, env.id);
+    let mut count = 0;
+    let total = envs.len();
+    for env in envs {
+        let cache_file = get_cache_dir(&folder).join(format!("{}.eml", env.id));
+        if !cache_file.exists() {
+            tokio::time::sleep(std::time::Duration::from_secs(12)).await;
+            match session.uid_fetch(&env.id, "(BODY.PEEK[])").await {
+                Ok(stream) => match stream.try_collect::<Vec<_>>().await {
+                    Ok(fetches) => {
+                        if let Some(fetch) = fetches.first() {
+                            if let Some(body) = fetch.body() {
+                                let _ = tokio::fs::write(&cache_file, body).await;
+                                count += 1;
+                                if std::env::var_os("MBS_DEBUG").is_some() {
+                                    eprintln!("[sync] downloaded {}/{}: {}", count, total, env.id);
+                                }
                             }
                         }
                     }
-                }
+                    Err(e) => eprintln!("[sync] fetch {} failed: {e}", env.id),
+                },
+                Err(e) => eprintln!("[sync] uid_fetch {} failed: {e}", env.id),
             }
         }
-        let _ = session.logout();
-        if std::env::var_os("MBS_DEBUG").is_some() {
-            eprintln!("[sync] background sync finished for {}", folder);
-        }
-    })
-    .await
-    .unwrap_or_else(|e| eprintln!("[sync] task failed: {}", e));
+    }
+    let _ = session.logout().await;
+    if std::env::var_os("MBS_DEBUG").is_some() {
+        eprintln!("[sync] background sync finished for {}", folder);
+    }
 }
 
 pub async fn read_message(id: &str, folder: &str) -> ParsedEmail {
@@ -838,74 +896,54 @@ pub async fn toggle_star(id: &str, folder: &str, star: bool) -> Result<(), Strin
     }
 
     let cfg = load_config();
-    let id = id.to_string();
-    let folder = folder.to_string();
-    tokio::task::spawn_blocking(move || {
-        let pass = resolve_password(&cfg);
-        let tls = native_tls::TlsConnector::builder().build().unwrap();
-        let client = imap::connect(
-            (cfg.imap_host.as_str(), cfg.imap_port),
-            cfg.imap_host.as_str(),
-            &tls,
-        )
-        .unwrap();
-        let mut session = client
-            .login(&cfg.email, &pass)
-            .map_err(|e| e.0.to_string())?;
-        session
-            .select(map_gmail_folder(&folder))
-            .map_err(|e| e.to_string())?;
-        let op = if star {
-            "+FLAGS (\\Flagged)"
-        } else {
-            "-FLAGS (\\Flagged)"
-        };
-        session.uid_store(&id, op).map_err(|e| e.to_string())?;
-        let _ = session.logout();
-        Ok::<(), String>(())
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let pass = resolve_password(&cfg);
+    let mut session = connect_and_login(&cfg.imap_host, cfg.imap_port, &cfg.email, &pass).await?;
+    session
+        .select(map_gmail_folder(folder))
+        .await
+        .map_err(|e| e.to_string())?;
+    let op = if star { "+FLAGS (\\Flagged)" } else { "-FLAGS (\\Flagged)" };
+    let _: Vec<_> = session
+        .uid_store(id, op)
+        .await
+        .map_err(|e| e.to_string())?
+        .try_collect()
+        .await
+        .map_err(|e| e.to_string())?;
+    let _ = session.logout().await;
+    Ok(())
 }
 
 pub async fn move_to_trash(id: &str, folder: &str) -> Result<(), String> {
     let cfg = load_config();
-    let id = id.to_string();
-    let folder = folder.to_string();
-    tokio::task::spawn_blocking(move || {
-        let pass = resolve_password(&cfg);
-        let tls = native_tls::TlsConnector::builder().build().unwrap();
-        let client = imap::connect(
-            (cfg.imap_host.as_str(), cfg.imap_port),
-            cfg.imap_host.as_str(),
-            &tls,
-        )
-        .unwrap();
-        let mut session = client
-            .login(&cfg.email, &pass)
-            .map_err(|e| e.0.to_string())?;
-
-        let orig_folder = map_gmail_folder(&folder);
-        let trash_folder = map_gmail_folder("Trash");
-
-        session.select(&orig_folder).map_err(|e| e.to_string())?;
-
-        // Copy to Trash
-        session
-            .uid_copy(&id, &trash_folder)
-            .map_err(|e| e.to_string())?;
-
-        // Delete from Original
-        session
-            .uid_store(&id, "+FLAGS (\\Deleted)")
-            .map_err(|e| e.to_string())?;
-        session.expunge().map_err(|e| e.to_string())?;
-
-        let _ = session.logout();
-        Ok::<(), String>(())
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let pass = resolve_password(&cfg);
+    let mut session = connect_and_login(&cfg.imap_host, cfg.imap_port, &cfg.email, &pass).await?;
+    let orig_folder = map_gmail_folder(folder);
+    let trash_folder = map_gmail_folder("Trash");
+    session
+        .select(&orig_folder)
+        .await
+        .map_err(|e| e.to_string())?;
+    session
+        .uid_copy(id, &trash_folder)
+        .await
+        .map_err(|e| e.to_string())?;
+    let _: Vec<_> = session
+        .uid_store(id, "+FLAGS (\\Deleted)")
+        .await
+        .map_err(|e| e.to_string())?
+        .try_collect()
+        .await
+        .map_err(|e| e.to_string())?;
+    let _: Vec<_> = session
+        .expunge()
+        .await
+        .map_err(|e| e.to_string())?
+        .try_collect()
+        .await
+        .map_err(|e| e.to_string())?;
+    let _ = session.logout().await;
+    Ok(())
 }
 
 pub async fn delete_message(id: &str, folder: &str) -> Result<(), String> {
@@ -914,32 +952,73 @@ pub async fn delete_message(id: &str, folder: &str) -> Result<(), String> {
     save_index(folder, &envs);
 
     let cfg = load_config();
-    let id = id.to_string();
-    let folder = folder.to_string();
-    tokio::task::spawn_blocking(move || {
-        let pass = resolve_password(&cfg);
-        let tls = native_tls::TlsConnector::builder().build().unwrap();
-        let client = imap::connect(
-            (cfg.imap_host.as_str(), cfg.imap_port),
-            cfg.imap_host.as_str(),
-            &tls,
-        )
-        .unwrap();
-        let mut session = client
-            .login(&cfg.email, &pass)
-            .map_err(|e| e.0.to_string())?;
-        session
-            .select(map_gmail_folder(&folder))
-            .map_err(|e| e.to_string())?;
-        session
-            .uid_store(&id, "+FLAGS (\\Deleted)")
-            .map_err(|e| e.to_string())?;
-        session.expunge().map_err(|e| e.to_string())?;
-        let _ = session.logout();
-        Ok::<(), String>(())
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let pass = resolve_password(&cfg);
+    let mut session = connect_and_login(&cfg.imap_host, cfg.imap_port, &cfg.email, &pass).await?;
+    session
+        .select(map_gmail_folder(folder))
+        .await
+        .map_err(|e| e.to_string())?;
+    let _: Vec<_> = session
+        .uid_store(id, "+FLAGS (\\Deleted)")
+        .await
+        .map_err(|e| e.to_string())?
+        .try_collect()
+        .await
+        .map_err(|e| e.to_string())?;
+    let _: Vec<_> = session
+        .expunge()
+        .await
+        .map_err(|e| e.to_string())?
+        .try_collect()
+        .await
+        .map_err(|e| e.to_string())?;
+    let _ = session.logout().await;
+    Ok(())
+}
+
+pub async fn fetch_folder_list() -> Result<Vec<String>, String> {
+    let cfg = load_config();
+    let pass = resolve_password(&cfg);
+    let mut session = connect_and_login(&cfg.imap_host, cfg.imap_port, &cfg.email, &pass).await?;
+    let stream = session.list(Some(""), Some("*")).await.map_err(|e| e.to_string())?;
+    let names: Vec<_> = stream.try_collect().await.map_err(|e| e.to_string())?;
+    let mut folders = Vec::new();
+    for name in names {
+        let n = name.name();
+        if n.is_empty() || n == "INBOX" || n.starts_with("[Gmail]") {
+            continue;
+        }
+        folders.push(n.to_string());
+    }
+    let _ = session.logout().await;
+    folders.sort();
+    folders.dedup();
+    Ok(folders)
+}
+
+pub fn folders_cache_path() -> std::path::PathBuf {
+    let base = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+    base.join("moon-beauty-shell/email_cache/folders.json")
+}
+
+pub fn load_folders_cache() -> Vec<String> {
+    let path = folders_cache_path();
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        if let Ok(list) = serde_json::from_str::<Vec<String>>(&content) {
+            return list;
+        }
+    }
+    Vec::new()
+}
+
+pub fn save_folders_cache(folders: &[String]) {
+    let path = folders_cache_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(folders) {
+        let _ = std::fs::write(path, json);
+    }
 }
 
 pub fn load_contacts() -> Vec<String> {

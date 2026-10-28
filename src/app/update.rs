@@ -1818,14 +1818,16 @@ impl MoonBeautyShellApp {
                 }
                 EmailMessage::SelectFolder(f) => {
                     self.email.update(EmailMessage::SelectFolder(f.clone()));
+                    let f_fetch = f.clone();
+                    let f_resp = f;
                     return Command::batch(vec![
                         Command::done(Message::Email(EmailMessage::SetLoading)),
                         Command::perform(
                             async move {
-                                moon_beauty_shell::libraries::backend::email_client::fetch_envelopes(&f).await
+                                moon_beauty_shell::libraries::backend::email_client::fetch_envelopes(&f_fetch).await
                             },
-                            |res| match res {
-                                Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(envs)),
+                            move |res| match res {
+                                Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(f_resp, envs)),
                                 Err(e) => Message::Email(EmailMessage::Error(e)),
                             },
                         ),
@@ -1833,11 +1835,17 @@ impl MoonBeautyShellApp {
                 }
                 EmailMessage::SelectMail(id) => {
                     let folder = self.email.active_folder.clone();
+                    // If we're in a local folder, the email actually lives
+                    // in the Gmail folder it was assigned from (usually INBOX).
+                    let source = moon_beauty_shell::libraries::backend::local_sort::source_folder_for(
+                        &id, &folder,
+                    )
+                    .unwrap_or_else(|| folder.clone());
                     self.email.update(EmailMessage::SelectMail(id.clone()));
                     return Command::perform(
                         async move {
                             moon_beauty_shell::libraries::backend::email_client::read_message(
-                                &id, &folder,
+                                &id, &source,
                             )
                             .await
                         },
@@ -1899,30 +1907,47 @@ impl MoonBeautyShellApp {
                         },
                     );
                 }
-                EmailMessage::EnvelopesLoaded(envs) => {
-                    self.email.update(EmailMessage::EnvelopesLoaded(envs));
-                    let folder = self.email.active_folder.clone();
+                EmailMessage::EnvelopesLoaded(folder, envs) => {
+                    if folder == self.email.active_folder {
+                        self.email.update(EmailMessage::EnvelopesLoaded(folder.clone(), envs));
+                    }
+                    let folder_for_fetch = folder.clone();
+                    let folder_for_resp = folder;
                     return Command::perform(
                         async move {
                             moon_beauty_shell::libraries::backend::email_client::fetch_from_network(
-                                &folder,
+                                &folder_for_fetch,
                             )
                             .await
                         },
-                        |res| match res {
-                            Ok(envs) => Message::Email(EmailMessage::NetworkEnvelopesLoaded(envs)),
+                        move |res| match res {
+                            Ok(envs) => Message::Email(EmailMessage::NetworkEnvelopesLoaded(folder_for_resp, envs)),
                             Err(_) => Message::Email(EmailMessage::SyncDone),
                         },
                     );
                 }
-                EmailMessage::NetworkEnvelopesLoaded(envs) => {
-                    self.email
-                        .update(EmailMessage::EnvelopesLoaded(envs.clone()));
+                EmailMessage::NetworkEnvelopesLoaded(folder, envs) => {
+                    // Local auto-sort only on INBOX (where the sort rules apply)
+                    if folder == "INBOX" && self.settings.email_auto_sort_threshold > 0 {
+                        let threshold = self.settings.email_auto_sort_threshold;
+                        moon_beauty_shell::libraries::backend::local_sort::auto_sort(
+                            &envs, &folder, threshold,
+                        );
+                    }
+                    if std::env::var_os("MBS_DEBUG").is_some() {
+                        eprintln!(
+                            "[sync] NetworkEnvelopesLoaded folder={:?} count={} active={:?}",
+                            folder, envs.len(), self.email.active_folder
+                        );
+                    }
                     moon_beauty_shell::libraries::backend::email_client::save_index(
-                        &self.email.active_folder,
+                        &folder,
                         &envs,
                     );
-                    let folder = self.email.active_folder.clone();
+                    if folder == self.email.active_folder {
+                        self.email
+                            .update(EmailMessage::EnvelopesLoaded(folder.clone(), envs.clone()));
+                    }
                     return Command::perform(
                         async move {
                             moon_beauty_shell::libraries::backend::email_client::sync_bodies_background(folder).await
@@ -1950,15 +1975,17 @@ impl MoonBeautyShellApp {
                         self.email.update(msg);
                         if self.email.active_folder != old_folder {
                             let f = self.email.active_folder.clone();
+                            let f_fetch = f.clone();
+                            let f_resp = f;
                             return Command::batch(vec![
                                 Command::done(Message::Email(EmailMessage::SetLoading)),
                                 Command::perform(
                                     async move {
-                                        moon_beauty_shell::libraries::backend::email_client::fetch_envelopes(&f).await
+                                        moon_beauty_shell::libraries::backend::email_client::fetch_envelopes(&f_fetch).await
                                     },
-                                    |res| match res {
+                                    move |res| match res {
                                         Ok(envs) => {
-                                            Message::Email(EmailMessage::EnvelopesLoaded(envs))
+                                            Message::Email(EmailMessage::EnvelopesLoaded(f_resp, envs))
                                         }
                                         Err(e) => Message::Email(EmailMessage::Error(e)),
                                     },
@@ -2056,6 +2083,42 @@ impl MoonBeautyShellApp {
                         }
                     }
                 }
+                EmailMessage::CopyGmailFilter => {
+                    let folder = self.email.active_folder.clone();
+                    if let Some(filter_text) = moon_beauty_shell::libraries::backend::local_sort::gmail_filter_text_for(&folder) {
+                        return Command::perform(
+                            async move {
+                                if let Ok(mut child) = tokio::process::Command::new("wl-copy")
+                                    .stdin(std::process::Stdio::piped())
+                                    .spawn()
+                                {
+                                    use tokio::io::AsyncWriteExt;
+                                    if let Some(mut stdin) = child.stdin.take() {
+                                        let _ = stdin.write_all(filter_text.as_bytes()).await;
+                                    }
+                                    let _ = child.wait().await;
+                                }
+                                let _ = tokio::process::Command::new("notify-send")
+                                    .args([
+                                        "-a", "Email",
+                                        "Gmail Filter Copied",
+                                        "Paste into Gmail Settings → Filters → Create new filter"
+                                    ])
+                                    .spawn();
+                            },
+                            |_| Message::Email(EmailMessage::SyncDone),
+                        );
+                    } else {
+                        // Not a local folder — inform the user
+                        let _ = std::process::Command::new("notify-send")
+                            .args([
+                                "-a", "Email",
+                                "No filter available",
+                                "Select a locally-sorted folder (like Steam (local)) first"
+                            ])
+                            .spawn();
+                    }
+                }
                 EmailMessage::SaveContact => {
                     if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
                         let email = mail.sender_email.clone();
@@ -2145,7 +2208,7 @@ impl MoonBeautyShellApp {
                                     },
                                     |res| match res {
                                         Ok(envs) => {
-                                            Message::Email(EmailMessage::EnvelopesLoaded(envs))
+                                            Message::Email(EmailMessage::EnvelopesLoaded("INBOX".to_string(), envs))
                                         }
                                         Err(e) => Message::Email(EmailMessage::Error(e)),
                                     },
