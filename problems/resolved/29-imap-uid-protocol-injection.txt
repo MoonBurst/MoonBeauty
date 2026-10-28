@@ -1,0 +1,22 @@
+29 HIGH IMAP uid protocol injection (sibling of finding 28)
+
+   file: src/libraries/backend/email_client.rs
+         ::fetch_raw_message, ::toggle_star, ::move_to_trash,
+         ::move_to_spam, ::mark_not_spam, ::delete_message
+         ::load_index (producer filter)
+
+   why:  async-imap's `uid_fetch`, `uid_store`, `uid_copy` embed the
+         uid verbatim in the wire command. A crafted `id` from a
+         poisoned index.json (hand-edited, or written by a build
+         predating this fix) can inject:
+             uid_fetch("1\r\nDELETE INBOX", "(BODY.PEEK[])")
+         Same severity as finding 28 (folder argument), same class of
+         exploit — arbitrary IMAP command execution on next open.
+
+   fix:  is_safe_imap_uid() — non-empty, ≤20 bytes, all ASCII digits.
+         Server-assigned uids are u32 (1–10 digits). Defense-in-depth:
+           1. load_index: retain-only filter on read
+           2. Every uid_* caller: early Err before session call
+
+   residual:  uid_expunge has no id (operates on the whole SELECT'd
+              folder). No injection surface there.

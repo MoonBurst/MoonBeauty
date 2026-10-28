@@ -1,0 +1,27 @@
+28 HIGH IMAP folder name protocol injection
+
+   file: src/libraries/backend/email_client.rs
+         ::fetch_folder_list (producer / LIST response)
+         ::fetch_from_network, ::fetch_raw_message (sinks / SELECT)
+
+   why:  async_imap::Session::select(folder) formats the folder name as
+         a quoted string in the SELECT command. IMAP quoted strings
+         cannot encode CR/LF. A hostile IMAP server returning a folder
+         name containing "\\r\\n" (e.g. `"FOO\\r\\nAPPEND INBOX ..."`)
+         breaks out of the SELECT and injects arbitrary IMAP commands.
+         Only requires the user to select the poisoned folder — which
+         the shell does automatically on INBOX→server-switch in some
+         code paths.
+
+         Not covered by findings 02/13: sanitize_folder_name targets
+         filesystem paths and permits control bytes (they're valid path
+         bytes). Different sink, different threat model.
+
+   fix:  is_safe_imap_folder() rejects: empty, >512 bytes, any C0 control
+         char, DEL. Applied at 3 sinks:
+           1. fetch_folder_list: filter LIST response before push
+           2. fetch_from_network: early Err before session.select
+           3. fetch_raw_message: early Err before session.select
+
+   residual:  ids passed to uid_fetch are numeric strings derived from
+              server uids (u32 → to_string); no injection surface there.

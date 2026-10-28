@@ -1,0 +1,25 @@
+30 HIGH Lockscreen Submit rate-limit / PAM account-lockout DoS
+
+   file: src/overlays/lockscreen/coordinator.rs (Submit handler)
+
+   why:  A hostile same-user process (sway exec, browser extension,
+         user unit, any .desktop Exec=) can open the coordinator socket
+         at $XDG_RUNTIME_DIR/moon-beauty-lock-<pid>.sock (mode 0600,
+         same-user-only) and send 3× (Key("x"), Submit). Each triggers
+         sudo -S -k -v → 3 PAM failures → default pam_faillock
+         (deny=3, unlock_time=600) locks the legitimate user out of
+         sudo for 10 minutes. Even without faillock, the attacker
+         saturates PAM sockets and tokio task slots.
+
+   fix:  In-memory rate limit with exponential backoff:
+           fail_streak:  u32, incremented on auth failure
+           backoff:      min(1s × 2^fail_streak, 16s)
+           empty buffer: rejected BEFORE streak increment (no
+                         free streak inflation)
+           per-sink:     global (not per-peer) — attacker can't
+                         bypass by reconnecting with a fresh peer id
+
+   residual:  Attacker who can kill the coordinator can bypass the rate
+              limit by forcing a respawn with fail_streak=0. But that
+              same attacker has already unlocked the screen (killing
+              the coordinator = killing the lock). Orthogonal risk.

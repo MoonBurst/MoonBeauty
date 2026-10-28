@@ -47,13 +47,41 @@ fn resolve_icon_name(name: &str) -> Option<String> {
     if name.is_empty() {
         return None;
     }
-    // Absolute path? Trust it or fail.
+    // Absolute path: only accept under a known icon root (finding 08).
     if name.starts_with('/') {
+        let known = [
+            "/usr/share/icons/", "/usr/share/pixmaps/",
+            "/usr/local/share/icons/", "/usr/local/share/pixmaps/",
+            "/run/current-system/sw/share/icons/",
+            "/run/current-system/sw/share/pixmaps/",
+            "/var/lib/flatpak/exports/share/icons/",
+            "/var/lib/flatpak/exports/share/pixmaps/",
+            "/var/lib/snapd/desktop/icons/",
+        ];
+        let mut ok = known.iter().any(|p| name.starts_with(p));
+        if !ok {
+            if let Some(home) = dirs::home_dir() {
+                let h = home.to_string_lossy();
+                ok = name.starts_with(&format!("{}/.local/share/icons/", h))
+                    || name.starts_with(&format!("{}/.nix-profile/share/icons/", h))
+                    || name.starts_with(&format!(
+                        "{}/.local/share/flatpak/exports/share/icons/", h));
+            }
+        }
+        if !ok {
+            crate::dbg_log!("[notif-icon] reject absolute icon path outside known roots: {:?}", name);
+            return None;
+        }
         return if std::path::Path::new(name).exists() {
             Some(name.to_string())
         } else {
             None
         };
+    }
+    // Relative name: reject separators and traversal.
+    if name.contains("..") || name.contains('/') || name.contains('\\') {
+        crate::dbg_log!("[notif-icon] reject unsafe icon name: {:?}", name);
+        return None;
     }
     let home = dirs::home_dir()?;
     let user = std::env::var("USER").unwrap_or_else(|_| "user".into());
@@ -145,6 +173,15 @@ fn resolve_icon_name(name: &str) -> Option<String> {
 fn resolve_desktop_icon(entry: &str) -> Option<String> {
     let clean = entry.trim_end_matches(".desktop").trim();
     if clean.is_empty() {
+        return None;
+    }
+    // Reject traversal and absolute paths in desktop_entry hint (finding 08).
+    if clean.starts_with('/')
+        || clean.contains("..")
+        || clean.contains('/')
+        || clean.contains('\\')
+    {
+        crate::dbg_log!("[notif-icon] reject unsafe desktop_entry: {:?}", entry);
         return None;
     }
 
@@ -439,8 +476,10 @@ impl NotificationOverlay {
     }
 
     fn history_path() -> PathBuf {
-        let base = dirs::cache_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-        base.join("moon_notification_history.json")
+        // Finding 23: OTP codes / private URLs must not land in world-readable /tmp.
+        dirs::cache_dir()
+            .expect("XDG_CACHE_HOME or HOME must be set; refusing to persist notification history to /tmp")
+            .join("moon_notification_history.json")
     }
 
     /// Compute the pixel offset needed to scroll the given history
@@ -1704,8 +1743,7 @@ fn rand_id() -> u32 {
 }
 
 pub fn dnd_flag_path() -> PathBuf {
-    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(dir).join("moon-beauty-shell-dnd")
+    crate::libraries::process::mbs_runtime_dir().join("moon-beauty-shell-dnd")
 }
 
 pub fn dnd_active() -> bool {
@@ -1719,7 +1757,7 @@ pub fn toggle_dnd() -> bool {
         eprintln!("[dnd] flag file removed: {:?}", p);
         false
     } else {
-        let _ = fs::write(&p, b"1");
+        let _ = crate::libraries::process::private_write_file(&p, b"1");
         eprintln!("[dnd] flag file created: {:?}", p);
         true
     };
@@ -1727,8 +1765,7 @@ pub fn toggle_dnd() -> bool {
 }
 
 pub fn held_notifs_path() -> PathBuf {
-    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(dir).join("moon-beauty-shell-held-notifs.json")
+    crate::libraries::process::mbs_runtime_dir().join("moon-beauty-shell-held-notifs.json")
 }
 
 pub fn load_held_notifs() -> Vec<NotificationToast> {
@@ -1749,7 +1786,7 @@ pub fn save_held_notifs(toasts: &[NotificationToast]) {
         let _ = fs::remove_file(&p);
     } else if let Ok(json) = serde_json::to_string(toasts) {
         let tmp = p.with_extension("tmp");
-        if fs::write(&tmp, json).is_ok() {
+        if crate::libraries::process::private_write_file(&tmp, json.as_bytes()).is_ok() {
             let _ = fs::rename(tmp, p);
         }
     }
@@ -1800,15 +1837,14 @@ pub fn take_held_notifs() -> Vec<NotificationToast> {
 // (plus a heartbeat), and the bar reads it with a short cache.
 
 pub fn active_count_path() -> PathBuf {
-    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(dir).join("moon-beauty-shell-active-count")
+    crate::libraries::process::mbs_runtime_dir().join("moon-beauty-shell-active-count")
 }
 
 /// Notif-surface calls this on any change to active+pending count.
 pub fn write_active_count(count: usize) {
     let p = active_count_path();
     let tmp = p.with_extension("tmp");
-    if fs::write(&tmp, count.to_string()).is_ok() {
+    if crate::libraries::process::private_write_file(&tmp, count.to_string().as_bytes()).is_ok() {
         let _ = fs::rename(tmp, p);
     }
 }

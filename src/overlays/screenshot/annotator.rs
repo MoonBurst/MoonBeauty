@@ -1323,7 +1323,16 @@ pub fn compose_annotations(
         }
     }
     args.push(out.to_str().unwrap_or("").into());
+    // Finding 07: bound ImageMagick resource use. Input is a PNG, but
+    // a crafted PNG can encode decompression bombs that exhaust memory.
     let ok = std::process::Command::new(bin)
+        .args([
+            "-limit", "memory", "512MiB",
+            "-limit", "map", "1GiB",
+            "-limit", "disk", "2GiB",
+            "-limit", "width", "16384",
+            "-limit", "height", "16384",
+        ])
         .args(&args)
         .status()
         .map(|s| s.success())
@@ -1351,7 +1360,8 @@ pub fn save_annotated_image(
     let composed_bytes = if annotations.is_empty() {
         std::fs::read(&source).map_err(|e| format!("read source: {e}"))?
     } else {
-        let composed_tmp = std::env::temp_dir().join(format!("mbs-composed-{}.png", stamp));
+        let composed_tmp = crate::libraries::process::mbs_subdir("mbs-annotator")
+            .join(format!("mbs-composed-{}.png", stamp));
         compose_annotations(&source, &annotations, &composed_tmp)?;
         let bytes = std::fs::read(&composed_tmp).map_err(|e| format!("read composed: {e}"))?;
         let _ = std::fs::remove_file(&composed_tmp);
@@ -1504,9 +1514,7 @@ pub fn slurp_region() -> Option<String> {
 }
 
 pub fn grim_capture(region: Option<&str>) -> Result<PathBuf, String> {
-    let rt = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-    let dir = PathBuf::from(rt).join("mbs-annotator");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir: {e}"))?;
+    let dir = crate::libraries::process::mbs_subdir("mbs-annotator");
     let path = dir.join(format!(
         "shot_{}.png",
         chrono::Local::now().format("%Y%m%d_%H%M%S")

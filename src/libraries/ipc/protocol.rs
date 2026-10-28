@@ -140,9 +140,14 @@ impl IpcServer {
     pub async fn accept(
         &self,
     ) -> Result<(UnixStream, IpcCommand), Box<dyn std::error::Error + Send + Sync>> {
+        // Finding 37: cap read at 4 MB.
+        const MAX_MSG: u64 = 4 * 1024 * 1024;
         let (mut stream, _) = self.listener.accept().await?;
         let mut buffer = Vec::new();
-        stream.read_to_end(&mut buffer).await?;
+        (&mut stream)
+            .take(MAX_MSG)
+            .read_to_end(&mut buffer)
+            .await?;
         let command: IpcCommand = serde_json::from_slice(&buffer)?;
         Ok((stream, command))
     }

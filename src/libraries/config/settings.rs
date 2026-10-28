@@ -153,21 +153,27 @@ fn default_profile_color() -> String {
 }
 
 pub fn find_friend_profiles_path() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-    let candidates = [
-        PathBuf::from("resources/friend_profiles.json"),
-        home.join("projects/Moon-Beauty-Shell/resources/friend_profiles.json"),
-        dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("/tmp"))
-            .join("moon-beauty-shell/resources/friend_profiles.json"),
-    ];
-
-    for path in &candidates {
-        if path.exists() {
-            return path.clone();
+    // Finding 20: XDG data only — cwd-relative candidates dropped.
+    let base = dirs::data_dir().expect(
+        "XDG_DATA_HOME or HOME must be set; refusing to load friend_profiles.json from cwd",
+    );
+    let target = base.join("moon-beauty-shell").join("friend_profiles.json");
+    // One-shot migration: only when target absent AND source parses as
+    // Vec<FriendProfile>. Rejects arbitrary files.
+    if !target.exists() {
+        let legacy = PathBuf::from("resources/friend_profiles.json");
+        if legacy.exists() {
+            if let Ok(content) = fs::read_to_string(&legacy) {
+                if serde_json::from_str::<Vec<FriendProfile>>(&content).is_ok() {
+                    if let Some(parent) = target.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    let _ = fs::write(&target, content);
+                }
+            }
         }
     }
-    PathBuf::from("resources/friend_profiles.json")
+    target
 }
 
 pub fn load_friend_profiles() -> Vec<FriendProfile> {
@@ -798,10 +804,12 @@ impl ShellSettings {
     }
 
     pub fn save(&self) -> Result<(), std::io::Error> {
-        eprintln!(
-            "[save] writing tooltip_sizes={:?} bar_monitor={:?}",
-            self.tooltip_sizes, self.bar_monitor
-        );
+        if std::env::var_os("MBS_SETTINGS_DEBUG").is_some() {
+            eprintln!(
+                "[save] writing tooltip_sizes={:?} bar_monitor={:?}",
+                self.tooltip_sizes, self.bar_monitor
+            );
+        }
         let path = Self::config_path();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -812,7 +820,11 @@ impl ShellSettings {
         fs::rename(tmp_path, &path)?;
 
         let _ = save_friend_profiles(&self.friend_profiles);
-        eprintln!("[save] OK -> {:?}", path);
+        // Finding 15: gate the completion log too (write line above is
+        // already gated by MBS_SETTINGS_DEBUG).
+        if std::env::var_os("MBS_SETTINGS_DEBUG").is_some() {
+            eprintln!("[save] OK -> {:?}", path);
+        }
         Ok(())
     }
 }

@@ -1,0 +1,14 @@
+16 LOW leftover debug scaffolding
+   file: src/app/subscription.rs::todo_sub
+           eprintln!("[todo-sub] key={:?} status={:?}", dbg_key, status);
+           Runs on every keypress in the todo overlay.
+         src/overlays/launcher.rs::LauncherMessage::SearchChanged
+           eprintln!("[launcher-input] {:?}", q);
+           plus a 5-line dump of the first 5 filtered entries per
+           keystroke.
+         src/app/view.rs::view - dead code
+           static ONCE: AtomicBool with an empty `if !ONCE.swap(...) {}`
+           body. Leftover from a "log first view" instrumentation.
+   why:  Debug scaffolding left in. Every keystroke in the todo or
+         launcher overlay generates 1-6 stderr lines.
+   fix:  Remove the eprintln!s. Delete the empty static ONCE block.

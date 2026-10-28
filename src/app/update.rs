@@ -28,7 +28,7 @@ impl MoonBeautyShellApp {
                 {
                     self.notif_screen_at_startup = self.settings.notif_screen_name.clone();
                     let _ = std::process::Command::new("pkill")
-                        .args(["-f", "--", "moon-beauty-shell --notif-surface"])
+                        .args(["-f", "--", "(^|/)moon-beauty-shell --notif-surface$"])
                         .status();
                     std::thread::sleep(std::time::Duration::from_millis(300));
                     let exe = resolve_exe();
@@ -83,9 +83,12 @@ impl MoonBeautyShellApp {
                                             notification_candidates(&app, entry.as_deref());
                                         if !is_app_focused(&matches) {
                                             let ok = focus_notification_app(&app, entry.as_deref());
-                                            eprintln!("[activate-latest] fallback app={:?} entry={:?} ok={}", app, entry, ok);
+                                            moon_beauty_shell::dbg_log!(
+                                                "[activate-latest] fallback app={:?} entry={:?} ok={}",
+                                                app, entry, ok
+                                            );
                                         } else {
-                                            eprintln!(
+                                            moon_beauty_shell::dbg_log!(
                                                 "[activate-latest] client self-focused app={:?}",
                                                 app
                                             );
@@ -318,7 +321,10 @@ impl MoonBeautyShellApp {
                 let mut sorted: Vec<_> = notified.into_iter().collect();
                 sorted.sort();
                 sorted.truncate(200);
-                let _ = std::fs::write(&dedup_path, sorted.join("\n"));
+                let _ = moon_beauty_shell::libraries::process::private_write_file(
+                    &dedup_path,
+                    sorted.join("\n").as_bytes(),
+                );
             }
             Message::EmailSynced => {}
             Message::TickWeather => {
@@ -451,10 +457,8 @@ impl MoonBeautyShellApp {
                     // same file-based command channel that --dismiss-notif
                     // already uses. Without this routing, DismissLatestNotif
                     // was a guaranteed no-op (Vec::first() on an empty Vec).
-                    let runtime = std::env::var("XDG_RUNTIME_DIR")
-                        .unwrap_or_else(|_| format!("/tmp/user-{}", std::process::id()));
-                    let cmd_path =
-                        std::path::PathBuf::from(runtime).join("moon-beauty-shell-notif-cmd");
+                    let cmd_path = moon_beauty_shell::libraries::process::mbs_runtime_dir()
+                        .join("moon-beauty-shell-notif-cmd");
                     match std::fs::write(&cmd_path, b"dismiss") {
                         Ok(_) => eprintln!("[ipc] DismissLatestNotif -> notif-surface"),
                         Err(e) => eprintln!("[ipc] DismissLatestNotif write failed: {e}"),
@@ -727,7 +731,7 @@ impl MoonBeautyShellApp {
                             // while paused to receive + hold. Only respawn if
                             // it died for some unrelated reason.
                             let running = std::process::Command::new("pgrep")
-                                .args(["-f", "--", "moon-beauty-shell --notif-surface"])
+                                .args(["-f", "--", "(^|/)moon-beauty-shell --notif-surface$"])
                                 .output()
                                 .map(|o| !o.stdout.is_empty())
                                 .unwrap_or(false);
@@ -810,17 +814,25 @@ impl MoonBeautyShellApp {
                                         .await
                                     {
                                         let json = serde_json::to_string(&items).unwrap();
-                                        let tmp_path = format!(
-                                            "/tmp/mbs-tray-menu-{}.json",
-                                            std::process::id()
+                                        let tmp_path = moon_beauty_shell::libraries::process::mbs_unique_tmp(
+                                            "mbs-tray-menu",
+                                            "json",
                                         );
-                                        std::fs::write(&tmp_path, json).unwrap();
+                                        if let Err(e) =
+                                            moon_beauty_shell::libraries::process::private_write_new(
+                                                &tmp_path,
+                                                json.as_bytes(),
+                                            )
+                                        {
+                                            eprintln!("[tray-menu] write failed: {e}");
+                                            return;
+                                        }
                                         let exe = resolve_exe();
                                         let h = (items.len() as u32 * 36).clamp(100, 600) + 40;
                                         let _ = std::process::Command::new(exe)
                                             .args([
                                                 "--tray-context-menu",
-                                                &tmp_path,
+                                                tmp_path.to_str().unwrap_or(""),
                                                 &item_clone.bus,
                                                 &menu_path,
                                                 "250",
@@ -1195,7 +1207,8 @@ impl MoonBeautyShellApp {
                         .map(|e| e.is_image)
                         .unwrap_or(false);
                     eprintln!("[ocr] entry found, is_image={}", is_img);
-                    let tmp_path = std::env::temp_dir().join(format!("mbs-ocr-{}.png", id));
+                    let tmp_path = moon_beauty_shell::libraries::process::mbs_subdir("mbs-clip")
+                        .join(format!("mbs-ocr-{}.png", id));
 
                     // Do OCR synchronously — it's fast (~1s) and we're about to close anyway
                     if let Ok(out) = std::process::Command::new("cliphist")
@@ -2119,6 +2132,65 @@ impl MoonBeautyShellApp {
                             .spawn();
                     }
                 }
+                EmailMessage::MarkSpam => {
+                    if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
+                        let id = mail.id.clone();
+                        let folder = self.email.active_folder.clone();
+                        self.email.envelopes.remove(self.email.selected_index);
+                        if self.email.selected_index >= self.email.envelopes.len()
+                            && !self.email.envelopes.is_empty()
+                        {
+                            self.email.selected_index = self.email.envelopes.len() - 1;
+                        }
+                        self.email.parsed_email = None;
+                        self.email.active_mail_id = None;
+                        moon_beauty_shell::libraries::backend::email_client::save_index(
+                            &folder,
+                            &self.email.envelopes,
+                        );
+                        return Command::perform(
+                            async move {
+                                moon_beauty_shell::libraries::backend::email_client::move_to_spam(
+                                    &id, &folder,
+                                )
+                                .await
+                            },
+                            |res| match res {
+                                Ok(_) => Message::Email(EmailMessage::SyncDone),
+                                Err(e) => Message::Email(EmailMessage::Error(e)),
+                            },
+                        );
+                    }
+                }
+                EmailMessage::MarkNotSpam => {
+                    if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
+                        let id = mail.id.clone();
+                        self.email.envelopes.remove(self.email.selected_index);
+                        if self.email.selected_index >= self.email.envelopes.len()
+                            && !self.email.envelopes.is_empty()
+                        {
+                            self.email.selected_index = self.email.envelopes.len() - 1;
+                        }
+                        self.email.parsed_email = None;
+                        self.email.active_mail_id = None;
+                        moon_beauty_shell::libraries::backend::email_client::save_index(
+                            "Spam",
+                            &self.email.envelopes,
+                        );
+                        return Command::perform(
+                            async move {
+                                moon_beauty_shell::libraries::backend::email_client::mark_not_spam(
+                                    &id,
+                                )
+                                .await
+                            },
+                            |res| match res {
+                                Ok(_) => Message::Email(EmailMessage::SyncDone),
+                                Err(e) => Message::Email(EmailMessage::Error(e)),
+                            },
+                        );
+                    }
+                }
                 EmailMessage::SaveContact => {
                     if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
                         let email = mail.sender_email.clone();
@@ -2282,12 +2354,12 @@ impl MoonBeautyShellApp {
                             let matches = notification_candidates(&app, entry.as_deref());
                             if !is_app_focused(&matches) {
                                 let ok = focus_notification_app(&app, entry.as_deref());
-                                eprintln!(
+                                moon_beauty_shell::dbg_log!(
                                     "[activate-toast] fallback app={:?} entry={:?} ok={}",
                                     app, entry, ok
                                 );
                             } else {
-                                eprintln!("[activate-toast] client self-focused app={:?}", app);
+                                moon_beauty_shell::dbg_log!("[activate-toast] client self-focused app={:?}", app);
                             }
                         });
                     }

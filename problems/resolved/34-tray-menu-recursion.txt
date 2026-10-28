@@ -1,0 +1,16 @@
+34 HIGH-DoS dbusmenu parse_item unbounded recursion
+
+   file: src/bar/tray/watcher.rs::get_menu_tree::parse_item
+
+   why:  parse_item recurses through dbusmenu children with no depth
+         limit. A hostile same-user tray app returns a menu tree
+         nested 10000-deep → ~2 MB stack per 10 levels → SIGSEGV at
+         ~1000 levels → shell crash. Killing the shell also kills the
+         lockscreen child watchdog → screen unlocked until respawn.
+
+   fix:  MAX_DEPTH = 16. Recursion guard at function entry; truncation
+         logged. Real dbusmenu trees are 2-4 levels.
+
+   residual:  Recursion still happens, just bounded. Truncated entries
+              are dropped silently (log fires). Acceptable — hostile
+              apps lose menu items but can't crash the shell.

@@ -172,14 +172,33 @@ pub async fn fetch_tray_items() -> Vec<TrayItem> {
                 continue;
             }
         };
-        let id: String = proxy.get_property("Id").await.unwrap_or_default();
-        let title: String = proxy.get_property("Title").await.unwrap_or_default();
+        // Finding 38: cap SNI strings before display.
+        const MAX_ID: usize = 128;
+        const MAX_TITLE: usize = 512;
+        const MAX_ICON_NAME: usize = 128;
+        let id: String = proxy
+            .get_property::<String>("Id")
+            .await
+            .ok()
+            .map(|s| s.chars().take(MAX_ID).collect())
+            .unwrap_or_default();
+        let title: String = proxy
+            .get_property::<String>("Title")
+            .await
+            .ok()
+            .map(|s| s.chars().take(MAX_TITLE).collect())
+            .unwrap_or_default();
         let status: String = proxy.get_property("Status").await.unwrap_or_default();
         if status.eq_ignore_ascii_case("Passive") {
             continue;
         }
 
-        let icon_name: String = proxy.get_property("IconName").await.unwrap_or_default();
+        let icon_name: String = proxy
+            .get_property::<String>("IconName")
+            .await
+            .ok()
+            .map(|s| s.chars().take(MAX_ICON_NAME).collect())
+            .unwrap_or_default();
         let mut icon_path = if !icon_name.is_empty() {
             resolve_icon(&icon_name)
         } else {
@@ -202,11 +221,17 @@ pub async fn fetch_tray_items() -> Vec<TrayItem> {
             Ok((_icon, _pixmaps, ttl, sub)) => {
                 let ttl = ttl.trim().to_string();
                 let sub = sub.trim().to_string();
-                match (ttl.is_empty(), sub.is_empty()) {
+                let combined = match (ttl.is_empty(), sub.is_empty()) {
                     (true, true) => String::new(),
                     (false, true) => ttl,
                     (true, false) => sub,
                     (false, false) => format!("{} — {}", ttl, sub),
+                };
+                const MAX_TOOLTIP: usize = 4096;
+                if combined.chars().count() > MAX_TOOLTIP {
+                    combined.chars().take(MAX_TOOLTIP - 3).collect::<String>() + "..."
+                } else {
+                    combined
                 }
             }
             Err(_) => String::new(),
@@ -267,7 +292,19 @@ pub async fn get_menu_tree(bus: &str, path: &str) -> Option<(String, Vec<TrayMen
         id: i32,
         props: std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
         children: Vec<zbus::zvariant::OwnedValue>,
+        depth: usize,
     ) -> Vec<TrayMenuItem> {
+        // Finding 34: cap recursion depth. Real dbusmenu trees are 2-4
+        // levels; a hostile provider returns 10000-deep nesting → stack
+        // overflow → shell crash → lockscreen child dies → unlock window.
+        const MAX_DEPTH: usize = 16;
+        if depth > MAX_DEPTH {
+            eprintln!(
+                "[tray-menu] depth {} exceeds cap {}, truncating",
+                depth, MAX_DEPTH
+            );
+            return Vec::new();
+        }
         let mut items = Vec::new();
 
         let label = match props.get("label").map(|v| &**v) {
@@ -303,13 +340,13 @@ pub async fn get_menu_tree(bus: &str, path: &str) -> Option<(String, Vec<TrayMen
         for c in children {
             let val: zbus::zvariant::Value = c.into();
             if let Ok((cid, cprops, ckids)) = val.downcast::<RawItem>() {
-                items.extend(parse_item(cid, cprops, ckids));
+                items.extend(parse_item(cid, cprops, ckids, depth + 1));
             }
         }
         items
     }
 
-    let items = parse_item(layout.0, layout.1, layout.2);
+    let items = parse_item(layout.0, layout.1, layout.2, 0);
     eprintln!("[tray-menu] found {} items", items.len());
     Some((menu_path, items))
 }
@@ -386,19 +423,80 @@ fn parse_registered(s: &str) -> Option<(String, String)> {
 /// **Fallback chain** if the source can't be decoded after re-encode:
 ///   → return `None`, renderer shows the initial letter (from `title`,
 ///     falling back to `id` and then `tooltip`).
+/// Finding 06: cap the tray icon cache directory at 20 MB. SNI items are
+/// untrusted — without a cap, a hostile app pins arbitrarily many icons
+/// into $XDG_RUNTIME_DIR/mbs-tray (tmpfs), growing until session OOM.
+/// Cached hits bypass this (they're already counted); only new resolves
+/// are declined when over budget.
+fn tray_cache_budget_ok(dir: &std::path::Path) -> bool {
+    const MAX: u64 = 20 * 1024 * 1024;
+    let total: u64 = std::fs::read_dir(dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.metadata().ok())
+        .map(|m| m.len())
+        .sum();
+    if total >= MAX {
+        eprintln!(
+            "[tray-icon] cache budget exceeded ({}/{}) — refusing new icons",
+            total, MAX
+        );
+        return false;
+    }
+    true
+}
+
+/// Finding 27: canonicalize an icon candidate and verify it stays under
+/// its declared root. Blocks symlink-to-sensitive-file: `~/.local/share/
+/// icons/hicolor/48x48/apps/foo.png -> /etc/passwd` is rejected rather
+/// than handed to `std::fs::read` + `image::load_from_memory`.
+///
+/// Both canonicalizations can fail (broken symlink, race, missing root);
+/// caller treats `None` as "try next candidate", which is the safe default.
+fn safe_icon_candidate(
+    candidate: &std::path::Path,
+    root: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    let canon = std::fs::canonicalize(candidate).ok()?;
+    let canon_root = std::fs::canonicalize(root).ok()?;
+    if canon.starts_with(&canon_root) {
+        Some(canon)
+    } else {
+        eprintln!(
+            "[tray-icon] symlink escape blocked: {:?} -> {:?}",
+            candidate, canon
+        );
+        None
+    }
+}
+
 fn resolve_icon(icon_name: &str) -> Option<String> {
-    use std::path::Path;
     if icon_name.is_empty() {
+        return None;
+    }
+    // Finding 09: SNI items come from untrusted D-Bus peers. Reject
+    // absolute paths (a read primitive via existence check + decode).
+    if icon_name.starts_with('/')
+        || icon_name.contains("..")
+        || icon_name.contains('/')
+        || icon_name.contains('\\')
+    {
+        eprintln!("[tray-icon] rejecting unsafe icon_name: {:?}", icon_name);
+        return None;
+    }
+    if !icon_name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        eprintln!("[tray-icon] rejecting icon_name with invalid chars: {:?}", icon_name);
         return None;
     }
 
     // Cache directory. Content-hashed filenames below ensure iced's
     // internal image-handle cache invalidates whenever the bytes change.
-    let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::env::temp_dir())
-        .join("mbs-tray");
-    let _ = std::fs::create_dir_all(&runtime_dir);
+    let runtime_dir = crate::libraries::process::mbs_subdir("mbs-tray");
 
     let safe_name: String = icon_name
         .chars()
@@ -424,13 +522,14 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
         }
     }
 
-    // Locate the source file
-    let source: std::path::PathBuf = if icon_name.starts_with('/') {
-        if !Path::new(icon_name).exists() {
-            return None;
-        }
-        std::path::PathBuf::from(icon_name)
-    } else {
+    // Finding 06: refuse NEW resolutions when the cache is over budget.
+    // Cached hits above already returned; existing icons stay visible.
+    if !tray_cache_budget_ok(&runtime_dir) {
+        return None;
+    }
+
+    // Locate the source file — theme search only (finding 09).
+    let source: std::path::PathBuf = {
         let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
         let roots = [
             std::path::PathBuf::from("/run/current-system/sw/share/icons/hicolor"),
@@ -454,26 +553,51 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
                         .join("apps")
                         .join(format!("{}.{}", icon_name, ext));
                     if candidate.exists() {
-                        found = Some(candidate);
-                        break 'search;
+                        // Finding 27: canonicalize + verify under root.
+                        if let Some(canon) = safe_icon_candidate(&candidate, root) {
+                            found = Some(canon);
+                            break 'search;
+                        }
                     }
                 }
             }
         }
         if found.is_none() {
             'search2: for pix in ["/run/current-system/sw/share/pixmaps", "/usr/share/pixmaps"] {
+                let pix_root = std::path::PathBuf::from(pix);
                 for ext in &exts {
-                    let candidate =
-                        std::path::PathBuf::from(pix).join(format!("{}.{}", icon_name, ext));
+                    let candidate = pix_root.join(format!("{}.{}", icon_name, ext));
                     if candidate.exists() {
-                        found = Some(candidate);
-                        break 'search2;
+                        if let Some(canon) = safe_icon_candidate(&candidate, &pix_root) {
+                            found = Some(canon);
+                            break 'search2;
+                        }
                     }
                 }
             }
         }
         found?
     };
+
+    // Finding 27: cap source file size before decode. `image::load_from_memory`
+    // fully decodes into memory; a 500 MB PNG in an icon theme would OOM
+    // the shell before any post-decode check could fire. 4 MB is generous
+    // for a real tray icon (typical: 2-40 KB).
+    const MAX_ICON_BYTES: u64 = 4 * 1024 * 1024;
+    match std::fs::metadata(&source) {
+        Ok(meta) if meta.len() > MAX_ICON_BYTES => {
+            eprintln!(
+                "[tray-icon] {} exceeds {} byte cap ({} bytes), skipping",
+                icon_name, MAX_ICON_BYTES, meta.len()
+            );
+            return None;
+        }
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("[tray-icon] {} metadata failed: {}", icon_name, e);
+            return None;
+        }
+    }
 
     // Decide destination extension. SVG → keep as SVG (iced has svg handle).
     // Everything else → normalize to PNG (ImageMagick rewrites cleanly).
@@ -504,25 +628,8 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
         Some(final_path.to_string_lossy().into_owned())
     };
 
-    // ImageMagick availability check (cached once per call for simplicity;
-    // it's cheap — just which())
-    let magick = if std::process::Command::new("magick")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
-        Some("magick")
-    } else if std::process::Command::new("convert")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
-        Some("convert")
-    } else {
-        None
-    };
+    // Finding 07: ImageMagick availability probe removed entirely.
+    // The tray renderer now has zero subprocess decoders.
 
     // ── SVG path: no re-encode, just copy ──────────────────────────
     if is_svg_src {
@@ -542,72 +649,55 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
     // fails to render silently). Re-encoding through ImageMagick strips
     // malformed chunks (broken iCCP, etc.) and guarantees a clean PNG
     // iced can render.
-    // Try to re-encode using the `image` crate first (fast, no subprocess).
-    // The `image` crate is lenient with malformed chunks (like Steam's
-    // broken iCCP) and saving it writes a clean PNG.
+    // Finding 27-residual: dimension gate BEFORE decode. A 4 MB PNG can
+    // decompress to hundreds of MB of RGBA (bomb ratio ~1000:1). The
+    // 4 MB input cap (batch 4) bounds the compressed size but not the
+    // decoded output. `into_dimensions()` reads only the header —
+    // typically <1KB — so rejecting early avoids the pixel allocation.
+    // Real tray icons are ≤256×256; 1024×1024 gives 4× headroom.
     if let Ok(bytes) = std::fs::read(&source) {
-        if let Ok(img) = image::load_from_memory(&bytes) {
-            // Overwrite base_dest with a clean PNG
-            let _ = std::fs::remove_file(&base_dest);
-            if img.save(&base_dest).is_ok() {
-                return hash_and_finalize(&base_dest);
-            }
-        }
-    }
-
-    eprintln!(
-        "[tray-icon] {} `image` crate failed to decode; falling back to magick",
-        icon_name
-    );
-
-    if let Some(bin) = magick {
-        let _ = std::fs::remove_file(&base_dest);
-        let output = std::process::Command::new(bin)
-            .args([
-                source.to_str().unwrap_or(""),
-                "-strip",
-                base_dest.to_str().unwrap_or(""),
-            ])
-            .output();
-        match output {
-            Ok(out) if out.status.success() => {
-                if base_dest.exists()
-                    && std::fs::metadata(&base_dest)
-                        .map(|m| m.len() > 0)
-                        .unwrap_or(false)
-                {
-                    return hash_and_finalize(&base_dest);
+        let dims = image::ImageReader::new(std::io::Cursor::new(&bytes))
+            .with_guessed_format()
+            .ok()
+            .and_then(|r| r.into_dimensions().ok());
+        match dims {
+            Some((w, h)) if w <= 1024 && h <= 1024 => {
+                if let Ok(img) = image::load_from_memory(&bytes) {
+                    let _ = std::fs::remove_file(&base_dest);
+                    if img.save(&base_dest).is_ok() {
+                        return hash_and_finalize(&base_dest);
+                    }
                 }
+            }
+            other => {
                 eprintln!(
-                    "[tray-icon] {} magick produced empty output. stderr: {}",
-                    icon_name,
-                    String::from_utf8_lossy(&out.stderr).trim()
+                    "[tray-icon] {} dimension gate rejected {:?} (cap 1024x1024)",
+                    icon_name, other
                 );
             }
-            Ok(out) => eprintln!(
-                "[tray-icon] {} magick exited {:?}. stderr: {}",
-                icon_name,
-                out.status.code(),
-                String::from_utf8_lossy(&out.stderr).trim()
-            ),
-            Err(e) => eprintln!("[tray-icon] {} magick spawn: {}", icon_name, e),
         }
-    } else {
-        eprintln!(
-            "[tray-icon] {} no ImageMagick; copying raw (may not render)",
-            icon_name
-        );
     }
 
-    // Fallback: raw copy (may fail to render, but at least icon_path exists)
-    match std::fs::copy(&source, &base_dest) {
-        Ok(_) => hash_and_finalize(&base_dest),
-        Err(_) => None,
-    }
+    // Finding 07: no ImageMagick fallback. `image` crate is the only
+    // decoder. If it fails, we return None and the renderer shows the
+    // item title's first letter. No subprocess, no RCE surface.
+    eprintln!(
+        "[tray-icon] {} `image` crate failed to decode; no fallback (finding 07)",
+        icon_name
+    );
+    None
 }
 
 fn save_pixmap(id: &str, w: u32, h: u32, data: &[u8]) -> Option<String> {
     if w == 0 || h == 0 {
+        return None;
+    }
+    // Finding 06: hard dimension cap. SNI items are attacker-controlled.
+    // Real tray icons are ≤256×256; 512×512 gives generous headroom.
+    // Without this, a hostile IconPixmap (10000×10000 × 4 = 400MB) hits
+    // Vec::with_capacity() below and OOMs the process.
+    if w > 512 || h > 512 {
+        eprintln!("[tray-icon] rejecting oversize pixmap {}×{}", w, h);
         return None;
     }
     if data.len() != (w as usize * h as usize * 4) {
@@ -626,11 +716,7 @@ fn save_pixmap(id: &str, w: u32, h: u32, data: &[u8]) -> Option<String> {
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
         .collect();
-    let icon_dir = std::env::var("XDG_RUNTIME_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::env::temp_dir())
-        .join("mbs-tray");
-    let _ = std::fs::create_dir_all(&icon_dir);
+    let icon_dir = crate::libraries::process::mbs_subdir("mbs-tray");
     let path = icon_dir.join(format!("mbs-tray-{}.png", safe));
     img.save(&path).ok()?;
     Some(path.to_string_lossy().into_owned())

@@ -1,6 +1,5 @@
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Stack};
 use iced::{Alignment, Color, Element, Length, Padding};
-use std::path::PathBuf;
 use tokio::process::Command;
 
 use crate::libraries::config::settings::ShellSettings;
@@ -94,7 +93,7 @@ impl ClipboardOverlay {
 
         let raw = String::from_utf8_lossy(&out.stdout);
         let mut list = Vec::new();
-        let tmp_dir = std::env::temp_dir();
+        let tmp_dir = crate::libraries::process::mbs_subdir("mbs-clip");
 
         for line in raw.lines() {
             if let Some((id_str, content)) = line.split_once('\t') {
@@ -163,7 +162,8 @@ impl ClipboardOverlay {
         match String::from_utf8(out.stdout.clone()) {
             Ok(text) => (text, None),
             Err(_) => {
-                let tmp = std::env::temp_dir().join(format!("mbs-clip-preview-{}.png", id));
+                let tmp = crate::libraries::process::mbs_subdir("mbs-clip")
+                    .join(format!("mbs-clip-preview-{}.png", id));
                 if std::fs::write(&tmp, &out.stdout).is_ok() {
                     (String::new(), Some(tmp.to_string_lossy().into_owned()))
                 } else {
@@ -225,8 +225,8 @@ impl ClipboardOverlay {
     }
 
     pub async fn ocr(id: u64) -> String {
-        let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-        let tmp_img = PathBuf::from(runtime).join(format!("qs_ocr_{}.png", id));
+        let tmp_img = crate::libraries::process::mbs_subdir("mbs-clip")
+            .join(format!("qs_ocr_{}.png", id));
 
         if let Ok(decode) = Command::new("cliphist")
             .args(["decode", &id.to_string()])

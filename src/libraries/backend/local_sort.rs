@@ -84,17 +84,19 @@ pub fn folder_name_from_sender(email: &str, display: &str) -> String {
         }
     }
     if !d.is_empty() {
-        return d;
+        return crate::libraries::process::sanitize_folder_name(&d);
     }
     // steampowered.com → Steampowered
     if let Some(at) = email.find('@') {
         let domain = &email[at + 1..];
         let root = domain.split('.').next().unwrap_or(domain);
         let mut c = root.chars();
-        return match c.next() {
-            Some(f) => f.to_uppercase().chain(c).collect(),
-            None => "Unknown".to_string(),
-        };
+        return crate::libraries::process::sanitize_folder_name(
+            &match c.next() {
+                Some(f) => f.to_uppercase().chain(c).collect::<String>(),
+                None => "Unknown".to_string(),
+            },
+        );
     }
     "Unknown".to_string()
 }
@@ -270,4 +272,47 @@ pub fn delete_folder(folder_name: &str) -> bool {
     state.assignments.retain(|_, v| v != folder_name);
     save(&state);
     true
+}
+
+#[cfg(test)]
+mod folder_name_tests {
+    use super::folder_name_from_sender;
+
+    #[test]
+    fn malicious_display_names_sanitized() {
+        for display in &[
+            "../../.config/autostart/evil",
+            "..",
+            ".",
+            "/etc/passwd",
+            "..\\..\\evil",
+            "a/b",
+        ] {
+            let out = folder_name_from_sender("x@evil.com", display);
+            assert!(!out.contains('/'), "{:?} → {:?}", display, out);
+            assert!(!out.contains('\\'), "{:?} → {:?}", display, out);
+            assert!(!out.contains(".."), "{:?} → {:?}", display, out);
+            assert!(!out.starts_with('.'), "{:?} → {:?}", display, out);
+            assert!(!out.is_empty(), "{:?} → empty", display);
+        }
+    }
+
+    #[test]
+    fn benign_display_names_unchanged() {
+        for name in &["GitHub", "Acme Corp.", "Foo (local)", "version 1.2"] {
+            assert_eq!(
+                folder_name_from_sender("x@example.com", name),
+                *name,
+                "{:?} changed", name
+            );
+        }
+    }
+
+    #[test]
+    fn suffix_strip_still_works() {
+        assert_eq!(
+            folder_name_from_sender("x@steampowered.com", "Steam Support"),
+            "Steam"
+        );
+    }
 }

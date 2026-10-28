@@ -1,0 +1,13 @@
+11 MED clipboard / OCR temp files fall back to /tmp silently
+   file: src/overlays/clipboard.rs::reload (thumb path), ::ocr
+         src/app/update.rs::ClipboardMessage::RunOcr (tmp_path)
+   why:  std::env::temp_dir() silently returns /tmp when XDG_RUNTIME_DIR
+         is unset. OCR writes /tmp/mbs-ocr-<id>.png, thumbnails write
+         /tmp/mbs-clip-thumb-<id>.png. Both are predictable from
+         process-local IDs, both persist after the process dies, and /tmp
+         is world-listable. A local attacker can read OCR'd content,
+         and any other user's temporary OCR output is exposed the same
+         way.
+   fix:  Centralize a helper mbs_tmp_dir() that panics if XDG_RUNTIME_DIR
+         is unset (matching ipc/protocol.rs behavior). Create with 0700.
+         Use that everywhere instead of temp_dir().

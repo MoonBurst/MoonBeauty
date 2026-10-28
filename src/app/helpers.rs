@@ -40,7 +40,8 @@ impl MoonBeautyShellApp {
             // binds cleanly without competing for the same outputs.
             if matches!(target, OverlayTarget::Lockscreen) {
                 let _ = std::process::Command::new("pkill")
-                    .args(["-KILL", "-f", "--", "--lockscreen-instance"])
+                    .args(["-KILL", "-f", "--",
+                           "(^|/)moon-beauty-shell --lockscreen-instance( .*)?$"])
                     .status();
             }
             let _ = child.kill();
@@ -52,13 +53,12 @@ impl MoonBeautyShellApp {
         self.kill_standalone();
         let exe = resolve_exe();
         let tag = target.as_arg();
-        let log_path = format!("/tmp/mbs-standalone-{}.log", tag);
-        let stderr_file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(&log_path)
-            .ok();
+        let log_path = moon_beauty_shell::libraries::process::mbs_unique_tmp(
+            "mbs-standalone",
+            "log",
+        );
+        let stderr_file =
+            moon_beauty_shell::libraries::process::private_create_new(&log_path).ok();
         let stdout_file = stderr_file.as_ref().and_then(|f| f.try_clone().ok());
 
         let mut cmd = std::process::Command::new(exe);
@@ -76,7 +76,7 @@ impl MoonBeautyShellApp {
                     "[ipc] spawned {:?} pid={} (log: {})",
                     target,
                     c.id(),
-                    log_path
+                    log_path.display()
                 );
                 self.standalone_child = Some((target, c));
             }

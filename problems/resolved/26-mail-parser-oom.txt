@@ -1,0 +1,19 @@
+26 MED mail_parser decodes full MIME tree before post-decode caps fire
+
+   file: src/libraries/backend/email_client.rs::read_message
+   why:  bytes passed to MessageParser::default().parse(&bytes) with no
+         size cap. A 500 MB raw body (hostile IMAP server or hostile
+         sender) inflates to 1.5+ GB in the parser before our post-decode
+         caps (06c: 50 MB attachments, 06e: 100 MB bodies) fire — the
+         shell OOMs. Cache-hit path in particular could re-open a large
+         cache written by a pre-batch-2 build.
+
+   fix:  MAX_RAW = 100 MB. Rejected at:
+           1. Cache-hit: cache_file.metadata().len() before std::fs::read
+           2. Network: fetch_raw_message().len() before secure_write
+           3. (06e, batch 2) sync_bodies_background post-fetch guard
+
+   residual:  Raw bytes still fully fetched before the check. A hostile
+              IMAP server can force a large *network transfer* but not
+              an instant OOM. True fix needs streaming partial-fetch
+              (`BODY.PEEK[]<0.N>`), not universally supported.

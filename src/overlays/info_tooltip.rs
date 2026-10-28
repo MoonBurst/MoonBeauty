@@ -178,7 +178,9 @@ impl App {
             Message::Tick => {
                 self.anim_frame = self.anim_frame.wrapping_add(1);
                 let elapsed_ms = self.opened.elapsed().as_millis() as u64;
-                eprintln!("[tick] frame={} elapsed={}ms", self.anim_frame, elapsed_ms);
+                if std::env::var_os("MBS_TICK_DIAG").is_some() {
+                    eprintln!("[tick] frame={} elapsed={}ms", self.anim_frame, elapsed_ms);
+                }
 
                 if let Some(t) = self.closing_at {
                     if t.elapsed().as_millis() > (self.drop_ms * 1.9) as u128 {

@@ -1,0 +1,9 @@
+18 LOW duplicate `adjust` binding in weather tooltip
+   file: src/bar/weather/tooltip.rs::run
+   why:  run() contains:
+           let _adjust: i32 = s.slant_width as i32 + 20;
+           let _adjust: i32 = s.slant_width as i32 + 20;
+         The second binding shadows the first with the same value.
+         Copy-paste artifact. No runtime effect, but dead code and a
+         warning suppressant (`_` prefix) hiding the redundancy.
+   fix:  Delete one of the two lines.

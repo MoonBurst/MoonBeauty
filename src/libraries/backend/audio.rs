@@ -180,8 +180,10 @@ impl AudioBackend {
 /// Resolve a user-configured alarm sound. Tries in order:
 ///   1. Absolute path as-is
 ///   2. `~/.local/share/moon-beauty-shell/sounds/<basename>` (stable, where imports go now)
-///   3. `resources/<basename>` relative to cwd (dev: running from project root)
-///   4. `$CARGO_MANIFEST_DIR/resources/<basename>` (compile-time baked path)
+///
+/// cwd-relative and $CARGO_MANIFEST_DIR candidates were dropped
+/// (finding 19): they only worked from the source tree and could be
+/// shadowed by an attacker-controlled ./resources/<name>.
 ///
 /// Logs the resolved path when found; if nothing is found, the caller
 /// logs the failure (see `play_alarm_sound`).
@@ -211,18 +213,7 @@ pub fn resolve_alarm_sound_path(sound: &str) -> Option<std::path::PathBuf> {
         );
     }
 
-    // cwd-relative (dev workflow: bar launched from project root).
-    if !raw.is_absolute() {
-        candidates.push(raw.clone());
-    }
-    candidates.push(PathBuf::from("resources").join(&filename));
-
-    // Compile-time manifest dir. Baked into the binary; points at the
-    // directory that was cwd when `cargo build` ran.
-    let manifest_resources = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("resources")
-        .join(&filename);
-    candidates.push(manifest_resources);
+    // Finding 19: cwd-relative and CARGO_MANIFEST_DIR candidates dropped.
 
     for c in &candidates {
         if c.exists() && c.is_file() {

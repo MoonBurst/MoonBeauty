@@ -198,9 +198,14 @@ impl LockCoordinator {
             PathBuf::from(&runtime_dir).join(format!("moon-beauty-lock-{}.sock", pid));
         let _ = std::fs::remove_file(&socket_path);
 
+        #[cfg(not(feature = "lock-debug-bypass"))]
+        if std::env::var_os("MBS_LOCK_DEBUG_PASS").is_some() {
+            eprintln!("[lock-coord] NOTE: MBS_LOCK_DEBUG_PASS set but lock-debug-bypass feature is not compiled in; NO effect");
+        }
+        #[cfg(feature = "lock-debug-bypass")]
         if let Ok(v) = std::env::var("MBS_LOCK_DEBUG_PASS") {
             eprintln!(
-                "[lock-coord] WARNING: MBS_LOCK_DEBUG_PASS is set (len={}); bypass armed",
+                "[lock-coord] WARNING: MBS_LOCK_DEBUG_PASS is set (len={}); bypass armed (COMPILE-TIME FEATURE — DO NOT SHIP)",
                 v.len()
             );
         }
@@ -278,6 +283,13 @@ impl LockCoordinator {
             let mut peers: Vec<Peer> = Vec::new();
             let mut buffer = String::new();
             let mut next_id: usize = 1;
+            // Finding 30: PAM/sudo account-lockout DoS mitigation.
+            // A hostile same-user process can open the coordinator socket
+            // and spam Submit to force N failed auths, tripping
+            // pam_faillock/sudo lockout for the legitimate user.
+            // Exponential backoff caps the attacker's rate to ~1/16s.
+            let mut last_failed_submit: Option<std::time::Instant> = None;
+            let mut fail_streak: u32 = 0;
 
             // Hotplug watcher
             let children_watch = children.clone();
@@ -429,20 +441,30 @@ impl LockCoordinator {
                     Some((peer_id, msg)) = event_rx.recv() => {
                         match msg {
                             LockIpc::Key(s) => {
-                                let added = s.chars().count();
-                                for c in s.chars() {
-                                    buffer.push(c);
-                                }
-                                if std::env::var_os("MBS_LOCK_DEBUG").is_some() {
+                                // Finding 35: cap buffer + per-message length.
+                                const MAX_BUF: usize = 256;
+                                const MAX_PER_KEY: usize = 64;
+                                let room = MAX_BUF.saturating_sub(buffer.chars().count());
+                                if room == 0 {
                                     eprintln!(
-                                        "[lock-coord] key from peer {}: +{} chars → len={}",
-                                        peer_id,
-                                        added,
-                                        buffer.chars().count()
+                                        "[lock-coord] buffer at cap ({}), ignoring Key",
+                                        MAX_BUF
                                     );
+                                } else {
+                                    let take = MAX_PER_KEY.min(room);
+                                    let added: usize =
+                                        s.chars().take(take).map(|c| buffer.push(c)).count();
+                                    if std::env::var_os("MBS_LOCK_DEBUG").is_some() {
+                                        eprintln!(
+                                            "[lock-coord] key from peer {}: +{} chars → len={}",
+                                            peer_id,
+                                            added,
+                                            buffer.chars().count()
+                                        );
+                                    }
+                                    let n = buffer.chars().count();
+                                    Self::broadcast(&mut peers, &LockIpc::BufferUpdate(n)).await;
                                 }
-                                let n = buffer.chars().count();
-                                Self::broadcast(&mut peers, &LockIpc::BufferUpdate(n)).await;
                             }
                             LockIpc::Backspace => {
                                 buffer.pop();
@@ -450,22 +472,59 @@ impl LockCoordinator {
                                 Self::broadcast(&mut peers, &LockIpc::BufferUpdate(n)).await;
                             }
                             LockIpc::Submit => {
-                                eprintln!(
-                                    "[lock-coord] submit from peer {} (len={})",
-                                    peer_id, buffer.chars().count()
+                                // Finding 30: rate-limit auth spawns to prevent
+                                // hostile same-user Submit spam from tripping
+                                // PAM/sudo account-lockout (pam_faillock).
+                                //
+                                // Empty buffer: rejected BEFORE the streak
+                                // counter so an attacker sending empty Submit
+                                // can't inflate fail_streak and rate-limit the
+                                // legit user without any real PAM attempt.
+                                //
+                                // Backoff: min(1s * 2^fail_streak, 16s). First
+                                // attempt is never rate-limited (last_failed_
+                                // submit = None). Caps at 16s after 4 failures,
+                                // well below pam_faillock's 3-per-10min budget.
+                                let now = std::time::Instant::now();
+                                let exponent = fail_streak.min(4);
+                                let min_delay = Duration::from_millis(
+                                    1000u64.saturating_mul(1u64 << exponent),
                                 );
-                                let ok = Self::authenticate(&buffer).await;
-                                if ok {
-                                    eprintln!("[lock-coord] SUCCESS");
-                                    Self::broadcast(&mut peers, &LockIpc::Success).await;
-                                    tokio::time::sleep(Duration::from_millis(200)).await;
-                                    Self::kill_all(&children);
-                                    let _ = std::fs::remove_file(&socket_path);
-                                    std::process::exit(0);
+                                let too_soon = last_failed_submit
+                                    .map(|prev| now.duration_since(prev) < min_delay)
+                                    .unwrap_or(false);
+                                if buffer.is_empty() {
+                                    eprintln!(
+                                        "[lock-coord] ignoring empty Submit (finding 30)"
+                                    );
+                                } else if too_soon {
+                                    eprintln!(
+                                        "[lock-coord] Submit rate-limited (fail_streak={}, min_delay={:?})",
+                                        fail_streak, min_delay
+                                    );
                                 } else {
-                                    eprintln!("[lock-coord] auth failed");
-                                    buffer.clear();
-                                    Self::broadcast(&mut peers, &LockIpc::Reset).await;
+                                    eprintln!(
+                                        "[lock-coord] submit from peer {} (len={})",
+                                        peer_id, buffer.chars().count()
+                                    );
+                                    let ok = Self::authenticate(&buffer).await;
+                                    if ok {
+                                        eprintln!("[lock-coord] SUCCESS");
+                                        Self::broadcast(&mut peers, &LockIpc::Success).await;
+                                        tokio::time::sleep(Duration::from_millis(200)).await;
+                                        Self::kill_all(&children);
+                                        let _ = std::fs::remove_file(&socket_path);
+                                        std::process::exit(0);
+                                    } else {
+                                        fail_streak = fail_streak.saturating_add(1);
+                                        last_failed_submit = Some(now);
+                                        eprintln!(
+                                            "[lock-coord] auth failed (fail_streak={})",
+                                            fail_streak
+                                        );
+                                        buffer.clear();
+                                        Self::broadcast(&mut peers, &LockIpc::Reset).await;
+                                    }
                                 }
                             }
                             _ => {}
@@ -552,21 +611,14 @@ impl LockCoordinator {
             return false;
         }
 
-        // ── Debug bypass (requires BOTH MBS_DEBUG and MBS_LOCK_DEBUG_PASS) ──
+        // ── Debug bypass: compile-time opt-in only (finding 05) ──
+        // Release builds: no code path exists. To diagnose in a dev
+        // build: cargo build --features lock-debug-bypass
+        #[cfg(feature = "lock-debug-bypass")]
         if let Ok(debug_pass) = std::env::var("MBS_LOCK_DEBUG_PASS") {
-            if !debug_pass.is_empty() {
-                if std::env::var_os("MBS_DEBUG").is_none() {
-                    eprintln!("[lock-coord] WARNING: MBS_LOCK_DEBUG_PASS set without MBS_DEBUG; bypass DISABLED");
-                } else if debug_pass == clean {
-                    eprintln!("[lock-coord] DEBUG BYPASS: matched");
-                    return true;
-                } else {
-                    eprintln!(
-                        "[lock-coord] DEBUG BYPASS: mismatch (buf len={}, debug len={})",
-                        clean.len(),
-                        debug_pass.len()
-                    );
-                }
+            if !debug_pass.is_empty() && debug_pass == clean {
+                eprintln!("[lock-coord] DEBUG BYPASS (compile-time feature): matched");
+                return true;
             }
         }
 

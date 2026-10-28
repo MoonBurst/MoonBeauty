@@ -2,10 +2,6 @@ use super::*;
 
 impl MoonBeautyShellApp {
     pub fn view(&self) -> Element<'_, Message> {
-        {
-            static ONCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-            if !ONCE.swap(true, std::sync::atomic::Ordering::Relaxed) {}
-        }
         if self.is_notif_surface {
             let is_right_corner = self.settings.notif_corner.contains("right");
             let is_top_corner = self.settings.notif_corner.contains("top");

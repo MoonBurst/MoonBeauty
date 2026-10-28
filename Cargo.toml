@@ -38,6 +38,12 @@ wayland-protocols = "0.32.13"
 wayland-protocols-wlr = "0.3.12"
 smithay-client-toolkit = "0.21.1"
 
+[features]
+default = []
+# Lockscreen debug bypass (MBS_LOCK_DEBUG_PASS env var). Compile-time
+# opt-in only — finding 05. Never ship a release build with this on.
+lock-debug-bypass = []
+
 [profile.release]
 opt-level = 3
 lto = "thin"

@@ -1,0 +1,18 @@
+20 LOW cwd-relative resource paths
+   file: src/libraries/backend/email_client.rs::load_contacts
+         src/libraries/backend/email_client.rs::save_contact
+         src/libraries/config/settings.rs::find_friend_profiles_path
+   why:  Three functions still resolve resources under cwd:
+           PathBuf::from("resources/contacts.txt")
+           PathBuf::from("resources/friend_profiles.json")
+         plus find_friend_profiles_path includes a cwd-relative
+         "resources/" candidate. These work only when the shell was
+         launched from the source tree. Under systemd --user, cwd is
+         whatever the service manager set (often $HOME). Under sway
+         exec, cwd is sway's cwd. Result: contacts/friend profiles
+         silently write to the wrong place.
+   fix:  Make XDG data the source of truth:
+           ~/.local/share/moon-beauty-shell/contacts.txt
+           ~/.local/share/moon-beauty-shell/friend_profiles.json
+         Migrate on first run from cwd-relative if the XDG file is
+         missing (one-shot copy).

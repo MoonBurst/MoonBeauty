@@ -1,0 +1,11 @@
+15 LOW save() logs tooltip_sizes on every write
+   file: src/libraries/config/settings.rs::ShellSettings::save
+   why:  Every call to save() runs:
+           eprintln!("[save] writing tooltip_sizes={:?} bar_monitor={:?}",
+                     self.tooltip_sizes, self.bar_monitor);
+         Save is rate-limited to 300ms in the settings UI, so dragging a
+         slider emits ~3 lines/sec. The map is often hundreds of bytes,
+         so log volume is non-trivial.
+   fix:  Remove or gate behind MBS_SETTINGS_DEBUG. For developers,
+         prefer a #[cfg(debug_assertions)] variant so the line cannot
+         fire in release builds.

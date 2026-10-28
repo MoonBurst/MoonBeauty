@@ -119,7 +119,7 @@ impl MoonBeautyShellApp {
                     ..
                 }) = event
                 {
-                    eprintln!("[todo-sub] key={:?} status={:?}", dbg_key, status);
+                    moon_beauty_shell::dbg_log!("[todo-sub] key={:?} status={:?}", dbg_key, status);
                 }
                 let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event
                 else {

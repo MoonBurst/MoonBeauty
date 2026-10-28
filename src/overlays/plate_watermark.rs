@@ -112,7 +112,15 @@ pub fn add_plate_watermark(bytes: &[u8], name: &str) -> Result<Vec<u8>, String> 
         tmp_out.to_string_lossy().into_owned(),
     ];
 
+    // Finding 07: bound ImageMagick resource use.
     let status = std::process::Command::new(bin)
+        .args([
+            "-limit", "memory", "512MiB",
+            "-limit", "map", "1GiB",
+            "-limit", "disk", "2GiB",
+            "-limit", "width", "16384",
+            "-limit", "height", "16384",
+        ])
         .args(&args)
         .status()
         .map_err(|e| format!("spawn {bin}: {e}"))?;
@@ -164,25 +172,23 @@ pub fn reveal(bytes: &[u8]) -> Result<Vec<u8>, String> {
 
     std::fs::write(&tmp_in, bytes).map_err(|e| format!("write: {e}"))?;
 
-    let status = std::process::Command::new(bin)
-        .args([
-            tmp_in.to_str().unwrap(),
-            "-channel",
-            "B",
-            "-separate",
-            "(",
-            "+clone",
-            "-blur",
-            "0x2",
-            ")",
-            "-compose",
-            "Subtract",
-            "-composite",
-            "-auto-level",
-            "-define",
-            "png:compression-level=1",
-            tmp_out.to_str().unwrap(),
-        ])
+    // Finding 07: bound ImageMagick resource use.
+    let mut cmd = std::process::Command::new(bin);
+    cmd.args([
+        "-limit", "memory", "512MiB",
+        "-limit", "map", "1GiB",
+        "-limit", "disk", "2GiB",
+        "-limit", "width", "16384",
+        "-limit", "height", "16384",
+    ]);
+    cmd.args([
+        tmp_in.to_str().unwrap(),
+        "-channel", "B", "-separate", "(", "+clone", "-blur", "0x2", ")",
+        "-compose", "Subtract", "-composite", "-auto-level",
+        "-define", "png:compression-level=1",
+        tmp_out.to_str().unwrap(),
+    ]);
+    let status = cmd
         .status()
         .map_err(|e| format!("spawn {bin}: {e}"))?;
 

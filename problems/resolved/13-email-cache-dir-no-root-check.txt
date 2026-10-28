@@ -1,0 +1,16 @@
+13 MED email cache directory built from unsanitized folder name
+   file: src/libraries/backend/email_client.rs::get_cache_dir
+         (via map_gmail_folder -> PathBuf::join)
+   why:  get_cache_dir(folder) does:
+           base.join("email_cache").join(map_gmail_folder(folder))
+         map_gmail_folder returns its input for unknown folders, and
+         fetch_from_network / save_index / load_index all accept the
+         caller's folder string. Combined with finding 02
+         (local_sort auto-creating folders from From: display names),
+         this is the write side of the traversal. Even without 02, any
+         folder name arriving from IMAP (LIST response) is trusted;
+         some servers return quoted names containing "../" if asked
+         with the wrong delimiter.
+   fix:  Same fix as finding 02: sanitize folder names at the boundary
+         (map_gmail_folder), and in get_cache_dir canonicalize the
+         result and assert starts_with(email_cache_root).

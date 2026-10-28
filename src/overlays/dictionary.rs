@@ -72,8 +72,10 @@ impl DictionaryOverlay {
     }
 
     fn cache_path() -> PathBuf {
-        let base = dirs::cache_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-        base.join("moon_dict_cache.json")
+        // Finding 24: mirror finding 23 for user search history.
+        dirs::cache_dir()
+            .expect("XDG_CACHE_HOME or HOME must be set; refusing to persist dictionary cache to /tmp")
+            .join("moon_dict_cache.json")
     }
 
     pub fn load_cache() -> HashMap<String, Vec<MeaningEntry>> {

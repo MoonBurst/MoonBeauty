@@ -83,7 +83,7 @@ impl RemindersOverlay {
     }
 
     pub fn storage_path() -> PathBuf {
-        let base = dirs::runtime_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
+        let base = crate::libraries::process::mbs_runtime_dir();
         let mbs = base.join("moon_reminders.json");
         let qs = base.join("quickshell_reminders.json");
         // One-time migration from Quickshell. The QML backend wrote to

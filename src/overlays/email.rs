@@ -11,6 +11,24 @@ pub const COMPOSE_SUBJ_ID: &str = "compose_subj";
 pub const COMPOSE_BODY_ID: &str = "compose_body";
 pub const COMPOSE_MANUAL_ATTACH_ID: &str = "compose_manual_attach";
 
+/// Finding 25: reject auto-opening attachments whose extension could
+/// yield code execution when double-clicked on a default config.
+/// A hostile sender delivering `invoice.pdf.desktop` looks like a PDF to
+/// the user but routes xdg-open → desktop file Exec= → RCE.
+fn is_safe_to_auto_open(path: &std::path::Path) -> bool {
+    const DENY_EXT: &[&str] = &[
+        "desktop", "service", "sh", "bash", "zsh", "ksh", "csh", "fish",
+        "py", "pl", "rb", "php", "lua",
+        "exe", "bat", "cmd", "ps1", "vbs", "app", "command", "run", "bin",
+        "msi", "dmg", "pkg", "deb", "rpm", "appimage",
+        "lnk", "url", "scf", "reg", "hta",
+    ];
+    match path.extension().and_then(|s| s.to_str()) {
+        Some(ext) => !DENY_EXT.iter().any(|d| ext.eq_ignore_ascii_case(d)),
+        None => false,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum EmailMessage {
     SelectFolder(String),
@@ -68,6 +86,8 @@ pub enum EmailMessage {
     RemoveFolder(String),
     SaveAttachment(String),
     CopyGmailFilter,
+    MarkSpam,
+    MarkNotSpam,
 }
 
 pub struct EmailOverlay {
@@ -467,19 +487,39 @@ impl EmailOverlay {
                         };
                         let _ = std::fs::create_dir_all(&download_dir);
                         let out_path = download_dir.join(&safe_name);
-                        eprintln!("[attach] saving to {:?}", out_path);
+                        crate::dbg_log!("[attach] saving to {:?}", out_path);
                         if std::fs::write(&out_path, data).is_ok() {
-                            let _ = std::process::Command::new("notify-send")
-                                .args([
-                                    "-a",
-                                    "Email",
-                                    "Attachment Saved",
-                                    &format!("Saved to {}", out_path.display()),
-                                ])
-                                .spawn();
-                            let _ = std::process::Command::new("xdg-open")
-                                .arg(&out_path)
-                                .spawn();
+                            // Finding 25: strip exec bits and gate auto-open
+                            // on a script/exec extension denylist.
+                            {
+                                use std::os::unix::fs::PermissionsExt;
+                                if let Ok(meta) = std::fs::metadata(&out_path) {
+                                    let mut perms = meta.permissions();
+                                    perms.set_mode(0o644);
+                                    let _ = std::fs::set_permissions(&out_path, perms);
+                                }
+                            }
+                            if is_safe_to_auto_open(&out_path) {
+                                let _ = std::process::Command::new("notify-send")
+                                    .args([
+                                        "-a", "Email", "Attachment Saved",
+                                        &format!("Saved to {}", out_path.display()),
+                                    ])
+                                    .spawn();
+                                let _ = std::process::Command::new("xdg-open")
+                                    .arg(&out_path)
+                                    .spawn();
+                            } else {
+                                let _ = std::process::Command::new("notify-send")
+                                    .args([
+                                        "-a", "Email", "Attachment Saved",
+                                        &format!(
+                                            "Saved (not auto-opened for safety) → {}",
+                                            out_path.display()
+                                        ),
+                                    ])
+                                    .spawn();
+                            }
                         } else {
                             let _ = std::process::Command::new("notify-send")
                                 .args([
@@ -530,6 +570,7 @@ impl EmailOverlay {
             }
             EmailMessage::DeleteSelected | EmailMessage::SaveContact => {}
             EmailMessage::CopyGmailFilter => { /* handled in app/update.rs for clipboard access */ }
+            EmailMessage::MarkSpam | EmailMessage::MarkNotSpam => { /* handled in app/update.rs */ }
             EmailMessage::DraftSaved => {
                 self.imap_error =
                     Some("Draft saved to ~/.local/share/moon-beauty-shell/drafts.txt".into());
@@ -1067,6 +1108,47 @@ impl EmailOverlay {
         } else if let Some(email) = &self.parsed_email {
             let mut body_col = column![].spacing(16);
 
+            // Action bar for the currently-viewed message
+            let in_spam = self.active_folder == "Spam" || self.active_folder == "[Gmail]/Spam";
+            let spam_label = if in_spam { "Not Spam" } else { "Mark Spam" };
+            let spam_msg = if in_spam { EmailMessage::MarkNotSpam } else { EmailMessage::MarkSpam };
+            let action_bar = row![
+                button(
+                    text(spam_label)
+                        .size((theme.font_size_normal) as f32)
+                        .color(theme.background)
+                )
+                .on_press(spam_msg)
+                .padding([6, 14])
+                .style(move |_t, _s| button::Style {
+                    background: Some(iced::Background::Color(theme.warning)),
+                    border: iced::Border {
+                        color: theme.warning,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }),
+                button(
+                    text("Move to Trash")
+                        .size((theme.font_size_normal) as f32)
+                        .color(theme.background)
+                )
+                .on_press(EmailMessage::DeleteSelected)
+                .padding([6, 14])
+                .style(move |_t, _s| button::Style {
+                    background: Some(iced::Background::Color(theme.danger)),
+                    border: iced::Border {
+                        color: theme.danger,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }),
+            ]
+            .spacing(8);
+            body_col = body_col.push(action_bar);
+
             // Render Images
             for img_path in &email.images {
                 body_col = body_col.push(
@@ -1077,7 +1159,13 @@ impl EmailOverlay {
             }
 
             // Render Text
-            body_col = body_col.push(text(&email.text).size(fs_main).color(theme.text));
+            body_col = body_col.push(
+                text(&email.text)
+                    .size(fs_main)
+                    .color(theme.text)
+                    .font(iced::Font::MONOSPACE)
+                    .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+            );
 
             // Render Attachments
             if !email.attachments.is_empty() {

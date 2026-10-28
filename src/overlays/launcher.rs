@@ -779,12 +779,45 @@ impl AppLauncher {
         if icon_name.is_empty() {
             return None;
         }
+        // Finding 08: same whitelist as notifications/ui.rs::resolve_icon_name.
+        // .desktop Icon= values are attacker-controlled via
+        // ~/.local/share/applications/.
         if icon_name.starts_with('/') {
+            let known = [
+                "/usr/share/icons/", "/usr/share/pixmaps/",
+                "/usr/local/share/icons/", "/usr/local/share/pixmaps/",
+                "/run/current-system/sw/share/icons/",
+                "/run/current-system/sw/share/pixmaps/",
+                "/var/lib/flatpak/exports/share/icons/",
+                "/var/lib/flatpak/exports/share/pixmaps/",
+                "/var/lib/snapd/desktop/icons/",
+            ];
+            let mut ok = known.iter().any(|p| icon_name.starts_with(p));
+            if !ok {
+                if let Some(home) = dirs::home_dir() {
+                    let h = home.to_string_lossy();
+                    ok = icon_name.starts_with(&format!("{}/.local/share/icons/", h))
+                        || icon_name.starts_with(&format!("{}/.nix-profile/share/icons/", h))
+                        || icon_name.starts_with(&format!(
+                            "{}/.local/share/flatpak/exports/share/icons/", h));
+                }
+            }
+            if !ok {
+                crate::dbg_log!(
+                    "[launcher-icon] reject absolute icon outside known roots: {:?}",
+                    icon_name
+                );
+                return None;
+            }
             return if Path::new(icon_name).exists() {
                 Some(icon_name.to_string())
             } else {
                 None
             };
+        }
+        if icon_name.contains("..") || icon_name.contains('/') || icon_name.contains('\\') {
+            crate::dbg_log!("[launcher-icon] reject unsafe icon name: {:?}", icon_name);
+            return None;
         }
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
         let roots = [
@@ -888,7 +921,7 @@ impl AppLauncher {
                 return iced::Task::none();
             }
             LauncherMessage::SearchChanged(q) => {
-                eprintln!("[launcher-input] {:?}", q);
+                crate::dbg_log!("[launcher-input] {:?}", q);
                 self.search_query = q.clone();
                 self.selected_index = 0;
 
@@ -915,7 +948,7 @@ impl AppLauncher {
 
                 // Dictionary search — takes priority if the query starts with 'def ', 'dict ', etc.
                 if let Some(dict_entries) = self.compute_dict_entries(&q) {
-                    eprintln!("[launcher-dict] {:?} → {} entries", q, dict_entries.len());
+                    crate::dbg_log!("[launcher-dict] {:?} → {} entries", q, dict_entries.len());
                     let mut dict_items = dict_entries;
                     dict_items.append(&mut filtered);
                     filtered = dict_items;
@@ -935,7 +968,7 @@ impl AppLauncher {
 
                 // Password store search — takes priority if the query starts with a pass-prefix
                 if let Some(pass_entries) = Self::compute_pass_entries(&q) {
-                    eprintln!("[launcher-pass] {:?} → {} entries", q, pass_entries.len());
+                    crate::dbg_log!("[launcher-pass] {:?} → {} entries", q, pass_entries.len());
                     let mut pass_items: Vec<AppEntry> = pass_entries
                         .into_iter()
                         .map(|(name, exec)| AppEntry {
@@ -952,7 +985,7 @@ impl AppLauncher {
                 // Multi-conversion + math result at top of list
                 let conversions = Self::compute_multi_conversions(&q);
                 if !conversions.is_empty() {
-                    eprintln!("[launcher-multi] {:?} → {} results", q, conversions.len());
+                    crate::dbg_log!("[launcher-multi] {:?} → {} results", q, conversions.len());
                     let mut math_entries: Vec<AppEntry> = conversions
                         .into_iter()
                         .map(|(label, exec)| AppEntry {
@@ -965,12 +998,14 @@ impl AppLauncher {
                     math_entries.append(&mut filtered);
                     filtered = math_entries;
                 } else {
-                    eprintln!("[launcher-multi] {:?} → 0 results", q);
+                    crate::dbg_log!("[launcher-multi] {:?} → 0 results", q);
                 }
 
-                eprintln!("[launcher-final] {} entries:", filtered.len());
-                for (i, e) in filtered.iter().enumerate().take(5) {
-                    eprintln!("  [{}] {} -> {}", i, e.name, e.exec);
+                crate::dbg_log!("[launcher-final] {} entries:", filtered.len());
+                if std::env::var_os("MBS_DEBUG").is_some() {
+                    for (i, e) in filtered.iter().enumerate().take(5) {
+                        eprintln!("  [{}] {} -> {}", i, e.name, e.exec);
+                    }
                 }
                 self.filtered_apps = filtered;
                 return iced::Task::none();

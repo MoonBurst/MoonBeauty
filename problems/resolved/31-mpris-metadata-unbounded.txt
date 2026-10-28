@@ -1,0 +1,19 @@
+31 LOW-DoS MPRIS metadata unbounded allocation
+
+   file: src/libraries/backend/mpris.rs::poll_uncached
+
+   why:  xesam:title / xesam:album / xesam:url / xesam:artist[] read via
+         zbus with no size cap. A hostile MPRIS provider returns 100 MB
+         metadata; we then concatenate/display it, doubling peak usage.
+
+   fix:  truncate_chars() cap at materialization time:
+           title/album:  512 chars
+           artist:       8 entries × 256 chars each
+           url:          4096 chars
+
+   residual:  The primary zbus allocation (`get_property::<String>`)
+              is unavoidable at this layer — it's the D-Bus message
+              payload, deserialized by zbus before we see it. Real fix
+              requires the D-Bus daemon's `max_message_size` to be
+              lowered, out of scope. Practical impact bounded by the
+              128 MB default message limit + 30s None cache (finding 32).

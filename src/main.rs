@@ -52,6 +52,9 @@ fn send_ipc_sync(cmd: &IpcCommand) -> Result<String, Box<dyn std::error::Error +
         .map(|d| std::path::PathBuf::from(d).join("moon-beauty-shell.sock"))
         .map_err(|e| format!("XDG_RUNTIME_DIR: {e}"))?;
     let mut stream = UnixStream::connect(&path)?;
+    // Finding 36: read timeout. Without this, a hung bar (deadlock,
+    // SIGSTOP, half-close race) blocks the CLI forever.
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
     let encoded = serde_json::to_vec(cmd)?;
     stream.write_all(&encoded)?;
     stream.shutdown(std::net::Shutdown::Write)?;
@@ -72,7 +75,10 @@ fn notification_candidates(app_name: &str, desktop_entry: Option<&str>) -> Vec<S
         let de_clean = de.trim_end_matches(".desktop").to_lowercase();
         cand_set.insert(de_clean);
     }
-    cand_set.into_iter().filter(|s| !s.is_empty()).collect()
+    cand_set
+        .into_iter()
+        .filter(|s| !s.is_empty() && moon_beauty_shell::libraries::process::is_safe_app_id(s))
+        .collect()
 }
 
 fn is_app_focused(candidates: &[String]) -> bool {
@@ -96,8 +102,11 @@ fn focus_notification_app(app_name: &str, desktop_entry: Option<&str>) -> bool {
         cand_set.insert(de_clean.clone());
         cand_set.insert(de_clean.to_lowercase());
     }
-    let candidates: Vec<String> = cand_set.into_iter().filter(|s| !s.is_empty()).collect();
-    eprintln!(
+    let candidates: Vec<String> = cand_set
+        .into_iter()
+        .filter(|s| !s.is_empty() && moon_beauty_shell::libraries::process::is_safe_app_id(s))
+        .collect();
+    moon_beauty_shell::dbg_log!(
         "[focus] app={:?} entry={:?} candidates={:?}",
         app_name, desktop_entry, candidates
     );
@@ -108,7 +117,7 @@ fn focus_notification_app(app_name: &str, desktop_entry: Option<&str>) -> bool {
                 .args([
                     "-t",
                     "command",
-                    &format!("[app_id=\"{}\"] focus", cand.trim()),
+                    &format!("[app_id=\"{}\"] focus", cand),
                 ])
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
@@ -125,19 +134,21 @@ fn focus_notification_app(app_name: &str, desktop_entry: Option<&str>) -> bool {
 
     if let Some(de) = desktop_entry {
         let de_clean = de.trim_end_matches(".desktop");
-        let ok = std::process::Command::new("gtk-launch")
-            .arg(de_clean)
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if ok {
-            return true;
+        if moon_beauty_shell::libraries::process::is_safe_app_id(de_clean) {
+            let ok = std::process::Command::new("gtk-launch")
+                .arg(de_clean)
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if ok {
+                return true;
+            }
         }
     }
 
-    let _ = std::process::Command::new("gtk-launch")
-        .arg(&candidates[0])
-        .status();
+    if let Some(first) = candidates.first() {
+        let _ = std::process::Command::new("gtk-launch").arg(first).status();
+    }
     false
 }
 
@@ -187,6 +198,13 @@ fn app_style(_state: &MoonBeautyShellApp, _theme: &iced::Theme) -> iced::theme::
 pub fn main() -> Result<(), iced_layershell::Error> {
     TM0.set(std::time::Instant::now()).ok();
     let args: Vec<String> = std::env::args().collect();
+
+    // Finding 07 defense-in-depth: restrictive ImageMagick policy that
+    // every child process (annotator, watermark, reveal) inherits via
+    // MAGICK_CONFIGURE_PATH.
+    if let Some(dir) = moon_beauty_shell::libraries::process::ensure_imagemagick_policy() {
+        std::env::set_var("MAGICK_CONFIGURE_PATH", &dir);
+    }
 
     // ── Lock auth test mode ──
     if args.iter().any(|a| a == "--test-lock-auth") {
@@ -239,10 +257,12 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     // Notification CLI actions
     if args.iter().any(|a| a == "--activate-latest-notif") {
-        let runtime = std::env::var("XDG_RUNTIME_DIR")
-            .unwrap_or_else(|_| format!("/tmp/user-{}", std::process::id()));
-        let cmd_path = std::path::PathBuf::from(runtime).join("moon-beauty-shell-notif-cmd");
-        match std::fs::write(&cmd_path, b"activate-latest") {
+        let cmd_path = moon_beauty_shell::libraries::process::mbs_runtime_dir()
+            .join("moon-beauty-shell-notif-cmd");
+        match moon_beauty_shell::libraries::process::private_write_file(
+            &cmd_path,
+            b"activate-latest",
+        ) {
             Ok(_) => std::process::exit(0),
             Err(e) => {
                 eprintln!("[activate-latest] write {:?}: {e}", cmd_path);
@@ -251,10 +271,9 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         }
     }
     if args.iter().any(|a| a == "--dismiss-notif") {
-        let runtime = std::env::var("XDG_RUNTIME_DIR")
-            .unwrap_or_else(|_| format!("/tmp/user-{}", std::process::id()));
-        let cmd_path = std::path::PathBuf::from(runtime).join("moon-beauty-shell-notif-cmd");
-        match std::fs::write(&cmd_path, b"dismiss") {
+        let cmd_path = moon_beauty_shell::libraries::process::mbs_runtime_dir()
+            .join("moon-beauty-shell-notif-cmd");
+        match moon_beauty_shell::libraries::process::private_write_file(&cmd_path, b"dismiss") {
             Ok(_) => std::process::exit(0),
             Err(e) => {
                 eprintln!("[dismiss-notif] write {:?}: {e}", cmd_path);
@@ -274,16 +293,16 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     // Restart bar (used by Settings when changing monitor)
     if args.iter().any(|a| a == "--restart-bar") {
-        // Kill ONLY the bar (end of argv is exactly "moon-beauty-shell"),
-        // and the orphaned tooltips that belong to it. NOT --settings,
-        // NOT --notif-surface, NOT --restart-bar itself.
+        // Finding 22: anchored patterns — require path-prefix before the
+        // binary name and end-of-argv after the flag. Prevents matching
+        // scripts / editors that merely mention the strings.
         let _ = std::process::Command::new("pkill")
-            .args(["-f", "target/release/moon-beauty-shell$"])
+            .args(["-f", "(^|/)moon-beauty-shell$"])
             .status();
         let _ = std::process::Command::new("pkill")
             .args([
                 "-f",
-                "-sys-tooltip|-weather-tooltip|-alarm-tooltip|-tray-popup|-info-tooltip",
+                "(^|/)moon-beauty-shell (--(sys|weather|alarm|info)-tooltip|--tray-popup)$",
             ])
             .status();
         std::thread::sleep(std::time::Duration::from_millis(400));
@@ -319,14 +338,21 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     if args.iter().any(|a| a == "--capture-test") {
         match screenshot::capture::capture_fullscreen() {
             Ok(bytes) => {
-                let path = "/tmp/mbs-capture-test.png";
-                let _ = std::fs::write(path, &bytes);
+                let path = moon_beauty_shell::libraries::process::mbs_unique_tmp(
+                    "mbs-capture-test",
+                    "png",
+                );
+                if let Err(e) =
+                    moon_beauty_shell::libraries::process::private_write_new(&path, &bytes)
+                {
+                    eprintln!("[capture-test] write failed: {e}");
+                }
                 match image::load_from_memory(&bytes) {
                     Ok(img) => println!(
                         "captured {}x{} → {} ({} bytes)",
                         img.width(),
                         img.height(),
-                        path,
+                        path.display(),
                         bytes.len()
                     ),
                     Err(e) => eprintln!("decode: {e}"),
@@ -401,12 +427,13 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         let min_x = outputs.iter().map(|(_, x, _, _, _)| *x).min().unwrap_or(0);
         let min_y = outputs.iter().map(|(_, _, y, _, _)| *y).min().unwrap_or(0);
 
-        let pid = std::process::id();
-        let state_file = std::path::PathBuf::from(format!("/tmp/mbs-freeze-state-{}.txt", pid));
+        let state_file =
+            moon_beauty_shell::libraries::process::mbs_unique_tmp("mbs-freeze-state", "txt");
         screenshot::fragment::write_state_file(&state_file, "idle", 0, 0, 0, 0);
 
         let exe = resolve_exe();
         let mut children: Vec<(String, std::process::Child)> = Vec::new();
+        let mut local_png_paths: Vec<std::path::PathBuf> = Vec::new();
 
         for (name, x, y, w, h) in &outputs {
             let lx = (*x - min_x) as u32;
@@ -415,10 +442,29 @@ pub fn main() -> Result<(), iced_layershell::Error> {
                 continue;
             }
             let crop = image::imageops::crop_imm(&full_img, lx, ly, *w, *h).to_image();
-            let local_png = format!("/tmp/mbs-freeze-{}-{}.png", name, pid);
-            if crop.save(&local_png).is_err() {
+            let local_png = moon_beauty_shell::libraries::process::mbs_unique_tmp(
+                &format!("mbs-freeze-{}", name),
+                "png",
+            );
+            let write_ok = match moon_beauty_shell::libraries::process::private_create_new(
+                &local_png,
+            ) {
+                Ok(mut f) => {
+                    let ok = image::DynamicImage::ImageRgba8(crop)
+                        .write_to(&mut f, image::ImageFormat::Png)
+                        .is_ok();
+                    if !ok {
+                        let _ = std::fs::remove_file(&local_png);
+                    }
+                    ok
+                }
+                Err(_) => false,
+            };
+            if !write_ok {
+                eprintln!("[screenshot] crop write failed: {}", local_png.display());
                 continue;
             }
+            local_png_paths.push(local_png.clone());
 
             match std::process::Command::new(&exe)
                 .args([
@@ -426,7 +472,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
                     name,
                     &x.to_string(),
                     &y.to_string(),
-                    &local_png,
+                    local_png.to_str().unwrap_or(""),
                     state_file.to_str().unwrap_or(""),
                 ])
                 .spawn()
@@ -472,8 +518,8 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         }
 
         // Clean up per-monitor crops
-        for (name, _, _, _, _) in &outputs {
-            let _ = std::fs::remove_file(format!("/tmp/mbs-freeze-{}-{}.png", name, pid));
+        for p in &local_png_paths {
+            let _ = std::fs::remove_file(p);
         }
         let _ = std::fs::remove_file(&state_file);
 
@@ -493,15 +539,31 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         }
 
         let cropped = image::imageops::crop_imm(&full_img, rx, ry, rw, rh).to_image();
-        let out_path = format!("/tmp/mbs-freeze-out-{}.png", pid);
-        if cropped.save(&out_path).is_err() {
+        let out_path =
+            moon_beauty_shell::libraries::process::mbs_unique_tmp("mbs-freeze-out", "png");
+        let save_ok = match moon_beauty_shell::libraries::process::private_create_new(&out_path) {
+            Ok(mut f) => {
+                let ok = image::DynamicImage::ImageRgba8(cropped)
+                    .write_to(&mut f, image::ImageFormat::Png)
+                    .is_ok();
+                if !ok {
+                    let _ = std::fs::remove_file(&out_path);
+                }
+                ok
+            }
+            Err(_) => false,
+        };
+        if !save_ok {
             eprintln!("[screenshot] save crop failed");
             std::process::exit(1);
         }
-        eprintln!("[screenshot] cropped → {}", out_path);
+        eprintln!("[screenshot] cropped → {}", out_path.display());
 
         if annotate {
-            let cmd = IpcCommand::Open(OverlayTarget::Annotator, Some(out_path.clone()));
+            let cmd = IpcCommand::Open(
+                OverlayTarget::Annotator,
+                Some(out_path.to_string_lossy().into_owned()),
+            );
             match send_ipc_sync(&cmd) {
                 Ok(_) => {}
                 Err(e) => {
@@ -584,7 +646,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     if !is_notif_surface && standalone_target.is_none() {
         let _ = std::process::Command::new("pkill")
-            .args(["-f", "--", "moon-beauty-shell --notif-surface"])
+            .args(["-f", "--", "(^|/)moon-beauty-shell --notif-surface$"])
             .status();
         std::thread::sleep(std::time::Duration::from_millis(300));
         let exe = resolve_exe();

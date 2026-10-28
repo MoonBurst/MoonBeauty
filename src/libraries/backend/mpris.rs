@@ -27,6 +27,34 @@ pub struct MprisBackend;
 const MPRIS_IFACE: &str = "org.mpris.MediaPlayer2.Player";
 const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 
+/// Finding 31: cap MPRIS-provided strings before concatenation /
+/// display. The initial `get_property::<String>` allocation is
+/// unavoidable (it's the D-Bus message payload); this bounds the
+/// *derived* work. Real `xesam:title`/`album` are <200 chars; 512 is
+/// generous. `xesam:url` gets 4096 (Windows-style long paths).
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        s.chars().take(max).collect()
+    }
+}
+
+/// Finding 33: parse a `file://` MPRIS track URL into a safe absolute
+/// path. Rejects relative paths and traversal. `open_track_folder` and
+/// `trash_current_track` are the only sinks — both require a user
+/// click, but the click is presented as innocuous ("Folder", "Trash").
+fn safe_mpris_file_path(url: &str) -> Option<std::path::PathBuf> {
+    let clean = url.strip_prefix("file://")?;
+    // Reject relative (file://etc → no leading slash) and traversal
+    // (file:///home/u/../../../etc).
+    if !clean.starts_with('/') || clean.contains("..") {
+        crate::dbg_log!("[mpris] rejected unsafe track url: {:?}", clean);
+        return None;
+    }
+    Some(std::path::PathBuf::from(clean))
+}
+
 impl MprisBackend {
     async fn get_active_player() -> Option<(Connection, String)> {
         let conn = Connection::session().await.ok()?;
@@ -43,21 +71,34 @@ impl MprisBackend {
             .ok()?;
 
         let names: Vec<String> = reply.body().deserialize().ok()?;
+        // Finding 32: cap enumeration at 20. A hostile app can register
+        // thousands of `org.mpris.MediaPlayer2.*` names; unbounded
+        // iteration → unbounded D-Bus probe calls → shell hang.
+        // Real systems have ≤5 legit players; 20 is generous headroom.
         let mpris_names: Vec<String> = names
             .into_iter()
             .filter(|n| n.starts_with("org.mpris.MediaPlayer2."))
             .filter(|n| !n.ends_with(".playerctld"))
+            .take(20)
             .collect();
 
         if mpris_names.is_empty() {
             return None;
         }
 
-        // Prefer a player that's currently Playing
+        // Prefer a player that's currently Playing.
+        // Finding 32: per-player timeout so a hung / hostile proxy
+        // doesn't block the whole enumeration. 2s is generous for a
+        // local D-Bus round-trip (real players respond in <50ms).
         for name in &mpris_names {
             if let Ok(proxy) = zbus::Proxy::new(&conn, name.as_str(), MPRIS_PATH, MPRIS_IFACE).await
             {
-                if let Ok(status) = proxy.get_property::<String>("PlaybackStatus").await {
+                if let Ok(Ok(status)) = tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    proxy.get_property::<String>("PlaybackStatus"),
+                )
+                .await
+                {
                     if status == "Playing" {
                         return Some((conn, name.clone()));
                     }
@@ -79,12 +120,31 @@ impl MprisBackend {
         {
             let g = c.lock().unwrap();
             if let Some((t, tr)) = &*g {
-                if t.elapsed().as_secs() < 5 {
+                // Finding 32: cache None results for 30s instead of 5s.
+                // A hostile player that hangs forces a 10s timeout per
+                // poll; caching the None longer avoids 10s hangs on
+                // every 15s hardware tick.
+                let cache_ttl = if tr.is_some() { 5 } else { 30 };
+                if t.elapsed().as_secs() < cache_ttl {
                     return tr.clone();
                 }
             }
         }
-        let result = Self::poll_uncached().await;
+        // Finding 32: outer 10s timeout caps worst case for the whole
+        // poll_uncached invocation. Per-player timeout is 2s × 20 cap =
+        // 40s worst case; this brings it to 10s.
+        let result = match tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            Self::poll_uncached(),
+        )
+        .await
+        {
+            Ok(r) => r,
+            Err(_) => {
+                eprintln!("[mpris] poll timed out at 10s (finding 32)");
+                None
+            }
+        };
         {
             let mut g = c.lock().unwrap();
             *g = Some((Instant::now(), result.clone()));
@@ -100,27 +160,34 @@ impl MprisBackend {
 
         let metadata: HashMap<String, OwnedValue> = proxy.get_property("Metadata").await.ok()?;
 
-        let get_str = |key: &str| -> Option<String> {
+        // Finding 31: cap each string as it's materialized. The primary
+        // D-Bus allocation is unpreventable at this layer; this bounds
+        // the downstream concat/display amplification.
+        let get_str = |key: &str, max: usize| -> Option<String> {
             metadata.get(key).and_then(|v| match &**v {
-                zbus::zvariant::Value::Str(s) => Some(s.to_string()),
+                zbus::zvariant::Value::Str(s) => Some(truncate_chars(s.as_str(), max)),
                 _ => None,
             })
         };
 
-        let title = get_str("xesam:title").unwrap_or_default();
-        let album = get_str("xesam:album").unwrap_or_default();
-        let url = get_str("xesam:url");
+        let title = get_str("xesam:title", 512).unwrap_or_default();
+        let album = get_str("xesam:album", 512).unwrap_or_default();
+        let url = get_str("xesam:url", 4096);
 
+        // Finding 31: cap array length (8 artists is generous) and each
+        // entry (256 chars). A hostile provider returning 1M-item arrays
+        // × 1KB each would otherwise allocate 1GB during join.
         let artist = metadata
             .get("xesam:artist")
             .and_then(|v| match &**v {
-                zbus::zvariant::Value::Str(s) => Some(s.to_string()),
+                zbus::zvariant::Value::Str(s) => Some(truncate_chars(s.as_str(), 512)),
                 zbus::zvariant::Value::Array(arr) => {
                     let parts: Vec<String> = arr
                         .iter()
+                        .take(8)
                         .filter_map(|item| {
                             if let zbus::zvariant::Value::Str(s) = item {
-                                Some(s.to_string())
+                                Some(truncate_chars(s.as_str(), 256))
                             } else {
                                 None
                             }
@@ -233,29 +300,84 @@ impl MprisBackend {
     }
 
     pub async fn open_track_folder(url_opt: Option<&str>) {
-        if let Some(url) = url_opt {
-            if let Some(clean_path) = url.strip_prefix("file://") {
-                let path = PathBuf::from(clean_path);
-                if let Some(parent) = path.parent() {
-                    let _ = Command::new("xdg-open").arg(parent).spawn();
-                }
+        // Finding 33: reject relative / traversal paths from hostile MPRIS.
+        if let Some(path) = url_opt.and_then(safe_mpris_file_path) {
+            if let Some(parent) = path.parent() {
+                let _ = Command::new("xdg-open").arg(parent).spawn();
             }
         }
     }
 
     pub async fn trash_current_track(url_opt: Option<&str>) -> bool {
-        if let Some(url) = url_opt {
-            if let Some(clean_path) = url.strip_prefix("file://") {
-                let status = Command::new("gio")
-                    .args(["trash", clean_path])
-                    .status()
-                    .await;
-                if status.map(|s| s.success()).unwrap_or(false) {
-                    Self::next().await;
-                    return true;
-                }
+        // Finding 33: `gio trash <path>` destroys the file. Without this
+        // guard, hostile MPRIS sets xesam:url = file:///home/u/.ssh/id_rsa
+        // and the user's "Trash" click silently destroys their SSH key.
+        if let Some(path) = url_opt.and_then(safe_mpris_file_path) {
+            let status = Command::new("gio")
+                .args(["trash"])
+                .arg(&path)
+                .status()
+                .await;
+            if status.map(|s| s.success()).unwrap_or(false) {
+                Self::next().await;
+                return true;
             }
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod safe_mpris_tests {
+    use super::{safe_mpris_file_path, truncate_chars};
+    use std::path::PathBuf;
+
+    #[test]
+    fn truncate_short_unchanged() {
+        assert_eq!(truncate_chars("", 10), "");
+        assert_eq!(truncate_chars("abc", 10), "abc");
+        assert_eq!(truncate_chars("abcdefghij", 10), "abcdefghij");
+    }
+
+    #[test]
+    fn truncate_long_ascii() {
+        assert_eq!(truncate_chars("abcdefghij", 5), "abcde");
+        assert_eq!(truncate_chars("a".repeat(10000).as_str(), 100).len(), 100);
+    }
+
+    #[test]
+    fn truncate_unicode_respects_char_boundary() {
+        // 5 chars (each 3 bytes UTF-8), cap to 3 chars = 9 bytes
+        assert_eq!(truncate_chars("日本語です", 3), "日本語");
+        // Never splits a multi-byte char in half
+        let out = truncate_chars("日本語です", 4);
+        assert_eq!(out.chars().count(), 4);
+        assert_eq!(out, "日本語で");
+    }
+
+    #[test]
+    fn file_path_absolute_accepted() {
+        let p = safe_mpris_file_path("file:///home/user/Music/track.mp3");
+        assert_eq!(p, Some(PathBuf::from("/home/user/Music/track.mp3")));
+    }
+
+    #[test]
+    fn file_path_relative_rejected() {
+        assert!(safe_mpris_file_path("file://etc/passwd").is_none());
+        assert!(safe_mpris_file_path("file://home/user/track.mp3").is_none());
+    }
+
+    #[test]
+    fn file_path_traversal_rejected() {
+        assert!(safe_mpris_file_path("file:///home/user/../../../etc/passwd").is_none());
+        assert!(safe_mpris_file_path("file:///home/user/..").is_none());
+    }
+
+    #[test]
+    fn file_path_non_file_scheme_rejected() {
+        assert!(safe_mpris_file_path("http://example.com/track.mp3").is_none());
+        assert!(safe_mpris_file_path("https://example.com/track.mp3").is_none());
+        assert!(safe_mpris_file_path("spotify:track:abc123").is_none());
+        assert!(safe_mpris_file_path("").is_none());
     }
 }

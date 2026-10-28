@@ -2,6 +2,7 @@ use super::*;
 
 impl MoonBeautyShellApp {
     pub fn new_app() -> (Self, Command<Message>) {
+        moon_beauty_shell::libraries::process::tighten_existing_runtime_state();
         let args: Vec<String> = std::env::args().collect();
         let standalone_target = detect_standalone_overlay(&args);
         if let Some(idx) = args.iter().position(|a| a == "--tray-context-menu") {
@@ -66,8 +67,10 @@ impl MoonBeautyShellApp {
                         Ok((mut stream, _)) => {
                             let _ =
                                 stream.set_read_timeout(Some(std::time::Duration::from_secs(3)));
+                            // Finding 37: cap read at 4 MB.
                             let mut buf = Vec::new();
-                            if let Err(e) = stream.read_to_end(&mut buf) {
+                            let mut limited = std::io::Read::take(&mut stream, 4 * 1024 * 1024);
+                            if let Err(e) = limited.read_to_end(&mut buf) {
                                 eprintln!("[ipc] read error: {e}");
                                 continue;
                             }
