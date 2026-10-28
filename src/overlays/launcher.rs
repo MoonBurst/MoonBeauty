@@ -625,8 +625,8 @@ impl AppLauncher {
                     continue;
                 };
 
-                let mut name = None;
-                let mut exec = None;
+                let mut name: Option<String> = None;
+                let mut exec: Option<String> = None;
                 let mut icon_name: Option<String> = None;
                 let mut nodisplay = false;
                 let mut hidden_flag = false;
@@ -646,17 +646,25 @@ impl AppLauncher {
                     }
                     if let Some(v) = line.strip_prefix("Name=") {
                         if name.is_none() {
-                            name = Some(v.trim().to_string());
+                            // Finding 45: cap Name before render.
+                            name = Some(v.trim().chars().take(256).collect::<String>());
                         }
                     } else if let Some(v) = line.strip_prefix("Exec=") {
                         if exec.is_none() {
                             let raw = v.trim();
-                            let cleaned = raw.split('%').next().unwrap_or(raw).trim().to_string();
-                            exec = Some(cleaned);
+                            // Finding 39: spec-compliant %-code stripping
+                            // (previous split('%').next() lost everything
+                            // after the first %, breaking multi-arg Exec).
+                            let cleaned = Self::strip_field_codes(raw)
+                                .trim()
+                                .to_string();
+                            // Finding 45: cap Exec at 4 KB before render.
+                            exec = Some(cleaned.chars().take(4096).collect::<String>());
                         }
                     } else if let Some(v) = line.strip_prefix("Icon=") {
                         if icon_name.is_none() {
-                            icon_name = Some(v.trim().to_string());
+                            // Finding 45: cap Icon before passing to resolve_icon.
+                            icon_name = Some(v.trim().chars().take(128).collect::<String>());
                         }
                     } else if let Some(v) = line.strip_prefix("OnlyShowIn=") {
                         only_show_in = v.trim().to_lowercase();
@@ -839,16 +847,29 @@ impl AppLauncher {
                         .join("apps")
                         .join(format!("{}.{}", icon_name, ext));
                     if p.exists() {
-                        return Some(p.to_string_lossy().into_owned());
+                        // Finding 40: canonicalize + root check, same as
+                        // tray/watcher.rs (finding 27). Without this, a
+                        // symlink in ~/.local/share/icons/ → /etc/passwd
+                        // is followed and rendered.
+                        if let Some(canon) =
+                            crate::libraries::process::safe_icon_candidate(&p, root)
+                        {
+                            return Some(canon.to_string_lossy().into_owned());
+                        }
                     }
                 }
             }
         }
         for pix in ["/run/current-system/sw/share/pixmaps", "/usr/share/pixmaps"] {
+            let pix_root = PathBuf::from(pix);
             for ext in &exts {
-                let p = PathBuf::from(pix).join(format!("{}.{}", icon_name, ext));
+                let p = pix_root.join(format!("{}.{}", icon_name, ext));
                 if p.exists() {
-                    return Some(p.to_string_lossy().into_owned());
+                    if let Some(canon) =
+                        crate::libraries::process::safe_icon_candidate(&p, &pix_root)
+                    {
+                        return Some(canon.to_string_lossy().into_owned());
+                    }
                 }
             }
         }
@@ -1064,24 +1085,90 @@ impl AppLauncher {
         })
     }
 
+    #[cfg(test)]
+    pub(crate) fn parse_exec_for_test(exec: &str) -> Option<(String, Vec<String>)> {
+        Self::parse_exec(exec)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn strip_field_codes_for_test(raw: &str) -> String {
+        Self::strip_field_codes(raw)
+    }
+
     pub fn focus_search(&mut self) -> iced::Task<LauncherMessage> {
         iced::widget::operation::focus(LAUNCHER_SEARCH_ID)
     }
 
-    pub async fn launch(exec: &str) {
-        if exec.is_empty() {
-            return;
+    /// Finding 39: strip .desktop %-field-codes per spec. Only %%
+    /// survives (as literal %); everything else (%f %F %u %U %i %c %k
+    /// plus deprecated variants) is dropped. Previously this used
+    /// `raw.split('%').next()`, which lost every character after the
+    /// first %, silently breaking `Exec=app %f --flag`.
+    fn strip_field_codes(raw: &str) -> String {
+        let mut out = String::with_capacity(raw.len());
+        let mut it = raw.chars().peekable();
+        while let Some(c) = it.next() {
+            if c == '%' {
+                match it.next() {
+                    Some('%') => out.push('%'),
+                    Some(_) => {} // drop %f/%F/%u/%U/%i/%c/%k/%d/%D/%n/%N/%v/%m
+                    None => out.push('%'),
+                }
+            } else {
+                out.push(c);
+            }
         }
+        out
+    }
+
+    /// Finding 39: tokenize a .desktop Exec line without invoking a
+    /// shell. Implements the subset of the spec that real .desktop
+    /// files use: whitespace separation, single/double quotes, and
+    /// backslash escape outside quotes. Rejects unbalanced quotes by
+    /// returning None (caller logs and refuses to launch).
+    fn parse_exec(exec: &str) -> Option<(String, Vec<String>)> {
+        let mut tokens: Vec<String> = Vec::new();
+        let mut cur = String::new();
+        let mut in_single = false;
+        let mut in_double = false;
+        let mut it = exec.chars().peekable();
+        while let Some(c) = it.next() {
+            match (c, in_single, in_double) {
+                ('\\', false, false) => {
+                    if let Some(&n) = it.peek() { cur.push(n); it.next(); }
+                    else { cur.push('\\'); }
+                }
+                ('\'', false, false) => in_single = true,
+                ('\'', true, _) => in_single = false,
+                ('"', false, false) => in_double = true,
+                ('"', _, true) => in_double = false,
+                (' ', false, false) | ('\t', false, false) => {
+                    if !cur.is_empty() { tokens.push(std::mem::take(&mut cur)); }
+                }
+                _ => cur.push(c),
+            }
+        }
+        if in_single || in_double { return None; }
+        if !cur.is_empty() { tokens.push(cur); }
+        let mut tok_it = tokens.into_iter();
+        let prog = tok_it.next()?;
+        Some((prog, tok_it.collect()))
+    }
+
+    pub async fn launch(exec: &str) {
+        if exec.is_empty() { return; }
+        // Finding 39: NEVER invoke a shell on .desktop Exec content.
+        // Tokenize + exec directly. A hostile .desktop with
+        // `Exec=foo; rm -rf ~` now becomes program="foo" with args
+        // [";", "rm", "-rf", "~"] — shell metachars are inert.
+        let Some((prog, args)) = Self::parse_exec(exec) else {
+            eprintln!("[launcher] refusing to launch: unparseable Exec {:?}", exec);
+            return;
+        };
         let _ = Command::new("systemd-run")
-            .args([
-                "--user",
-                "--collect",
-                "--quiet",
-                "--slice=app.slice",
-                "sh",
-                "-c",
-                exec,
-            ])
+            .args(["--user", "--collect", "--quiet", "--slice=app.slice", "--"])
+            .arg(&prog)
+            .args(&args)
             .spawn();
     }
 
@@ -1520,5 +1607,94 @@ impl AppLauncher {
             .center_x(Length::Fill)
             .center_y(Length::Fill)
             .into()
+    }
+}
+
+
+#[cfg(test)]
+mod parse_exec_tests {
+    use super::AppLauncher;
+
+    #[test]
+    fn simple_command() {
+        let (prog, args) = AppLauncher::parse_exec_for_test("firefox").unwrap();
+        assert_eq!(prog, "firefox");
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn command_with_args() {
+        let (prog, args) = AppLauncher::parse_exec_for_test("firefox --new-window").unwrap();
+        assert_eq!(prog, "firefox");
+        assert_eq!(args, vec!["--new-window"]);
+    }
+
+    #[test]
+    fn double_quoted_argument() {
+        let (prog, args) =
+            AppLauncher::parse_exec_for_test(r#"foo "bar baz""#).unwrap();
+        assert_eq!(prog, "foo");
+        assert_eq!(args, vec!["bar baz"]);
+    }
+
+    #[test]
+    fn single_quoted_argument() {
+        let (prog, args) =
+            AppLauncher::parse_exec_for_test("foo 'bar baz'").unwrap();
+        assert_eq!(prog, "foo");
+        assert_eq!(args, vec!["bar baz"]);
+    }
+
+    #[test]
+    fn shell_metachars_are_literal_args() {
+        // Finding 39 regression: ; | & $ ( ) must NOT be interpreted.
+        let (prog, args) =
+            AppLauncher::parse_exec_for_test("foo; rm -rf ~").unwrap();
+        assert_eq!(prog, "foo;");
+        assert_eq!(args, vec!["rm", "-rf", "~"]);
+    }
+
+    #[test]
+    fn dollar_command_substitution_literal() {
+        let (prog, args) =
+            AppLauncher::parse_exec_for_test("firefox $(id)").unwrap();
+        assert_eq!(prog, "firefox");
+        assert_eq!(args, vec!["$(id)"]);
+    }
+
+    #[test]
+    fn unbalanced_quote_rejected() {
+        assert!(AppLauncher::parse_exec_for_test(r#"foo "bar"#).is_none());
+        assert!(AppLauncher::parse_exec_for_test("foo 'bar").is_none());
+    }
+
+    #[test]
+    fn empty_returns_none() {
+        assert!(AppLauncher::parse_exec_for_test("").is_none());
+        assert!(AppLauncher::parse_exec_for_test("   ").is_none());
+    }
+
+    #[test]
+    fn backslash_escape() {
+        let (prog, args) =
+            AppLauncher::parse_exec_for_test(r"foo\bar").unwrap();
+        assert_eq!(prog, "foobar");
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn percent_codes_stripped() {
+        assert_eq!(
+            AppLauncher::strip_field_codes_for_test("firefox %u"),
+            "firefox "
+        );
+        assert_eq!(
+            AppLauncher::strip_field_codes_for_test("app %f --flag"),
+            "app  --flag"
+        );
+        assert_eq!(
+            AppLauncher::strip_field_codes_for_test("echo 100%%"),
+            "echo 100%"
+        );
     }
 }

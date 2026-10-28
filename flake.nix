@@ -24,6 +24,7 @@
           pipewire
           pam
           dbus
+          openssl
         ];
 
         # External CLI tools the shell invokes via Command::new().
@@ -78,6 +79,15 @@
           ];
           buildInputs = linkLibs p;
 
+          # openssl-sys needs an explicit hint in the hermetic Nix sandbox.
+          # Belt-and-suspenders alongside pkg-config: OPENSSL_DIR for
+          # the direct-lookup path, OPENSSL_NO_VENDOR to fail cleanly
+          # (not attempt a network-vendored build needing perl).
+          env = {
+            OPENSSL_DIR = "${p.openssl.dev}";
+            OPENSSL_NO_VENDOR = "1";
+          };
+
           doCheck = true;
           preCheck = ''
             unset XDG_RUNTIME_DIR XDG_DATA_HOME XDG_CACHE_HOME XDG_CONFIG_HOME || true
@@ -122,7 +132,8 @@
             # LD_LIBRARY_PATH forces glibc's loader to probe every entry for
             # every library — ~700 failed openat() calls per spawn, ~130 ms
             # of wasted disk I/O. rpath uses ld.so.cache, one probe per lib.
-            export NIX_RPATH_PATHS="${pkgs.lib.makeLibraryPath (linkLibs pkgs)}:/run/opengl-driver/lib:/run/opengl-driver-32/lib"
+                        export OPENSSL_DIR=${pkgs.openssl.dev}
+export NIX_RPATH_PATHS="${pkgs.lib.makeLibraryPath (linkLibs pkgs)}:/run/opengl-driver/lib:/run/opengl-driver-32/lib"
             export RUSTFLAGS="-C link-arg=-fuse-ld=mold -C link-arg=-Wl,--enable-new-dtags,-rpath,$NIX_RPATH_PATHS"
           '';
         };

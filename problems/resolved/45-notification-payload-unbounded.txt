@@ -1,0 +1,21 @@
+45 MED-DoS notification payload + history unbounded
+
+   file: src/overlays/notifications/ui.rs::push_notification, ::load_history
+
+   why:  app_name/summary/body/actions stored with no caps. Any
+         same-user process calling notify-send (or D-Bus directly)
+         sends 100 MB body. Bounded to 80 history entries × 100 MB =
+         8 GB in ~/.cache/moon_notification_history.json. Next launch:
+         read_to_string + serde + to_string_pretty migration =
+         triple allocation → session OOM at login.
+
+   fix:  push_notification caps: app_name ≤128, summary ≤512, body
+         ≤4096, actions ≤16 × ≤256.
+         load_history: 8 MB file-size pre-check; reset if over.
+
+   also: launcher::scan_desktop_files caps .desktop Name ≤256,
+         Exec ≤4096, Icon ≤128 (rendered in launcher UI).
+
+   residual:  Initial D-Bus payload allocation is unpreventable at this
+              layer (same class as finding 31). Practical impact bounded
+              by D-Bus default 128 MB message cap + push caps above.

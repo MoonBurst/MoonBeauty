@@ -312,6 +312,27 @@ pub fn is_safe_app_id(s: &str) -> bool {
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
+/// Canonicalize an icon candidate and verify it stays under its
+/// declared root. Blocks symlink-to-sensitive-file — same class as the
+/// tray/watcher.rs version added for finding 27. Used by launcher.rs
+/// and any future icon resolver that wants the same guarantee.
+pub fn safe_icon_candidate(
+    candidate: &std::path::Path,
+    root: &std::path::Path,
+) -> Option<PathBuf> {
+    let canon = std::fs::canonicalize(candidate).ok()?;
+    let canon_root = std::fs::canonicalize(root).ok()?;
+    if canon.starts_with(&canon_root) {
+        Some(canon)
+    } else {
+        eprintln!(
+            "[icon] symlink escape blocked: {:?} -> {:?}",
+            candidate, canon
+        );
+        None
+    }
+}
+
 pub fn resolve_exe() -> PathBuf {
     std::env::current_exe()
         .ok()

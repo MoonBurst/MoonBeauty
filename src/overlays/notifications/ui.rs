@@ -529,6 +529,22 @@ impl NotificationOverlay {
 
     pub fn load_history() -> Vec<NotificationToast> {
         let path = Self::history_path();
+        // Finding 45: file-size pre-check. A pre-fix history file with
+        // 8 GB of notifications would OOM on read_to_string + serde +
+        // to_string_pretty-for-migration. Reset if over cap.
+        const MAX_HISTORY_BYTES: u64 = 8 * 1024 * 1024;
+        match std::fs::metadata(&path) {
+            Ok(m) if m.len() > MAX_HISTORY_BYTES => {
+                eprintln!(
+                    "[notif] history file {} bytes exceeds {} cap, resetting",
+                    m.len(), MAX_HISTORY_BYTES
+                );
+                let _ = std::fs::remove_file(&path);
+                return Vec::new();
+            }
+            Ok(_) => {}
+            Err(_) => return Vec::new(),
+        }
         if path.exists() {
             if let Ok(raw) = fs::read_to_string(&path) {
                 if let Ok(mut items) = serde_json::from_str::<Vec<NotificationToast>>(&raw) {
@@ -614,6 +630,29 @@ impl NotificationOverlay {
         actions: Vec<String>,
         settings: &ShellSettings,
     ) {
+        // Finding 45: cap attacker-controlled fields. Notification
+        // payloads arrive from any same-user D-Bus client (any app
+        // calling notify-send, or D-Bus directly). A 100 MB body is
+        // bounded to 4 KB; history stays small; load_history can
+        // never OOM. Caps generous for real content.
+        const MAX_APP_NAME: usize = 128;
+        const MAX_SUMMARY: usize = 512;
+        const MAX_BODY: usize = 4096;
+        const MAX_ACTIONS: usize = 16;
+        const MAX_ACTION_LEN: usize = 256;
+        let cap = |s: &str, n: usize| -> String {
+            if s.chars().count() <= n { s.to_string() }
+            else { s.chars().take(n).collect() }
+        };
+        let app_name: String = cap(app_name, MAX_APP_NAME);
+        let summary: String = cap(summary, MAX_SUMMARY);
+        let body: String = cap(body, MAX_BODY);
+        let actions: Vec<String> = actions
+            .into_iter()
+            .take(MAX_ACTIONS)
+            .map(|a| cap(&a, MAX_ACTION_LEN))
+            .collect();
+
         let id = rand_id();
 
         let matched_profile = settings.friend_profiles.iter().find(|p| {
