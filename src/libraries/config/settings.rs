@@ -177,15 +177,12 @@ pub fn find_friend_profiles_path() -> PathBuf {
 }
 
 pub fn load_friend_profiles() -> Vec<FriendProfile> {
-    let path = find_friend_profiles_path();
-    if path.exists() {
-        if let Ok(content) = fs::read_to_string(&path) {
-            if let Ok(list) = serde_json::from_str::<Vec<FriendProfile>>(&content) {
-                return list;
-            }
-        }
-    }
-    Vec::new()
+    // Finding 47: 4 MB cap.
+    crate::libraries::process::read_json_capped::<Vec<FriendProfile>>(
+        &find_friend_profiles_path(),
+        4 * 1024 * 1024,
+    )
+    .unwrap_or_default()
 }
 
 pub fn save_friend_profiles(profiles: &[FriendProfile]) -> Result<(), std::io::Error> {
@@ -768,9 +765,12 @@ impl ShellSettings {
                 path.exists()
             );
         }
-        if path.exists() {
-            if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(mut settings) = serde_json::from_str::<ShellSettings>(&content) {
+        // Finding 47: 2 MB cap on settings.json.
+        if let Some(mut settings) = crate::libraries::process::read_json_capped::<ShellSettings>(
+            &path,
+            2 * 1024 * 1024,
+        ) {
+            {
                     let mut disk_profiles = load_friend_profiles();
                     if !disk_profiles.is_empty() {
                         // Migrate broken templates that inject "a new" or {summary}
@@ -795,7 +795,6 @@ impl ShellSettings {
                         settings.friend_profiles = disk_profiles;
                     }
                     return settings;
-                }
             }
         }
         let mut def = Self::default();

@@ -29,6 +29,18 @@ impl std::fmt::Debug for Message {
 }
 
 pub fn read_state_file(path: &std::path::Path) -> (String, i32, i32, i32, i32) {
+    // Finding 50: cap state-file read at 1KB. The coordination file is
+    // 5 short lines (~30 bytes); a hostile same-user process could
+    // truncate+write it between orchestrator writes. Metadata-first
+    // check avoids the read_to_string allocation entirely on oversize.
+    const MAX_BYTES: u64 = 1024;
+    if std::fs::metadata(path).map(|m| m.len()).unwrap_or(0) > MAX_BYTES {
+        eprintln!(
+            "[fragment] state file exceeds {} bytes, treating as idle",
+            MAX_BYTES
+        );
+        return ("idle".into(), 0, 0, 0, 0);
+    }
     let Ok(content) = std::fs::read_to_string(path) else {
         return ("idle".into(), 0, 0, 0, 0);
     };

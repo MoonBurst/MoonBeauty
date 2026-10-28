@@ -65,8 +65,11 @@ impl MoonBeautyShellApp {
                 loop {
                     match listener.accept() {
                         Ok((mut stream, _)) => {
+                            // Finding 49: 1s timeout bounds per-connection
+                            // accept-loop block. Was 3s; a stalled client
+                            // held the accept loop for 3s per connection.
                             let _ =
-                                stream.set_read_timeout(Some(std::time::Duration::from_secs(3)));
+                                stream.set_read_timeout(Some(std::time::Duration::from_secs(1)));
                             // Finding 37: cap read at 4 MB.
                             let mut buf = Vec::new();
                             let mut limited = std::io::Read::take(&mut stream, 4 * 1024 * 1024);
@@ -188,13 +191,25 @@ impl MoonBeautyShellApp {
             annotator: {
                 let mut a = AnnotatorOverlay::new();
                 if let Ok(p) = std::env::var("MBS_ANNOTATOR_PATH") {
+                    // Finding 46: reject non-absolute / traversal paths
+                    // before reading. Same-user IPC can set this env;
+                    // path validation + the byte cap in load_image
+                    // together bound the exposure.
                     let pb = std::path::PathBuf::from(&p);
+                    let safe = pb.is_absolute() && !p.contains("..");
+                    if !safe {
+                        eprintln!(
+                            "[annotator] rejecting unsafe MBS_ANNOTATOR_PATH: {:?}",
+                            p
+                        );
+                    } else {
                     match std::fs::read(&pb) {
                         Ok(bytes) => {
                             a.load_image(pb, bytes);
                             eprintln!("[annotator] loaded capture from {p}");
                         }
                         Err(e) => eprintln!("[annotator] failed to read {p}: {e}"),
+                    }
                     }
                 }
                 a

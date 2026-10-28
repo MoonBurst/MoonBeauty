@@ -145,18 +145,15 @@ impl TodoOverlay {
     }
 
     pub fn load() -> TodoDb {
-        let path = Self::storage_path();
-        if path.exists() {
-            if let Ok(raw) = fs::read_to_string(&path) {
-                if let Ok(db) = serde_json::from_str::<TodoDb>(&raw) {
-                    return db;
-                }
-            }
-        }
-        TodoDb {
+        // Finding 47: 8 MB cap.
+        crate::libraries::process::read_json_capped::<TodoDb>(
+            &Self::storage_path(),
+            8 * 1024 * 1024,
+        )
+        .unwrap_or_else(|| TodoDb {
             categories: vec!["Inbox".into()],
             todos: Vec::new(),
-        }
+        })
     }
 
     pub fn save(&self) {

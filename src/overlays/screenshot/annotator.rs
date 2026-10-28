@@ -161,6 +161,32 @@ impl AnnotatorOverlay {
     }
 
     pub fn load_image(&mut self, path: PathBuf, bytes: Vec<u8>) {
+        // Finding 46: cap raw bytes + dimension pre-decode. Same class as
+        // finding 27 (tray). A hostile PNG forces OOM through the decode
+        // path even if raw bytes are small (compression bomb).
+        const MAX_RAW: usize = 100 * 1024 * 1024;
+        const MAX_DIM: u32 = 16384;
+        if bytes.len() > MAX_RAW {
+            self.status = format!(
+                "image too large to load ({} MB exceeds {} MB cap)",
+                bytes.len() / (1024 * 1024), MAX_RAW / (1024 * 1024)
+            );
+            return;
+        }
+        let dims = ::image::ImageReader::new(std::io::Cursor::new(&bytes))
+            .with_guessed_format()
+            .ok()
+            .and_then(|r| r.into_dimensions().ok());
+        match dims {
+            Some((w, h)) if w <= MAX_DIM && h <= MAX_DIM => {}
+            other => {
+                self.status = format!(
+                    "image rejected by dimension gate {:?} (cap {}×{})",
+                    other, MAX_DIM, MAX_DIM
+                );
+                return;
+            }
+        }
         match ::image::load_from_memory(&bytes) {
             Ok(img) => {
                 self.image_size = Size::new(img.width() as f32, img.height() as f32);

@@ -99,15 +99,12 @@ impl RemindersOverlay {
     }
 
     pub fn load() -> Vec<ReminderEntry> {
-        let path = Self::storage_path();
-        if path.exists() {
-            if let Ok(raw) = fs::read_to_string(&path) {
-                if let Ok(items) = serde_json::from_str::<Vec<ReminderEntry>>(&raw) {
-                    return items;
-                }
-            }
-        }
-        Vec::new()
+        // Finding 47: 4 MB cap.
+        crate::libraries::process::read_json_capped::<Vec<ReminderEntry>>(
+            &Self::storage_path(),
+            4 * 1024 * 1024,
+        )
+        .unwrap_or_default()
     }
 
     pub fn save(&self) {

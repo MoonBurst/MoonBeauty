@@ -31,9 +31,17 @@ pub fn spawn(tx: Sender<AnnotatorCommand>) {
         loop {
             match listener.accept() {
                 Ok((mut stream, _)) => {
-                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(3)));
+                    // Finding 49: 1s timeout (was 3s).
+                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(1)));
+                    // Finding 51: 4MB Take cap (same as finding 37 for
+                    // the two main IPC accept paths). Without this, a
+                    // same-user client sends 1GB JSON-shaped bytes →
+                    // OOM. Currently this code path has no caller, but
+                    // it compiles and would ship unhardened if wired up.
+                    const MAX_MSG: u64 = 4 * 1024 * 1024;
                     let mut buf = Vec::new();
-                    if stream.read_to_end(&mut buf).is_err() {
+                    let mut limited = std::io::Read::take(&mut stream, MAX_MSG);
+                    if limited.read_to_end(&mut buf).is_err() {
                         continue;
                     }
                     match serde_json::from_slice::<AnnotatorCommand>(&buf) {

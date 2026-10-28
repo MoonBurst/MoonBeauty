@@ -333,6 +333,44 @@ pub fn safe_icon_candidate(
     }
 }
 
+/// Read a JSON file with a size cap. Returns None on missing / oversized
+/// / malformed. Used by every user-state loader (settings, todos,
+/// reminders, held notifs, dictionaries, caches) to prevent a hostile
+/// same-user process from OOMing the shell at next launch with a
+/// multi-GB file.
+pub fn read_json_capped<T: serde::de::DeserializeOwned>(
+    path: &std::path::Path,
+    max_bytes: u64,
+) -> Option<T> {
+    match std::fs::metadata(path) {
+        Ok(m) if m.len() > max_bytes => {
+            eprintln!(
+                "[json] {} is {} bytes, exceeds {} cap; skipping",
+                path.display(), m.len(), max_bytes
+            );
+            None
+        }
+        Ok(_) => {
+            let raw = std::fs::read_to_string(path).ok()?;
+            serde_json::from_str(&raw).ok()
+        }
+        Err(_) => None,
+    }
+}
+
+/// Spawn a command and reap it in a detached thread. Prevents zombie
+/// accumulation when the Child handle is dropped without wait (finding
+/// 48). Suitable for fire-and-forget spawns like notify-send, xdg-open,
+/// wl-copy.
+pub fn spawn_and_reap(cmd: &mut std::process::Command) -> std::io::Result<u32> {
+    let mut child = cmd.spawn()?;
+    let pid = child.id();
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(pid)
+}
+
 pub fn resolve_exe() -> PathBuf {
     std::env::current_exe()
         .ok()

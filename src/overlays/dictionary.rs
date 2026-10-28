@@ -79,15 +79,12 @@ impl DictionaryOverlay {
     }
 
     pub fn load_cache() -> HashMap<String, Vec<MeaningEntry>> {
-        let path = Self::cache_path();
-        if path.exists() {
-            if let Ok(raw) = fs::read_to_string(&path) {
-                if let Ok(map) = serde_json::from_str(&raw) {
-                    return map;
-                }
-            }
-        }
-        HashMap::new()
+        // Finding 47: 8 MB cap.
+        crate::libraries::process::read_json_capped::<HashMap<String, Vec<MeaningEntry>>>(
+            &Self::cache_path(),
+            8 * 1024 * 1024,
+        )
+        .unwrap_or_default()
     }
 
     fn save_cache(&self) {

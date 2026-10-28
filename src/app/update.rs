@@ -186,16 +186,17 @@ impl MoonBeautyShellApp {
                             } else {
                                 e.text.clone()
                             };
-                            let _ = std::process::Command::new("notify-send")
-                                .args([
+                            // Finding 48: reap to prevent zombie accumulation.
+                            let _ = moon_beauty_shell::libraries::process::spawn_and_reap(
+                                std::process::Command::new("notify-send").args([
                                     "-a",
                                     "Alarm",
                                     "-u",
                                     "critical",
                                     "⏰ Timer Complete!",
                                     &text,
-                                ])
-                                .spawn();
+                                ]),
+                            );
 
                             if e.play_sound {
                                 if let Some(sound) = &self.settings.alarm_sound {
@@ -299,9 +300,10 @@ impl MoonBeautyShellApp {
                         eprintln!("[sync] New email from {}: {}", env.sender, env.subject);
 
                         // Visual notification
-                        let _ = std::process::Command::new("notify-send")
-                            .args(["-a", "Email", &env.sender, &env.subject])
-                            .spawn();
+                        let _ = moon_beauty_shell::libraries::process::spawn_and_reap(
+                            std::process::Command::new("notify-send")
+                                .args(["-a", "Email", &env.sender, &env.subject]),
+                        );
 
                         // Spoken announcement
                         moon_beauty_shell::overlays::notifications::NotificationOverlay::speak_tts(
@@ -489,9 +491,10 @@ impl MoonBeautyShellApp {
                             "Telemetry stream established.",
                         ),
                     ] {
-                        let _ = std::process::Command::new("notify-send")
-                            .args(["-a", "Diagnostics", title, body])
-                            .spawn();
+                        let _ = moon_beauty_shell::libraries::process::spawn_and_reap(
+                            std::process::Command::new("notify-send")
+                                .args(["-a", "Diagnostics", title, body]),
+                        );
                     }
                 }
                 IpcCommand::IncomingNotif { .. } => {}

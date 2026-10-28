@@ -1808,15 +1808,14 @@ pub fn held_notifs_path() -> PathBuf {
 }
 
 pub fn load_held_notifs() -> Vec<NotificationToast> {
-    let p = held_notifs_path();
-    if p.exists() {
-        if let Ok(content) = fs::read_to_string(&p) {
-            if let Ok(list) = serde_json::from_str::<Vec<NotificationToast>>(&content) {
-                return list;
-            }
-        }
-    }
-    Vec::new()
+    // Finding 47: 16 MB cap (80 history × ~4 KB × 50 = 16 MB headroom;
+    // a real DND storm can reach this). Prevents a pre-fix file written
+    // at 400 MB from OOMing on read.
+    crate::libraries::process::read_json_capped::<Vec<NotificationToast>>(
+        &held_notifs_path(),
+        16 * 1024 * 1024,
+    )
+    .unwrap_or_default()
 }
 
 pub fn save_held_notifs(toasts: &[NotificationToast]) {
