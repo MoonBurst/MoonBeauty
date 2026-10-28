@@ -713,7 +713,18 @@ impl NotificationOverlay {
         };
 
         let tts_pending = !is_test && matched_profile.map(|p| p.tts).unwrap_or(false);
-        let tts_readout = matched_profile.and_then(|p| p.default_readout.clone());
+        let mut tts_readout = matched_profile.and_then(|p| p.default_readout.clone());
+        
+        // Apply custom content rules if they match the summary or body
+        if let Some(p) = matched_profile {
+            for rule in &p.content_rules {
+                let pat = rule.pattern.to_lowercase();
+                if summary.to_lowercase().contains(&pat) || body.to_lowercase().contains(&pat) {
+                    tts_readout = Some(rule.readout.clone());
+                    break;
+                }
+            }
+        }
         let tts_command = settings.tts_command.clone();
         eprintln!(
             "[tts-defer] app={:?} pending={} summary={:?}",
@@ -810,7 +821,14 @@ impl NotificationOverlay {
         let b = body.to_string();
         let readout_template = _custom_readout
             .map(|s| s.to_string())
-            .unwrap_or_else(|| "Message from {sender}".to_string());
+            .unwrap_or_else(|| {
+                let lower = format!("{} {}", s, b).to_lowercase();
+                if lower.contains("logged in") || lower.contains("signed in") {
+                    "{sender} has logged in".to_string()
+                } else {
+                    "Message from {sender}".to_string()
+                }
+            });
 
         std::thread::spawn(move || {
             // Smart sender extraction
@@ -836,6 +854,15 @@ impl NotificationOverlay {
 
                 if !is_generic {
                     sender = s.clone();
+                // Strip common login suffixes so "{sender} has logged in"
+                // doesn't become "Player has logged in has logged in".
+                let lower_sender = sender.to_lowercase();
+                for suffix in [" has logged in", " has signed in", " is now online", " logged in"] {
+                    if lower_sender.ends_with(suffix) {
+                        sender = sender[..sender.len() - suffix.len()].trim().to_string();
+                        break;
+                    }
+                }
                 } else if !b.is_empty() && b.len() < 30 && !b.contains(':') {
                     let b_lower = b.to_lowercase();
                     if !b_lower.contains("voice") && !b_lower.contains("new message") {

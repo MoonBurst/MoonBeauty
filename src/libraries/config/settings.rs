@@ -777,6 +777,14 @@ impl ShellSettings {
                                     *readout = "Message from {name}".to_string();
                                 }
                             }
+                            // Inject the default "logged in" rule if it's missing
+                            if !p.content_rules.iter().any(|r| r.pattern.to_lowercase().contains("logged in")) {
+                                p.content_rules.push(ContentRule {
+                                    pattern: "logged in".into(),
+                                    readout: "{name} has logged in".into(),
+                                    sound_path: None,
+                                });
+                            }
                         }
                         settings.friend_profiles = disk_profiles;
                     }

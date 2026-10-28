@@ -452,7 +452,13 @@ impl SettingsOverlay {
                     sound_path: None,
                     tts: true,
                     default_readout: Some("Message from {name}: {body}".into()),
-                    content_rules: Vec::new(),
+                    content_rules: vec![
+                        crate::libraries::config::settings::ContentRule {
+                            pattern: "logged in".into(),
+                            readout: "{name} has logged in".into(),
+                            sound_path: None,
+                        }
+                    ],
                 });
                 self.selected_profile = settings.friend_profiles.len().saturating_sub(1);
                 let _ = crate::libraries::config::settings::save_friend_profiles(
