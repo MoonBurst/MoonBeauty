@@ -78,7 +78,19 @@
           ];
           buildInputs = linkLibs p;
 
+          doCheck = true;
+          preCheck = ''
+            unset XDG_RUNTIME_DIR XDG_DATA_HOME XDG_CACHE_HOME XDG_CONFIG_HOME || true
+          '';
+
           postInstall = ''
+            # Hardening: refuse to package if lock-debug-bypass is compiled in.
+            if grep -aqF 'DEBUG BYPASS (compile-time feature)' $out/bin/moon-beauty-shell; then
+              echo "FATAL: lock-debug-bypass feature compiled into release binary" >&2
+              echo "       Rebuild without --features lock-debug-bypass." >&2
+              exit 1
+            fi
+
             wrapProgram $out/bin/moon-beauty-shell \
               --prefix PATH : ${p.lib.makeBinPath (runtimeTools p)}
           '';
@@ -102,6 +114,7 @@
           nativeBuildInputs = with pkgs; [
             rustc cargo rustfmt clippy pkg-config
             stdenv.cc gcc binutils mold lld
+            cargo-audit   # run: cargo audit
           ];
           buildInputs = (linkLibs pkgs) ++ (runtimeTools pkgs);
           shellHook = ''
@@ -122,6 +135,15 @@
           let cfg = config.services.moon-beauty-shell; in {
             options.services.moon-beauty-shell = {
               enable = lib.mkEnableOption "Moon Beauty Shell (bar, tooltips, overlays)";
+
+              harden = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = ''
+                  Strip MBS_DEBUG and MBS_LOCK_DEBUG_PASS from the
+                  service environment via systemd UnsetEnvironment.
+                '';
+              };
 
               package = lib.mkOption {
                 type = lib.types.package;
@@ -181,6 +203,11 @@
                   ] ++ lib.optionals (cfg.output != "") [
                     "MBS_OUTPUT=${cfg.output}"
                   ];
+
+                  UnsetEnvironment = lib.optionals cfg.harden [
+                    "MBS_DEBUG"
+                    "MBS_LOCK_DEBUG_PASS"
+                  ];
                 };
 
                 Install.WantedBy = [ "graphical-session.target" ];
@@ -196,6 +223,15 @@
           let cfg = config.services.moon-beauty-shell; in {
             options.services.moon-beauty-shell = {
               enable = lib.mkEnableOption "Moon Beauty Shell for all users";
+
+              harden = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = ''
+                  Strip MBS_DEBUG and MBS_LOCK_DEBUG_PASS from the
+                  service environment via systemd UnsetEnvironment.
+                '';
+              };
 
               package = lib.mkOption {
                 type = lib.types.package;
@@ -244,6 +280,11 @@
                   Restart = "always";
                   RestartSec = 2;
                   Environment = [ "RUST_BACKTRACE=1" ];
+
+                  UnsetEnvironment = lib.optionals cfg.harden [
+                    "MBS_DEBUG"
+                    "MBS_LOCK_DEBUG_PASS"
+                  ];
                 };
                 Install.WantedBy = [ "graphical-session.target" ];
               };
