@@ -7,9 +7,6 @@ description = "High-performance Wayland desktop shell and overlay matrix in Rust
 
 [dependencies]
 sha2 = "0.10"
-rand_chacha = "0.3"
-rand = "0.8"
-async-channel = "2"
 iced_futures = "0.14"
 iced = { version = "0.14", features = ["advanced", "tokio", "canvas", "image", "svg", "unconditional-rendering"] }
 iced_layershell = { version = "0.14.2", default-features = false, features = ["tiny-skia", "fira-sans"] }
@@ -30,7 +27,6 @@ native-tls = "0.2"
 mail-parser = "0.9"
 html2text = "0.12"
 rfd = { version = "0.14", default-features = false, features = ["xdg-portal", "tokio"] }
-pkcs8 = "0.10"
 sysinfo = "0.31"
 zbus = { version = "4.4", features = ["tokio"] }
 wayland-client = "0.31.15"
