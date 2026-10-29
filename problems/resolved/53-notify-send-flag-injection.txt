@@ -1,0 +1,12 @@
+53 LOW-preventive notify-send args without -- guard
+
+   file: src/app/update.rs (3 call sites)
+         src/main.rs (--notify CLI path)
+
+   why:  notify-send's getopt parser treats leading-dash args as flags.
+         Sender/subject from attacker-controlled IMAP could look like
+         --urgency=critical or --icon=/path. Nuisance only — no exploit
+         class, but institutionalize the pattern.
+
+   fix:  Insert `--` between options and positional arguments at all 4
+         sites. Positional args (sender, subject) can't be reinterpreted.

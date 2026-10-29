@@ -603,7 +603,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             args.get(4).map(|s| s.as_str()).unwrap_or("")
         };
         let _ = std::process::Command::new("notify-send")
-            .args(["-a", "Desktop", summary, body])
+            .args(["-a", "Desktop", "--", summary, body])
             .spawn();
         std::process::exit(0);
     }

@@ -189,12 +189,8 @@ impl MoonBeautyShellApp {
                             // Finding 48: reap to prevent zombie accumulation.
                             let _ = moon_beauty_shell::libraries::process::spawn_and_reap(
                                 std::process::Command::new("notify-send").args([
-                                    "-a",
-                                    "Alarm",
-                                    "-u",
-                                    "critical",
-                                    "⏰ Timer Complete!",
-                                    &text,
+                                    "-a", "Alarm", "-u", "critical",
+                                    "--", "⏰ Timer Complete!", &text,
                                 ]),
                             );
 
@@ -302,7 +298,7 @@ impl MoonBeautyShellApp {
                         // Visual notification
                         let _ = moon_beauty_shell::libraries::process::spawn_and_reap(
                             std::process::Command::new("notify-send")
-                                .args(["-a", "Email", &env.sender, &env.subject]),
+                                .args(["-a", "Email", "--", &env.sender, &env.subject]),
                         );
 
                         // Spoken announcement
@@ -493,7 +489,7 @@ impl MoonBeautyShellApp {
                     ] {
                         let _ = moon_beauty_shell::libraries::process::spawn_and_reap(
                             std::process::Command::new("notify-send")
-                                .args(["-a", "Diagnostics", title, body]),
+                                .args(["-a", "Diagnostics", "--", title, body]),
                         );
                     }
                 }

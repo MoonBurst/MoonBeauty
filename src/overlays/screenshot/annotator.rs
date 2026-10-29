@@ -187,8 +187,24 @@ impl AnnotatorOverlay {
                 return;
             }
         }
-        match ::image::load_from_memory(&bytes) {
-            Ok(img) => {
+        // Finding 52: bound the decoded pixel buffer, not just dimensions.
+        // The dimension gate above allows 16384×16384 = 1 GB decoded; a
+        // hostile PNG compressed to <100 KB passes byte + dimension checks
+        // then bombs on decode. image::Limits caps decoded memory directly.
+        let mut limits = ::image::Limits::default();
+        limits.max_image_width = Some(MAX_DIM);
+        limits.max_image_height = Some(MAX_DIM);
+        limits.max_alloc = Some(512 * 1024 * 1024);
+        let decoded = ::image::ImageReader::new(std::io::Cursor::new(&bytes))
+            .with_guessed_format()
+            .ok()
+            .and_then(|r| {
+                let mut r = r;
+                r.limits(limits);
+                r.decode().ok()
+            });
+        match decoded {
+            Some(img) => {
                 self.image_size = Size::new(img.width() as f32, img.height() as f32);
                 self.handle = Some(iced::widget::image::Handle::from_bytes(bytes));
                 self.source_path = Some(path);
@@ -198,7 +214,7 @@ impl AnnotatorOverlay {
                     img.height()
                 );
             }
-            Err(e) => self.status = format!("decode failed: {e}"),
+            None => self.status = "decode failed (rejected by size limits)".to_string(),
         }
     }
 
