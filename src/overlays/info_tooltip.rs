@@ -1992,8 +1992,12 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     // Alignment offset for the slanted corner + padding.
     let _adjust: i32 = s.slant_width as i32 + 20; // slant + padding
 
-    let adjust_left = s.tooltip_offset_left;
-    let adjust_right = s.tooltip_offset_right;
+    // Finding 76: per-capsule bias (batch-76 missed this file — anchor
+    // used moon_beauty_shell:: but needed crate:: prefix).
+    // Finding 77: global offsets auto-scale from slant_width.
+    let (bias_l, bias_r) = crate::bar::tooltip_spawn::read_offset_extra();
+    let adjust_left = s.effective_tooltip_offset_left() + bias_l;
+    let adjust_right = s.effective_tooltip_offset_right() + bias_r;
 
     // Clock is the keystone — center the window on the capsule, so the
     // octagon grows symmetrically outward from the clock's position.

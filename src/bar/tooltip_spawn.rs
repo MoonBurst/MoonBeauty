@@ -29,6 +29,11 @@ pub struct SpawnRequest<'a> {
     pub slant_l: &'a str,
     pub slant_r: &'a str,
     pub grow_right: bool,
+    /// Finding 76: per-capsule bias, added to the settings' global
+    /// tooltip_offset_left/right inside each tooltip spawner.
+    /// Positive = shift further inward (same sign as the global).
+    pub offset_left_extra: i32,
+    pub offset_right_extra: i32,
 }
 
 pub fn spawn(req: &SpawnRequest) -> io::Result<Child> {
@@ -61,7 +66,15 @@ pub fn spawn(req: &SpawnRequest) -> io::Result<Child> {
     .env("MBS_SLANT_R", req.slant_r)
     .env("MBS_GROW_RIGHT", if req.grow_right { "1" } else { "0" })
     .env("MBS_CAPSULE_CX", req.capsule_cx.to_string())
-    .env("MBS_CAPSULE_W", req.capsule_w.to_string());
+    .env("MBS_CAPSULE_W", req.capsule_w.to_string())
+    .env(
+        "MBS_TOOLTIP_OFFSET_LEFT_EXTRA",
+        req.offset_left_extra.to_string(),
+    )
+    .env(
+        "MBS_TOOLTIP_OFFSET_RIGHT_EXTRA",
+        req.offset_right_extra.to_string(),
+    );
 
     eprintln!(
         "[spawn] id={:?} w={} h={} cx={} cap_w={:.1} sw={} L={} R={} grow_right={} out={:?}",
@@ -90,6 +103,22 @@ pub fn spawn(req: &SpawnRequest) -> io::Result<Child> {
 ///      reload settings itself.
 ///   2. Otherwise, derive height from current telemetry content size
 ///      (weather forecast line count, CPU/GPU/RAM process count, etc.).
+/// Finding 76: read the per-capsule bias from env. Tooltip spawners
+/// add this on top of the settings' global offset. Missing env var
+/// defaults to 0 (identical to pre-finding-76 behavior).
+pub fn read_offset_extra() -> (i32, i32) {
+    let read = |key: &str| -> i32 {
+        std::env::var(key)
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0)
+    };
+    (
+        read("MBS_TOOLTIP_OFFSET_LEFT_EXTRA"),
+        read("MBS_TOOLTIP_OFFSET_RIGHT_EXTRA"),
+    )
+}
+
 pub fn compute_height(id: &str, settings: &ShellSettings, telemetry: &UnifiedTelemetry) -> u32 {
     // User-dragged override wins.
     if let Some((w, h)) = settings.tooltip_sizes.get(id) {

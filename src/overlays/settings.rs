@@ -73,6 +73,8 @@ pub enum SettingsMessage {
     TooltipPauseMs(u32),
     TooltipOffsetLeft(i32),
     TooltipOffsetRight(i32),
+    TooltipOffsetLeftReset,
+    TooltipOffsetRightReset,
     BorderWidth(u32),
     ControlBorderWidth(u32),
     CapsuleSpacing(i32),
@@ -318,10 +320,16 @@ impl SettingsOverlay {
             SettingsMessage::TooltipHeightPx(v) => settings.tooltip_height_px = v.clamp(100, 1000),
             SettingsMessage::TooltipPauseMs(v) => settings.tooltip_pause_ms = v.clamp(0, 1000),
             SettingsMessage::TooltipOffsetLeft(v) => {
-                settings.tooltip_offset_left = v.clamp(-100, 200)
+                settings.tooltip_offset_left = Some(v.clamp(-100, 200))
             }
             SettingsMessage::TooltipOffsetRight(v) => {
-                settings.tooltip_offset_right = v.clamp(-100, 200)
+                settings.tooltip_offset_right = Some(v.clamp(-100, 200))
+            }
+            SettingsMessage::TooltipOffsetLeftReset => {
+                settings.tooltip_offset_left = None
+            }
+            SettingsMessage::TooltipOffsetRightReset => {
+                settings.tooltip_offset_right = None
             }
             SettingsMessage::BorderWidth(v) => {
                 settings.global_border_width = (v as f32).clamp(1.0, 12.0)
@@ -2626,6 +2634,123 @@ impl SettingsOverlay {
         .width(Length::Fill)
         .into();
 
+        // Finding 77: per-slot offset columns. Slider shows the
+        // effective value (auto or override); label marks "(auto)"
+        // when the field is None; reset button clears the override.
+        let offset_left_col: Element<'a, SettingsMessage> = {
+            let is_auto = settings.tooltip_offset_left.is_none();
+            let eff = settings.effective_tooltip_offset_left();
+            column![
+                row![
+                    text("Tooltip Left Offset")
+                        .size((scale_sz(0.8)) as f32)
+                        .bold()
+                        .color(theme.text),
+                    row![].width(Length::Fill),
+                    text(if is_auto {
+                        format!("{}px (auto)", eff)
+                    } else {
+                        format!("{}px", eff)
+                    })
+                    .size((scale_sz(0.8)) as f32)
+                    .bold()
+                    .color(theme.text),
+                    button(text(if is_auto { " " } else { "↺" }).size(11))
+                        .on_press_maybe(if is_auto {
+                            None
+                        } else {
+                            Some(SettingsMessage::TooltipOffsetLeftReset)
+                        })
+                        .padding([2, 6])
+                        .style(move |_t, _s| button::Style {
+                            background: if is_auto {
+                                None
+                            } else {
+                                Some(iced::Background::Color(theme.surface_alt))
+                            },
+                            border: if is_auto {
+                                iced::Border::default()
+                            } else {
+                                iced::Border {
+                                    color: theme.warning,
+                                    width: 1.0,
+                                    radius: 3.0.into(),
+                                }
+                            },
+                            text_color: if is_auto { theme.muted } else { theme.warning },
+                            ..Default::default()
+                        }),
+                ]
+                .spacing(4)
+                .align_y(Alignment::Center),
+                slider(
+                    -50..=100,
+                    eff,
+                    SettingsMessage::TooltipOffsetLeft
+                )
+                .width(Length::Fill),
+            ]
+            .spacing(3)
+            .width(Length::FillPortion(1))
+            .into()
+        };
+        let offset_right_col: Element<'a, SettingsMessage> = {
+            let is_auto = settings.tooltip_offset_right.is_none();
+            let eff = settings.effective_tooltip_offset_right();
+            column![
+                row![
+                    text("Tooltip Right Offset")
+                        .size((scale_sz(0.8)) as f32)
+                        .bold()
+                        .color(theme.text),
+                    row![].width(Length::Fill),
+                    text(if is_auto {
+                        format!("{}px (auto)", eff)
+                    } else {
+                        format!("{}px", eff)
+                    })
+                    .size((scale_sz(0.8)) as f32)
+                    .bold()
+                    .color(theme.text),
+                    button(text(if is_auto { " " } else { "↺" }).size(11))
+                        .on_press_maybe(if is_auto {
+                            None
+                        } else {
+                            Some(SettingsMessage::TooltipOffsetRightReset)
+                        })
+                        .padding([2, 6])
+                        .style(move |_t, _s| button::Style {
+                            background: if is_auto {
+                                None
+                            } else {
+                                Some(iced::Background::Color(theme.surface_alt))
+                            },
+                            border: if is_auto {
+                                iced::Border::default()
+                            } else {
+                                iced::Border {
+                                    color: theme.warning,
+                                    width: 1.0,
+                                    radius: 3.0.into(),
+                                }
+                            },
+                            text_color: if is_auto { theme.muted } else { theme.warning },
+                            ..Default::default()
+                        }),
+                ]
+                .spacing(4)
+                .align_y(Alignment::Center),
+                slider(
+                    -50..=100,
+                    eff,
+                    SettingsMessage::TooltipOffsetRight
+                )
+                .width(Length::Fill),
+            ]
+            .spacing(3)
+            .width(Length::FillPortion(1))
+            .into()
+        };
         let anim_sliders: Element<'a, SettingsMessage> = column![
             row![
                 column![
@@ -2716,48 +2841,8 @@ impl SettingsOverlay {
                 ]
                 .spacing(3)
                 .width(Length::FillPortion(1)),
-                column![
-                    row![
-                        text("Tooltip Left Offset")
-                            .size((scale_sz(0.8)) as f32)
-                            .bold()
-                            .color(theme.text),
-                        row![].width(Length::Fill),
-                        text(format!("{}px", settings.tooltip_offset_left))
-                            .size((scale_sz(0.8)) as f32)
-                            .bold()
-                            .color(theme.text)
-                    ],
-                    slider(
-                        -50..=100,
-                        settings.tooltip_offset_left,
-                        SettingsMessage::TooltipOffsetLeft
-                    )
-                    .width(Length::Fill),
-                ]
-                .spacing(3)
-                .width(Length::FillPortion(1)),
-                column![
-                    row![
-                        text("Tooltip Right Offset")
-                            .size((scale_sz(0.8)) as f32)
-                            .bold()
-                            .color(theme.text),
-                        row![].width(Length::Fill),
-                        text(format!("{}px", settings.tooltip_offset_right))
-                            .size((scale_sz(0.8)) as f32)
-                            .bold()
-                            .color(theme.text)
-                    ],
-                    slider(
-                        -50..=100,
-                        settings.tooltip_offset_right,
-                        SettingsMessage::TooltipOffsetRight
-                    )
-                    .width(Length::Fill),
-                ]
-                .spacing(3)
-                .width(Length::FillPortion(1)),
+                offset_left_col,
+                offset_right_col,
             ]
             .spacing(20)
             .width(Length::Fill),

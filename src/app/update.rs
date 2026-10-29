@@ -645,7 +645,7 @@ impl MoonBeautyShellApp {
                                 }
                                 self.weather_tooltip_child = None;
 
-                                let target_output = if self.settings.notif_screen_name != "Auto"
+                                                                let target_output = if self.settings.notif_screen_name != "Auto"
                                     && self.settings.notif_screen_name != "Auto (Primary)"
                                     && !self.settings.notif_screen_name.is_empty()
                                 {
@@ -654,30 +654,26 @@ impl MoonBeautyShellApp {
                                     None
                                 };
                                 let sw = get_screen_width_for(target_output);
-                                let _cx = if recent_click && self.last_cursor_x > 0.0 {
-                                    self.last_cursor_x as i32
-                                } else {
-                                    capsule_center_x(&self.settings, sw, &id)
-                                };
-                                let target_output = if self.settings.notif_screen_name != "Auto"
-                                    && self.settings.notif_screen_name != "Auto (Primary)"
-                                    && !self.settings.notif_screen_name.is_empty()
-                                {
-                                    Some(self.settings.notif_screen_name.as_str())
-                                } else {
-                                    None
-                                };
-                                let sw = get_screen_width_for(target_output);
-                                let cx = if id == "clock" {
-                                    capsule_center_x(&self.settings, sw, &id)
-                                } else if recent_click && self.last_cursor_x > 0.0 {
-                                    self.last_cursor_x as i32
-                                } else {
-                                    capsule_center_x(&self.settings, sw, &id)
-                                };
                                 let in_left = self.settings.bar_left.contains(&id);
                                 let in_center = self.settings.bar_center.contains(&id);
                                 let in_right = self.settings.bar_right.contains(&id);
+                                // Finding 78: right-side capsules use capsule_center_x, not
+                                // last_cursor_x. Right-anchored math is
+                                //   margin_right = sw - cx - half_cap + adjust_right
+                                // which assumes cx = capsule center. If cx = click_x (near
+                                // capsule right edge), tooltip lands half_cap - adjust past
+                                // capsule_right — off-screen at larger font sizes. Left-anchored
+                                // works because the clamp catches the (cx - half_cap) overshoot.
+                                let cx = if id == "clock" {
+                                    capsule_center_x(&self.settings, sw, &id)
+                                } else if recent_click
+                                    && self.last_cursor_x > 0.0
+                                    && in_left
+                                {
+                                    self.last_cursor_x as i32
+                                } else {
+                                    capsule_center_x(&self.settings, sw, &id)
+                                };
                                 let (slant_l, slant_r): (&str, &str) =
                                     match self.settings.slant_mode.as_str() {
                                         "left" => ("L", "L"),
@@ -730,6 +726,11 @@ impl MoonBeautyShellApp {
                                         .or_else(resolve_primary_output)
                                 };
 
+                                // Finding 76: per-capsule tooltip bias.
+                                let (bias_l, bias_r) =
+                                    moon_beauty_shell::bar::capsules::tooltip_bias(
+                                        &id, &self.theme,
+                                    );
                                 let req = moon_beauty_shell::bar::tooltip_spawn::SpawnRequest {
                                     id: &id,
                                     exe: resolve_exe(),
@@ -749,6 +750,8 @@ impl MoonBeautyShellApp {
                                     slant_l,
                                     slant_r,
                                     grow_right,
+                                    offset_left_extra: bias_l,
+                                    offset_right_extra: bias_r,
                                 };
 
                                 match moon_beauty_shell::bar::tooltip_spawn::spawn(&req) {

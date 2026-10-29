@@ -452,8 +452,11 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     // Symmetric alignment: +32 on the left, -32 on the right.
     let _adjust: i32 = s.slant_width as i32 + 20; // slant + padding
 
-    let adjust_left = s.tooltip_offset_left;
-    let adjust_right = s.tooltip_offset_right;
+    // Finding 76: per-capsule bias added to global offsets.
+    let (bias_l, bias_r) =
+        crate::bar::tooltip_spawn::read_offset_extra();
+    let adjust_left = s.effective_tooltip_offset_left() + bias_l;
+    let adjust_right = s.effective_tooltip_offset_right() + bias_r;
 
     let (anchor, margin) = if grow_right {
         (

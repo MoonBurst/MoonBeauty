@@ -404,6 +404,9 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     let _sw_tip = s.slant_width * (h as f32 / s.bar_height as f32);
     let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
 
+    // Finding 76: per-capsule bias added to the slant-shift correction.
+    let (bias_l, bias_r) =
+        crate::bar::tooltip_spawn::read_offset_extra();
     let (anchor, margin) = if grow_right {
         let sl_left = sl_str == "L";
         let shift = if sl_left { sw_cap } else { 0.0 };
@@ -413,7 +416,7 @@ pub fn run() -> Result<(), iced_layershell::Error> {
                 margin_top,
                 0,
                 0,
-                ((cx - half_start) as f32 + shift)
+                ((cx - half_start) as f32 + shift + bias_l as f32)
                     .max(0.0)
                     .min((sw - w as i32).max(0) as f32) as i32,
             ),
@@ -425,7 +428,7 @@ pub fn run() -> Result<(), iced_layershell::Error> {
             Anchor::Top | Anchor::Right,
             (
                 margin_top,
-                ((sw - cx - half_start) as f32 + shift)
+                ((sw - cx - half_start) as f32 + shift + bias_r as f32)
                     .max(0.0)
                     .min((sw - w as i32).max(0) as f32) as i32,
                 0,

@@ -20,6 +20,28 @@ pub(super) fn render<'a, Message: 'a>(
     (elem, CapsuleAction::ToggleTrayExpanded, theme.text)
 }
 
+/// Tray bias — the arrow (▼/◀/▶) is a single character centered
+/// inside a `settings.tray_width`-wide pill. The default +32 global
+/// offset would place the tooltip's left edge 32px from the pill's
+/// container left. But the arrow's visual center is at
+/// `pill_width/2`, so the tooltip appears shifted right by
+/// `pill_width/2 - 32`. For typical `tray_width = 60`, that's a
+/// +~-2 drift — subtle but every tray tooltip accumulates it.
+///
+/// The bias pulls the tooltip inward on the grow_right side so its
+/// left edge aligns with the arrow's left edge, and pulls inward on
+/// the grow_left side for the same reason (arrow's right edge).
+pub(super) fn tooltip_bias(theme: &ShellTheme) -> (i32, i32) {
+    // Arrow glyph width ~ theme.font_size_normal * 0.6 (ASCII-ish).
+    let arrow_w = theme.font_size_normal as f32 * 0.6;
+    // Default user offset (32) already shifts 32px inward.
+    // Actual pill padding + slant ≈ (slant + 12). Difference is what
+    // we need to correct. Rounded to i32 for the caller.
+    let pad = theme.slant_width + 12.0;
+    let bias = (pad - arrow_w / 2.0 - 8.0).round() as i32;
+    (bias, bias)
+}
+
 static SVG_HANDLE_CACHE: OnceLock<
     Mutex<std::collections::HashMap<String, iced::widget::svg::Handle>>,
 > = OnceLock::new();
