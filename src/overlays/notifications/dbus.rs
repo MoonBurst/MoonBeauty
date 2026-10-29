@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::SyncSender;
 use zbus::zvariant::OwnedValue;
 
 #[derive(Debug, Clone)]
@@ -14,7 +14,9 @@ pub struct IncomingNotification {
 }
 
 pub struct NotifServer {
-    tx: Sender<IncomingNotification>,
+    // Finding 55: bounded channel. Was Sender (unbounded); a hostile
+    // notify-send loop outpaces the receiver and OOMs the shell.
+    tx: SyncSender<IncomingNotification>,
 }
 
 fn next_id() -> u32 {
@@ -53,7 +55,11 @@ impl NotifServer {
                 zbus::zvariant::Value::Str(s) => Some(s.as_str().to_string()),
                 _ => None,
             });
-        let _ = self.tx.send(IncomingNotification {
+        // Finding 55: try_send (non-blocking). On full, drop the payload
+        // but still return id — matches D-Bus spec (notify() returns
+        // immediately) and dunst's queue-full policy (no error to well-
+        // behaved apps that would retry and amplify the flood).
+        if let Err(e) = self.tx.try_send(IncomingNotification {
             id,
             app_name,
             summary,
@@ -61,7 +67,9 @@ impl NotifServer {
             is_urgent,
             desktop_entry,
             actions,
-        });
+        }) {
+            crate::dbg_log!("[notif] dropped (channel not ready: {:?})", e);
+        }
         id
     }
 
@@ -125,7 +133,7 @@ pub fn emit_action_invoked(id: u32, key: &str) {
     });
 }
 
-pub fn spawn(tx: Sender<IncomingNotification>) {
+pub fn spawn(tx: SyncSender<IncomingNotification>) {
     std::thread::spawn(move || {
         let rt = match tokio::runtime::Builder::new_current_thread()
             .enable_all()

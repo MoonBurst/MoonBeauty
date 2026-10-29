@@ -1,0 +1,14 @@
+57 LOW tray menu flat-width unbounded
+
+   file: src/bar/tray/watcher.rs::get_menu_tree::parse_item
+
+   why:  Finding 34 (batch 8) capped recursion depth at 16 but not
+         per-level width. A single GetLayout response with 1M flat
+         children allocates 1M TrayMenuItem (~100MB) before the depth
+         guard can fire — user-triggered (click tray icon → context
+         menu). Requires 128MB D-Bus message, which is the practical
+         ceiling.
+
+   fix:  MAX_ITEMS_PER_LEVEL = 1000 (break before recursion into next
+         child). Combined with depth 16: worst case = 16 × 1000 = 16K
+         items in memory regardless of tree shape.

@@ -24,6 +24,28 @@ impl TrayWatcher {
         service: String,
         #[zbus(header)] hdr: zbus::message::Header<'_>,
     ) -> zbus::fdo::Result<()> {
+        // Finding 54: bound input length + item count. A same-user process
+        // can call this in a loop with unique strings; unbounded HashSet
+        // growth OOMs the bar → lockscreen children die.
+        const MAX_SERVICE_LEN: usize = 250;
+        const MAX_ITEMS: usize = 500;
+        if service.len() > MAX_SERVICE_LEN {
+            crate::dbg_log!(
+                "[tray-watcher] reject oversize service ({} bytes)",
+                service.len()
+            );
+            return Ok(());
+        }
+        {
+            let g = self.items.lock().unwrap();
+            if g.len() >= MAX_ITEMS && !g.contains(&normalize_service(&service)) {
+                crate::dbg_log!(
+                    "[tray-watcher] reject registration: at cap ({})",
+                    MAX_ITEMS
+                );
+                return Ok(());
+            }
+        }
         // Some clients (ayatana-style, e.g. Steam) send just the object path.
         // Fall back to the sender's unique bus name so the item is reachable.
         let entry = if service.starts_with('/') {
@@ -153,22 +175,44 @@ pub async fn fetch_tray_items() -> Vec<TrayItem> {
         }
     };
 
+    // Finding 56: cap enumeration. Chained from finding 54 — a hostile
+    // process that registered N names now drives N Proxy::new calls,
+    // each blocking up to 25s on timeout. 200 is 10× real systems; caps
+    // worst-case to 200 * 25s = 83 min. Combined with the refetch
+    // cadence, only one stalled fetch at a time.
+    const MAX_ITEMS: usize = 200;
+    if raw_items.len() > MAX_ITEMS {
+        crate::dbg_log!(
+            "[tray-fetch] capping item enumeration {} → {}",
+            raw_items.len(), MAX_ITEMS
+        );
+    }
     let mut out = Vec::new();
-    for raw in raw_items {
+    for raw in raw_items.into_iter().take(MAX_ITEMS) {
         let Some((bus, path)) = parse_registered(&raw) else {
             continue;
         };
-        let proxy = match zbus::Proxy::new(
-            &conn,
-            bus.as_str(),
-            path.as_str(),
-            "org.kde.StatusNotifierItem",
+        // Finding 56: per-item timeout (3s). Bounds the total fetch time
+        // when combined with MAX_ITEMS. A hung peer no longer stalls the
+        // whole enumeration at the D-Bus default 25s.
+        let proxy_result = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            zbus::Proxy::new(
+                &conn,
+                bus.as_str(),
+                path.as_str(),
+                "org.kde.StatusNotifierItem",
+            ),
         )
-        .await
-        {
-            Ok(p) => p,
-            Err(e) => {
+        .await;
+        let proxy = match proxy_result {
+            Ok(Ok(p)) => p,
+            Ok(Err(e)) => {
                 crate::dbg_log!("[tray-fetch] {} proxy: {e}", raw);
+                continue;
+            }
+            Err(_) => {
+                crate::dbg_log!("[tray-fetch] {} proxy: timeout", raw);
                 continue;
             }
         };
@@ -337,7 +381,21 @@ pub async fn get_menu_tree(bus: &str, path: &str) -> Option<(String, Vec<TrayMen
             });
         }
 
+        // Finding 57: cap flat width per level. Real dbusmenu trees are
+        // <20 items wide; a hostile single-level 1M-children response
+        // allocates 1M TrayMenuItem before depth guard (34) can fire.
+        // Cap at 1000 per level — recursion depth 16 with cap 1000 means
+        // worst case is 16 × 1000 = 16K items in memory regardless of
+        // tree shape.
+        const MAX_ITEMS_PER_LEVEL: usize = 1000;
         for c in children {
+            if items.len() >= MAX_ITEMS_PER_LEVEL {
+                crate::dbg_log!(
+                    "[tray-menu] level width cap {} at depth {}",
+                    MAX_ITEMS_PER_LEVEL, depth
+                );
+                break;
+            }
             let val: zbus::zvariant::Value = c.into();
             if let Ok((cid, cprops, ckids)) = val.downcast::<RawItem>() {
                 items.extend(parse_item(cid, cprops, ckids, depth + 1));

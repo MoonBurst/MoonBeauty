@@ -95,7 +95,10 @@ impl MoonBeautyShellApp {
         }
 
         let notif_rx = if is_notif_surface {
-            let (tx, rx) = std::sync::mpsc::channel();
+            // Finding 55: bounded (256). notify-send can be called at
+            // arbitrary rate by any same-user process; unbounded channel
+            // OOMs the shell under load. 256 is 64× the visible toast cap.
+            let (tx, rx) = std::sync::mpsc::sync_channel(256);
             moon_beauty_shell::overlays::notifications::spawn(tx);
             moon_beauty_shell::bar::tray::watcher::spawn();
             Some(rx)

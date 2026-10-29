@@ -1,0 +1,18 @@
+55 MED notification D-Bus channel unbounded
+
+   file: src/app/new_app.rs:98, src/overlays/notifications/dbus.rs
+
+   why:  std::sync::mpsc::channel() is unbounded. Any same-user process
+         (or D-Bus client) calling notify-send at arbitrary rate outpaces
+         the receiver (which pulls every 50ms in notif-surface). Backlog
+         grows → OOM → shell dies → unlock window.
+
+   fix:  sync_channel(256) + try_send. On Full, drop the payload but
+         still return id (D-Bus spec: notify() returns immediately;
+         matches dunst's queue-full policy — no error to apps that
+         would retry and amplify).
+
+   residual:  A single attacker can still flood the 256-slot channel and
+              cause every subsequent notification to drop. Bounded CPU,
+              zero OOM risk, and the next 50ms poll drains whatever made
+              it in.
