@@ -273,10 +273,10 @@ pub struct ShellSettings {
     pub tooltip_height_px: u32,
     #[serde(default = "default_tooltip_pause_ms", alias = "tooltipPauseMs")]
     pub tooltip_pause_ms: u32,
-    #[serde(default = "default_tooltip_offset", alias = "tooltipOffsetLeft")]
-    pub tooltip_offset_left: i32,
-    #[serde(default = "default_tooltip_offset", alias = "tooltipOffsetRight")]
-    pub tooltip_offset_right: i32,
+    #[serde(default, alias = "tooltipOffsetLeft")]
+    pub tooltip_offset_left: Option<i32>,
+    #[serde(default, alias = "tooltipOffsetRight")]
+    pub tooltip_offset_right: Option<i32>,
     #[serde(default, alias = "tooltipSizes")]
     pub tooltip_sizes: HashMap<String, (u32, u32)>,
     #[serde(default = "default_slant_mode", alias = "slantStyleMode")]
@@ -472,9 +472,6 @@ fn default_tooltip_height_px() -> u32 {
 fn default_tooltip_pause_ms() -> u32 {
     0
 }
-fn default_tooltip_offset() -> i32 {
-    32
-}
 fn default_slant_mode() -> String {
     "symmetric".to_string()
 }
@@ -657,8 +654,8 @@ impl Default for ShellSettings {
             tooltip_width_px: default_tooltip_width_px(),
             tooltip_height_px: default_tooltip_height_px(),
             tooltip_pause_ms: default_tooltip_pause_ms(),
-            tooltip_offset_left: default_tooltip_offset(),
-            tooltip_offset_right: default_tooltip_offset(),
+            tooltip_offset_left: None,
+            tooltip_offset_right: None,
             tooltip_sizes: HashMap::new(),
             slant_mode: default_slant_mode(),
             bar_shape: default_bar_shape(),
@@ -741,6 +738,13 @@ impl ShellSettings {
             "clock" => (540, 320),
             _ => (self.tooltip_width_px, self.tooltip_height_px),
         })
+    }
+
+    pub fn effective_tooltip_offset_left(&self) -> i32 {
+        self.tooltip_offset_left.unwrap_or_else(|| self.slant_width as i32 + 20)
+    }
+    pub fn effective_tooltip_offset_right(&self) -> i32 {
+        self.tooltip_offset_right.unwrap_or_else(|| self.slant_width as i32 + 20)
     }
 
     pub fn get_window_size(&self, id: &str, _def_w: u32, _def_h: u32) -> (f32, f32) {

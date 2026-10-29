@@ -1,8 +1,0 @@
-51 LOW annotator IPC unbounded read
-
-   file: src/overlays/screenshot/ipc.rs::spawn
-
-   why:  stream.read_to_end with no cap. Sibling of finding 37 (which
-         fixed the two main accept paths but missed this one).
-
-   fix:  4MB Take cap, matching finding 37.

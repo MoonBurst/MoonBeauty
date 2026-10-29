@@ -75,6 +75,13 @@ pub fn record_width(id: &str, w: f32) {
     }
 }
 
+
+pub fn tooltip_bias(id: &str, theme: &ShellTheme) -> (i32, i32) {
+    match id {
+        "tray" => tray::tooltip_bias(theme),
+        _ => (0, 0),
+    }
+}
 pub fn lookup_width(id: &str) -> Option<f32> {
     widths_map().lock().ok().and_then(|m| m.get(id).copied())
 }

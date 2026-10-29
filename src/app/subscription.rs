@@ -4,7 +4,7 @@ impl MoonBeautyShellApp {
     pub fn subscription(&self) -> iced::Subscription<Message> {
         let is_bar = !self.is_standalone && !self.is_notif_surface;
         let clock_sub = if is_bar {
-            iced::time::every(std::time::Duration::from_millis(1000)).map(|_| Message::TickClock)
+            iced::time::every(std::time::Duration::from_millis(1500)).map(|_| Message::TickClock)
         } else {
             iced::Subscription::none()
         };
@@ -73,35 +73,6 @@ impl MoonBeautyShellApp {
 
         let text_typing_sub = if self.annotator.text_editing.is_some() {
             iced::event::listen_with(handle_annotator_text_input)
-        } else {
-            iced::Subscription::none()
-        };
-
-        let _todo_sub = if matches!(self.active_overlay, Some(OverlayTarget::Todo)) {
-            iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event
-                else {
-                    return None;
-                };
-                // Cycle categories with L/R, cycle filter with U/D.
-                // (text_input also sees these but only cursor-moves on
-                // non-empty input; empty input leaves them free.)
-                match key {
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft) => {
-                        Some(Message::Todo(TodoMessage::CategoryPrev))
-                    }
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight) => {
-                        Some(Message::Todo(TodoMessage::CategoryNext))
-                    }
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
-                        Some(Message::Todo(TodoMessage::FilterPrev))
-                    }
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => {
-                        Some(Message::Todo(TodoMessage::FilterNext))
-                    }
-                    _ => None,
-                }
-            })
         } else {
             iced::Subscription::none()
         };
@@ -472,7 +443,7 @@ impl MoonBeautyShellApp {
         let ipc_sub = if self.is_standalone || self.is_notif_surface {
             iced::Subscription::none()
         } else {
-            iced::time::every(std::time::Duration::from_millis(10)).map(|_| Message::PollIpc)
+            iced::time::every(std::time::Duration::from_millis(100)).map(|_| Message::PollIpc)
         };
 
         // Lockscreen watchdog: 500ms cadence. Combined with the
@@ -483,14 +454,14 @@ impl MoonBeautyShellApp {
         let lockscreen_watchdog_sub = if self.is_standalone || self.is_notif_surface {
             iced::Subscription::none()
         } else {
-            iced::time::every(std::time::Duration::from_millis(500))
+            iced::time::every(std::time::Duration::from_millis(1500))
                 .map(|_| Message::CheckLockscreenAlive)
         };
 
         let notif_sub = if self.is_notif_surface {
             iced::time::every(std::time::Duration::from_millis(50)).map(|_| Message::PollNotifs)
         } else if !self.is_standalone {
-            iced::time::every(std::time::Duration::from_millis(500)).map(|_| Message::PollNotifs)
+            iced::time::every(std::time::Duration::from_millis(1500)).map(|_| Message::PollNotifs)
         } else {
             iced::Subscription::none()
         };

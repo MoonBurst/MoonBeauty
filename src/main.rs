@@ -8,7 +8,6 @@ use moon_beauty_shell::overlays::*;
 
 use moon_beauty_shell::overlays::screenshot;
 
-pub(crate) static TM0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
 
 
@@ -196,7 +195,6 @@ fn app_style(_state: &MoonBeautyShellApp, _theme: &iced::Theme) -> iced::theme::
 }
 
 pub fn main() -> Result<(), iced_layershell::Error> {
-    TM0.set(std::time::Instant::now()).ok();
     let args: Vec<String> = std::env::args().collect();
 
     // Finding 07 defense-in-depth: restrictive ImageMagick policy that

@@ -1,8 +1,0 @@
-50 LOW screenshot state_file unbounded read
-
-   file: src/overlays/screenshot/fragment.rs::read_state_file
-
-   why:  read_to_string with no size cap. Hostile same-user process
-         truncate+writes the target path between orchestrator writes.
-
-   fix:  Metadata-first 1KB cap before read_to_string.

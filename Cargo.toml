@@ -9,7 +9,7 @@ description = "High-performance Wayland desktop shell and overlay matrix in Rust
 mpd_client = "1"
 sha2 = "0.10"
 iced_futures = "0.14"
-iced = { version = "0.14", features = ["advanced", "tokio", "canvas", "image", "svg", "unconditional-rendering"] }
+iced = { version = "0.14", features = ["advanced", "tokio", "canvas", "image", "svg"] }
 iced_layershell = { version = "0.14.2", default-features = false, features = ["tiny-skia", "fira-sans"] }
 tokio = { version = "1.38", features = ["full"] }
 bollard = "0.17"
@@ -19,7 +19,6 @@ serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5.0"
 walkdir = "2.5"
-regex = "1.10"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-native-tls"] }
 async-imap = { version = "0.10", default-features = false, features = ["runtime-tokio"] }
@@ -30,10 +29,6 @@ html2text = "0.12"
 rfd = { version = "0.14", default-features = false, features = ["xdg-portal", "tokio"] }
 sysinfo = "0.31"
 zbus = { version = "4.4", features = ["tokio"] }
-wayland-client = "0.31.15"
-wayland-protocols = "0.32.13"
-wayland-protocols-wlr = "0.3.12"
-smithay-client-toolkit = "0.21.1"
 
 [features]
 default = []

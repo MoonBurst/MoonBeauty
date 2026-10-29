@@ -251,6 +251,7 @@ impl MoonBeautyShellApp {
         let mut init_tasks: Vec<Command<Message>> = Vec::new();
         if is_bar {
             init_tasks.push(Command::done(Message::FetchTrayItems));
+            init_tasks.push(Command::done(Message::TickHardware));
             init_tasks.push(Command::done(Message::TickEmailSync));
             init_tasks.push(Command::perform(
                 async {

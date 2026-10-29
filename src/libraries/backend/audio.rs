@@ -16,7 +16,7 @@ fn cached(which: &'static str) -> Option<AudioStatus> {
     let c = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let g = c.lock().unwrap();
     g.get(which)
-        .filter(|(t, _)| t.elapsed().as_secs() < 5)
+        .filter(|(t, _)| t.elapsed().as_secs() < 15)
         .map(|(_, s)| s.clone())
 }
 

@@ -45,7 +45,6 @@
           pciutils          # lspci for GPU detection
           iproute2          # ss for net procs
           procps            # kill / ps
-          playerctl         # MPRIS fallback
           xdg-utils         # xdg-open
           util-linux        # script for sudo PTY
           pass              # password manager

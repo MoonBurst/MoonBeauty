@@ -179,7 +179,10 @@ impl SystemCollector {
                     std::thread::sleep(std::time::Duration::from_millis(250));
                     sys.refresh_cpu_usage();
                 }
-                sys.refresh_processes(ProcessesToUpdate::All);
+                sys.refresh_processes_specifics(
+                    ProcessesToUpdate::All,
+                    sysinfo::ProcessRefreshKind::new(),
+                );
             }
 
             let usage_pct = sys.global_cpu_usage().round().clamp(0.0, 100.0) as u8;
@@ -348,7 +351,10 @@ impl SystemCollector {
                 refresh
             };
             if should_refresh_procs {
-                sys.refresh_processes(ProcessesToUpdate::All);
+                sys.refresh_processes_specifics(
+                    ProcessesToUpdate::All,
+                    sysinfo::ProcessRefreshKind::new(),
+                );
             }
 
             let total_gib = sys.total_memory() as f32 / (1024.0 * 1024.0 * 1024.0);
@@ -537,15 +543,24 @@ impl SystemCollector {
         };
 
         // Lightweight TCP ping
-        let mut ping_str = "OFFLINE".to_string();
-        if let Ok(addr) = "1.1.1.1:80".parse() {
-            let t0 = std::time::Instant::now();
-            if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(400))
-                .is_ok()
-            {
-                ping_str = format!("{}ms", t0.elapsed().as_millis());
+        let ping_str = {
+            use std::sync::{Mutex, OnceLock};
+            use std::time::Instant;
+            static PING_CACHE: OnceLock<Mutex<Option<(Instant, String)>>> = OnceLock::new();
+            let cache = PING_CACHE.get_or_init(|| Mutex::new(None));
+            let mut g = cache.lock().unwrap();
+            if g.as_ref().map_or(true, |(t, _)| t.elapsed().as_secs() >= 15) {
+                let mut new_ping = "OFFLINE".to_string();
+                if let Ok(addr) = "1.1.1.1:80".parse() {
+                    let t0 = std::time::Instant::now();
+                    if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(400)).is_ok() {
+                        new_ping = format!("{}ms", t0.elapsed().as_millis());
+                    }
+                }
+                *g = Some((Instant::now(), new_ping));
             }
-        }
+            g.as_ref().unwrap().1.clone()
+        };
 
         NetMetrics {
             iface: chosen_iface,
@@ -1075,6 +1090,19 @@ impl SystemCollector {
     /// Collect GPU metrics for a card_id like "card0" or "nvidia0".
     /// The display name is resolved via lspci (cached after first lookup).
     pub async fn collect_gpu_by_card_id(card_id: &str) -> GpuMetrics {
+        use std::sync::{Mutex, OnceLock};
+        use std::time::Instant;
+        static CACHE: OnceLock<Mutex<std::collections::HashMap<String, (Instant, GpuMetrics)>>> = OnceLock::new();
+        let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+        
+        {
+            let g = cache.lock().unwrap();
+            if let Some((t, m)) = g.get(card_id) {
+                if t.elapsed().as_secs() < 5 {
+                    return m.clone();
+                }
+            }
+        }
         let (is_nv, nv_idx) = if let Some(idx_str) = card_id.strip_prefix("nvidia") {
             (true, idx_str.parse::<u32>().unwrap_or(0))
         } else {
@@ -1082,6 +1110,10 @@ impl SystemCollector {
         };
         let mut m = Self::collect_gpu(card_id, is_nv, nv_idx).await;
         m.name = resolve_gpu_name_sync_cached(card_id);
+        {
+            let mut g = cache.lock().unwrap();
+            g.insert(card_id.to_string(), (Instant::now(), m.clone()));
+        }
         m
     }
 }
