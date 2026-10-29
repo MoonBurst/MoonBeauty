@@ -81,7 +81,8 @@ pub enum Message {
     PollIpc,
     PollNotifs,
     ResizeNotifSurface(u32, u32),
-    WindowResized(f32),
+    // WindowResized removed (problem 07): emitted by resize_sub but
+    // the only consumer (view_toasts _window_w) ignored it.
     TopBar(TopBarMessage),
     Launcher(LauncherMessage),
     Calc(CalcMessage),
@@ -170,7 +171,8 @@ pub struct MoonBeautyShellApp {
         std::sync::mpsc::Receiver<moon_beauty_shell::overlays::notifications::IncomingNotification>,
     >,
     pub settings_json_mtime: Option<std::time::SystemTime>,
-    pub window_w: f32,
+    // window_w removed (problem 07): the only setter was WindowResized
+    // and the only reader was view_toasts, which ignored it.
     pub notif_screen_at_startup: String,
     pub notif_surface_size: (u32, u32),
     pub tray_expanded: bool,

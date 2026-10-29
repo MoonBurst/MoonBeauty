@@ -5,7 +5,6 @@
 
 #![allow(clippy::type_complexity)]
 use std::collections::HashMap;
-use std::path::PathBuf;
 use tokio::process::Command;
 use zbus::zvariant::OwnedValue;
 use zbus::Connection;

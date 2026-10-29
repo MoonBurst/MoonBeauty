@@ -27,7 +27,7 @@ impl MoonBeautyShellApp {
             };
             return container(
                 self.notifs
-                    .view_toasts(&self.theme, &self.settings, self.window_w)
+                    .view_toasts(&self.theme, &self.settings)
                     .map(Message::Notif),
             )
             .width(Length::Fill)
@@ -76,7 +76,7 @@ impl MoonBeautyShellApp {
 
         let notifs_view = container(
             self.notifs
-                .view_toasts(&self.theme, &self.settings, self.window_w)
+                .view_toasts(&self.theme, &self.settings)
                 .map(Message::Notif),
         )
         .width(Length::Fill)

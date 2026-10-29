@@ -494,8 +494,8 @@ impl MoonBeautyShellApp {
         } else {
             iced::Subscription::none()
         };
-        let resize_sub =
-            iced::window::resize_events().map(|(_id, size)| Message::WindowResized(size.width));
+        // resize_sub removed (problem 07): emitted WindowResized whose
+        // only consumer ignored the value.
         let elapsed = self.tray_anim_started_at.elapsed().as_millis() as u64;
         let anim_active = elapsed < self.tray_anim_duration_ms
             && (self.tray_anim_width - self.tray_target_width).abs() > 0.01;
@@ -560,7 +560,6 @@ impl MoonBeautyShellApp {
             enter_sub,
             ipc_sub,
             notif_sub,
-            resize_sub,
             clip_sub,
             annotator_sub,
             text_typing_sub,

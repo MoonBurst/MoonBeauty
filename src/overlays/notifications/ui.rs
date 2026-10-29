@@ -1252,7 +1252,6 @@ impl NotificationOverlay {
         &'a self,
         theme: &'a ShellTheme,
         settings: &'a ShellSettings,
-        _window_w: f32,
     ) -> Element<'a, NotifMessage> {
         let card_w = settings.notif_card_width as f32;
         let card_h = settings.notif_card_height as f32;

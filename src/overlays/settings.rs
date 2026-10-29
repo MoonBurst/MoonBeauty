@@ -176,7 +176,9 @@ pub enum SettingsMessage {
 
     SaveSettings,
     TestNotification,
-    ToggleEditModule(String),
+    // ToggleEditModule removed (problem 09): handler set
+    // self.editing_module, but view() never read it and nothing
+    // emitted the message.
     SelectBarMonitor(String),
     Dismiss,
 }
@@ -186,7 +188,7 @@ pub struct SettingsOverlay {
     pub selected_screen: String,
     pub selected_profile: usize,
     last_save: std::time::Instant,
-    pub editing_module: Option<String>,
+    // editing_module removed (problem 09)
     preview_child: Option<std::process::Child>,
     last_preview: std::time::Instant,
     pub detected_gpus: Vec<GpuInfo>,
@@ -199,7 +201,6 @@ impl SettingsOverlay {
             selected_screen: "Auto (Primary)".into(),
             selected_profile: 0,
             last_save: std::time::Instant::now(),
-            editing_module: None,
             preview_child: None,
             last_preview: std::time::Instant::now() - std::time::Duration::from_secs(60),
             detected_gpus: SystemCollector::list_gpus_sync(),
@@ -212,7 +213,6 @@ impl SettingsOverlay {
             selected_screen: "Auto (Primary)".into(),
             selected_profile: 0,
             last_save: std::time::Instant::now(),
-            editing_module: None,
             preview_child: None,
             last_preview: std::time::Instant::now() - std::time::Duration::from_secs(60),
             detected_gpus: Vec::new(),
@@ -624,19 +624,7 @@ impl SettingsOverlay {
                 settings.friend_profiles =
                     crate::libraries::config::settings::load_friend_profiles();
             }
-            SettingsMessage::ToggleEditModule(id) => {
-                mbs_dbg(&format!("[dbg-toggle-FIRED] id={:?}", id));
-                mbs_dbg(&format!(
-                    "[toggle] FIRED id={:?} current={:?}",
-                    id, self.editing_module
-                ));
-                if self.editing_module.as_deref() == Some(&id) {
-                    self.editing_module = None;
-                } else {
-                    self.editing_module = Some(id);
-                }
-                mbs_dbg(&format!("[toggle] new value={:?}", self.editing_module));
-            }
+            // SettingsMessage::ToggleEditModule removed (problem 09)
             SettingsMessage::AlarmSoundChanged(v) => {
                 settings.alarm_sound = if v.trim().is_empty() { None } else { Some(v) };
             }

@@ -4,9 +4,7 @@ use super::*;
 impl MoonBeautyShellApp {
     pub fn update(&mut self, message: Message) -> Command<Message> {
         match message {
-            Message::WindowResized(w) => {
-                self.window_w = w;
-            }
+            // Message::WindowResized removed (problem 07)
             Message::ResizeNotifSurface(w, h) => {
                 eprintln!(
                     "[resize] update caught ({}, {}) — try_into NOT called",
@@ -873,22 +871,8 @@ impl MoonBeautyShellApp {
                     self.active_overlay = None;
                 }
                 LauncherMessage::ExecuteApp(cmd) => {
-                    // Tab pressed on math row — open calculator with same expression
-                    if cmd == "__tab__" {
-                        // Tab = Enter on currently selected item.
-                        // For a math row, this copies the result.
-                        // For an app row, this launches the app.
-                        if let Some(selected) = self
-                            .launcher
-                            .filtered_apps
-                            .get(self.launcher.selected_index)
-                        {
-                            let resolved = selected.exec.clone();
-                            return self
-                                .update(Message::Launcher(LauncherMessage::ExecuteApp(resolved)));
-                        }
-                        return Command::none();
-                    }
+                    // __tab__ branch removed (problem 10): nothing emits
+                    // ExecuteApp("__tab__").
                     // Math result — copy to clipboard and close
                     if let Some(result) = cmd.strip_prefix("math:") {
                         let result = result.to_string();

@@ -140,7 +140,7 @@ impl MoonBeautyShellApp {
             settings_json_mtime: std::fs::metadata(ShellSettings::config_path())
                 .ok()
                 .and_then(|m| m.modified().ok()),
-            window_w: 1920.0,
+            // window_w removed (problem 07)
             notif_screen_at_startup,
             notif_surface_size: if is_notif_surface { (1, 1) } else { (0, 0) },
             tray_expanded: false,
