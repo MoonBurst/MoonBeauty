@@ -291,6 +291,25 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         }
     }
 
+    // Music CLI flags — fired from the tooltip's Cycle/Prev/Play/Next
+    // buttons and bindable to sway keybinds.
+    for (flag, cmd) in [
+        ("--music-cycle", IpcCommand::MusicCycle),
+        ("--music-next", IpcCommand::MusicNext),
+        ("--music-previous", IpcCommand::MusicPrevious),
+        ("--music-play-pause", IpcCommand::MusicPlayPause),
+    ] {
+        if args.iter().any(|a| a == flag) {
+            match send_ipc_sync(&cmd) {
+                Ok(_) => std::process::exit(0),
+                Err(e) => {
+                    eprintln!("[{flag}] IPC failed: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+
     // Restart bar (used by Settings when changing monitor)
     if args.iter().any(|a| a == "--restart-bar") {
         // Finding 22: anchored patterns — require path-prefix before the

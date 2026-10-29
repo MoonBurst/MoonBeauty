@@ -53,6 +53,7 @@ pub enum SettingsTab {
     Hardware,
     BarLayout,
     OverlaysWindows,
+    IpcCommands,
 }
 
 #[derive(Debug, Clone)]
@@ -176,6 +177,7 @@ pub enum SettingsMessage {
 
     SaveSettings,
     TestNotification,
+    CopyIpc(String),
     // ToggleEditModule removed (problem 09): handler set
     // self.editing_module, but view() never read it and nothing
     // emitted the message.
@@ -689,6 +691,11 @@ impl SettingsOverlay {
                     }
                 }
             }
+            // CopyIpc is handled in app/update.rs (returns
+            // iced::clipboard::write early). This arm only exists for
+            // enum exhaustiveness when SettingsOverlay::update is
+            // called directly.
+            SettingsMessage::CopyIpc(_) => {}
             SettingsMessage::Dismiss => {
                 self.kill_preview();
             }
@@ -827,6 +834,7 @@ impl SettingsOverlay {
             (SettingsTab::Hardware, "Hardware"),
             (SettingsTab::BarLayout, "Bar Layout & Slants"),
             (SettingsTab::OverlaysWindows, "Overlays & Windows"),
+            (SettingsTab::IpcCommands, "Commands & Keybinds"),
         ];
 
         let mut tab_row = row![].spacing(6).align_y(Alignment::Center);
@@ -871,6 +879,7 @@ impl SettingsOverlay {
             SettingsTab::BarLayout => self.view_bar_layout(settings, theme),
 
             SettingsTab::OverlaysWindows => self.view_overlays_windows(settings, theme),
+            SettingsTab::IpcCommands => self.view_ipc_commands(settings, theme),
         };
 
         let card_bg = ShapeBox::new()
@@ -3391,5 +3400,235 @@ impl SettingsOverlay {
             .height(Length::Fill)
             .clip(true)
             .into()
+    }
+
+    fn view_ipc_commands<'a>(
+        &'a self,
+        settings: &'a ShellSettings,
+        theme: &'a ShellTheme,
+    ) -> Element<'a, SettingsMessage> {
+        let base_sz = theme.font_size_overlay;
+        let scale_sz = |factor: f32| -> u16 {
+            ((base_sz as f32) * factor).round().max(9.0) as u16
+        };
+        let fs_desc = scale_sz(0.72) as f32;
+        let fs_cmd = scale_sz(0.75) as f32;
+        let fs_head = scale_sz(0.85) as f32;
+
+        // (title, [(description, command), ...])
+        let sections: &[(&str, &[(&str, &str)])] = &[
+            ("MUSIC", &[
+                (
+                    "Cycle through active players (play, pause, next player, play, ...)",
+                    "moon-beauty-shell --music-cycle",
+                ),
+                (
+                    "Play/pause the currently active player",
+                    "moon-beauty-shell --music-play-pause",
+                ),
+                (
+                    "Skip to the next track on the active player",
+                    "moon-beauty-shell --music-next",
+                ),
+                (
+                    "Go to the previous track on the active player",
+                    "moon-beauty-shell --music-previous",
+                ),
+            ]),
+            ("OVERLAYS — toggle (press the same keybind twice to close)", &[
+                ("Application launcher", "moon-beauty-shell --toggle launcher"),
+                ("Clipboard manager", "moon-beauty-shell --toggle clipboard"),
+                ("Notification history", "moon-beauty-shell --toggle history"),
+                ("Settings", "moon-beauty-shell --toggle settings"),
+                ("Calculator & units", "moon-beauty-shell --toggle calc"),
+                ("Password store", "moon-beauty-shell --toggle pass"),
+                ("Dictionary", "moon-beauty-shell --toggle dict"),
+                ("Unicode glyphs", "moon-beauty-shell --toggle unicode"),
+                ("Tasks & todos", "moon-beauty-shell --toggle todo"),
+                ("Reminders & alarms", "moon-beauty-shell --toggle reminders"),
+                ("Dice & RNG", "moon-beauty-shell --toggle rng"),
+                ("Web search", "moon-beauty-shell --toggle web"),
+                ("Email client", "moon-beauty-shell --toggle email"),
+                ("Among Us tracker", "moon-beauty-shell --toggle amogus"),
+                ("Lock screen", "moon-beauty-shell --toggle lockscreen"),
+            ]),
+            ("NOTIFICATIONS", &[
+                (
+                    "Send a notification from a script or shell",
+                    "moon-beauty-shell --notify \"Title\" \"Body\"",
+                ),
+                (
+                    "Focus the app that sent the newest toast",
+                    "moon-beauty-shell --activate-latest-notif",
+                ),
+                (
+                    "Dismiss the newest toast",
+                    "moon-beauty-shell --dismiss-notif",
+                ),
+                (
+                    "Toggle the notification history panel",
+                    "moon-beauty-shell --notif-history",
+                ),
+            ]),
+            ("SCREENSHOTS", &[
+                (
+                    "Capture a region, save to ~/Pictures/Screenshots",
+                    "moon-beauty-shell --screenshot",
+                ),
+                (
+                    "Capture a region, open the annotator",
+                    "moon-beauty-shell --screenshot --annotate",
+                ),
+            ]),
+            ("SYSTEM", &[
+                (
+                    "Restart the bar (picks up new settings)",
+                    "moon-beauty-shell --restart-bar",
+                ),
+                (
+                    "Test IMAP/SMTP email connection",
+                    "moon-beauty-shell --test-email",
+                ),
+                (
+                    "Test lockscreen password authentication",
+                    "moon-beauty-shell --test-lock-auth",
+                ),
+            ]),
+            ("SWAY KEYBIND EXAMPLES", &[
+                (
+                    "Cycle music players with Super+M",
+                    "bindsym $mod+m exec moon-beauty-shell --music-cycle",
+                ),
+                (
+                    "Play/pause with Super+Shift+M",
+                    "bindsym $mod+Shift+m exec moon-beauty-shell --music-play-pause",
+                ),
+                (
+                    "Next track with Super+Shift+Right",
+                    "bindsym $mod+Shift+Right exec moon-beauty-shell --music-next",
+                ),
+                (
+                    "Toggle notification history with Super+N",
+                    "bindsym $mod+n exec moon-beauty-shell --toggle history",
+                ),
+                (
+                    "Region screenshot with Print",
+                    "bindsym Print exec moon-beauty-shell --screenshot",
+                ),
+            ]),
+        ];
+
+        let mut col = column![].spacing(20).width(Length::Fill);
+
+        col = col.push(
+            container(
+                text("Click 📋 to copy a command. Paste into a sway keybind, shell alias, or terminal.")
+                    .size(fs_desc)
+                    .color(theme.muted),
+            )
+            .padding([10, 14])
+            .width(Length::Fill)
+            .style(move |_t| container::Style {
+                background: Some(iced::Background::Color(theme.surface_alt)),
+                border: iced::Border {
+                    color: theme.border,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            }),
+        );
+
+        for (title, entries) in sections {
+            col = col.push(
+                text(*title)
+                    .size(fs_head)
+                    .bold()
+                    .color(theme.success),
+            );
+
+            let mut section_col = column![].spacing(6).width(Length::Fill);
+            for (desc, cmd) in entries.iter() {
+                let cmd_clone = (*cmd).to_string();
+
+                let desc_el = text(*desc)
+                    .size(fs_desc)
+                    .color(theme.muted);
+
+                let cmd_el = text(*cmd)
+                    .size(fs_cmd)
+                    .font(iced::Font::MONOSPACE)
+                    .color(theme.text)
+                    .wrapping(iced::widget::text::Wrapping::None);
+
+                let copy_btn = button(
+                    container(text("📋").size(14))
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill),
+                )
+                .on_press(SettingsMessage::CopyIpc(cmd_clone))
+                .padding(0)
+                .width(Length::Fixed(40.0))
+                .height(Length::Fixed(32.0))
+                .style(move |_t, status| button::Style {
+                    background: Some(iced::Background::Color(match status {
+                        button::Status::Hovered | button::Status::Pressed => {
+                            theme.surface_alt
+                        }
+                        _ => theme.background,
+                    })),
+                    border: iced::Border {
+                        color: theme.text,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    text_color: theme.text,
+                    ..Default::default()
+                });
+
+                let row = container(
+                    row![
+                        column![desc_el, cmd_el]
+                            .spacing(2)
+                            .width(Length::Fill),
+                        copy_btn,
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill),
+                )
+                .padding([6, 10])
+                .width(Length::Fill)
+                .style(move |_t| container::Style {
+                    border: iced::Border {
+                        color: theme.border,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                });
+
+                section_col = section_col.push(row);
+            }
+            col = col.push(section_col);
+        }
+
+        container(
+            scrollable(col)
+                .height(Length::Fill)
+                .width(Length::Fill),
+        )
+        .padding(iced::Padding {
+            top: 0.0,
+            right: (settings.overlay_cut as f32) + 16.0,
+            bottom: (settings.overlay_cut as f32) + 16.0,
+            left: (settings.overlay_cut as f32) + 16.0,
+        })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .clip(true)
+        .into()
     }
 }

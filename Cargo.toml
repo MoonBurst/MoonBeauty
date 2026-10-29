@@ -6,6 +6,7 @@ authors = ["MoonBeauty"]
 description = "High-performance Wayland desktop shell and overlay matrix in Rust & Iced"
 
 [dependencies]
+mpd_client = "1"
 sha2 = "0.10"
 iced_futures = "0.14"
 iced = { version = "0.14", features = ["advanced", "tokio", "canvas", "image", "svg", "unconditional-rendering"] }

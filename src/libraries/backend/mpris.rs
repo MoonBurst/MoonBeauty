@@ -264,6 +264,174 @@ impl MprisBackend {
         Self::call_method("Next").await;
     }
 
+    /// List all currently registered MPRIS bus names, capped at 20.
+    /// Used by the music cycle to enumerate available players.
+    pub async fn list_players() -> Vec<String> {
+        let Ok(conn) = Connection::session().await else { return Vec::new() };
+        let Ok(reply) = conn
+            .call_method(
+                Some("org.freedesktop.DBus"),
+                "/org/freedesktop/DBus",
+                Some("org.freedesktop.DBus"),
+                "ListNames",
+                &(),
+            )
+            .await
+        else {
+            return Vec::new();
+        };
+        let Ok(names) = reply.body().deserialize::<Vec<String>>() else {
+            return Vec::new();
+        };
+        names
+            .into_iter()
+            .filter(|n| n.starts_with("org.mpris.MediaPlayer2."))
+            .filter(|n| !n.ends_with(".playerctld"))
+            .take(20)
+            .collect()
+    }
+
+    /// Poll a specific player by bus name. Used by the music cycle;
+    /// the normal `poll()` auto-selects. Same field extraction as
+    /// `poll_uncached`, just targeted.
+    pub async fn poll_for(bus: &str) -> Option<MprisTrack> {
+        let conn = Connection::session().await.ok()?;
+        let proxy = zbus::Proxy::new(&conn, bus, MPRIS_PATH, MPRIS_IFACE)
+            .await
+            .ok()?;
+        let t = std::time::Duration::from_secs(2);
+        let metadata: HashMap<String, OwnedValue> =
+            tokio::time::timeout(t, proxy.get_property("Metadata"))
+                .await
+                .ok()?
+                .ok()?;
+        let is_playing = tokio::time::timeout(t, proxy.get_property::<String>("PlaybackStatus"))
+            .await
+            .ok()?
+            .ok()
+            .map(|s| s == "Playing")
+            .unwrap_or(false);
+        let position_sec = tokio::time::timeout(t, proxy.get_property::<i64>("Position"))
+            .await
+            .ok()?
+            .ok()
+            .map(|p| p as f64 / 1_000_000.0)
+            .unwrap_or(0.0);
+        let volume_pct = tokio::time::timeout(t, proxy.get_property::<f64>("Volume"))
+            .await
+            .ok()?
+            .ok()
+            .map(|v| (v * 100.0).clamp(0.0, 100.0) as u8)
+            .unwrap_or(100);
+
+        let get_str = |key: &str, max: usize| -> Option<String> {
+            metadata.get(key).and_then(|v| match &**v {
+                zbus::zvariant::Value::Str(s) => Some(truncate_chars(s.as_str(), max)),
+                _ => None,
+            })
+        };
+        let title = get_str("xesam:title", 512).unwrap_or_default();
+        let album = get_str("xesam:album", 512).unwrap_or_default();
+        let url = get_str("xesam:url", 4096);
+        let artist = metadata
+            .get("xesam:artist")
+            .and_then(|v| match &**v {
+                zbus::zvariant::Value::Str(s) => Some(truncate_chars(s.as_str(), 512)),
+                zbus::zvariant::Value::Array(arr) => {
+                    let parts: Vec<String> = arr
+                        .iter()
+                        .take(8)
+                        .filter_map(|item| {
+                            if let zbus::zvariant::Value::Str(s) = item {
+                                Some(truncate_chars(s.as_str(), 256))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    if parts.is_empty() {
+                        None
+                    } else {
+                        Some(parts.join(", "))
+                    }
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
+        let length_sec = metadata
+            .get("mpris:length")
+            .and_then(|v| match &**v {
+                zbus::zvariant::Value::I64(n) => Some(*n as f64 / 1_000_000.0),
+                zbus::zvariant::Value::U64(n) => Some(*n as f64 / 1_000_000.0),
+                _ => None,
+            })
+            .unwrap_or(0.0);
+        if title.is_empty() && artist.is_empty() {
+            return None;
+        }
+        Some(MprisTrack {
+            title,
+            artist,
+            album,
+            is_playing,
+            position_sec,
+            length_sec,
+            volume_pct,
+            url,
+        })
+    }
+
+    /// Play/pause a specific player by bus name. Used by the music
+    /// cycle and the tooltip buttons (finding 74 fix).
+    ///
+    /// Finding 75: use `PlayPause` (required-by-MPRIS-spec toggle)
+    /// after checking current state, instead of `Play`/`Pause`
+    /// individually. Firefox implements all four; some MPRIS bridges
+    /// (e.g. mpv-mpris) stub the individual ones. `PlayPause` with a
+    /// pre-check is universal.
+    pub async fn set_playing_for(bus: &str, play: bool) {
+        let Ok(conn) = Connection::session().await else {
+            crate::dbg_log!("[mpris] set_playing_for({}): no session conn", bus);
+            return;
+        };
+        let Ok(proxy) = zbus::Proxy::new(&conn, bus, MPRIS_PATH, MPRIS_IFACE).await else {
+            crate::dbg_log!("[mpris] set_playing_for({}): proxy failed", bus);
+            return;
+        };
+        let current = match proxy.get_property::<String>("PlaybackStatus").await {
+            Ok(s) => s,
+            Err(e) => {
+                crate::dbg_log!("[mpris] set_playing_for({}): status read: {}", bus, e);
+                return;
+            }
+        };
+        let is_playing = current == "Playing";
+        if is_playing == play {
+            crate::dbg_log!(
+                "[mpris] set_playing_for({}): already {} (no-op)",
+                bus, if play { "playing" } else { "paused" }
+            );
+            return;
+        }
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            proxy.call_method("PlayPause", &()),
+        )
+        .await
+        {
+            Ok(Ok(_)) => crate::dbg_log!(
+                "[mpris] set_playing_for({}): → {} (PlayPause)",
+                bus, if play { "playing" } else { "paused" }
+            ),
+            Ok(Err(e)) => crate::dbg_log!(
+                "[mpris] set_playing_for({}): PlayPause failed: {}", bus, e
+            ),
+            Err(_) => crate::dbg_log!(
+                "[mpris] set_playing_for({}): PlayPause timeout", bus
+            ),
+        }
+    }
+
     pub async fn previous() {
         Self::call_method("Previous").await;
     }

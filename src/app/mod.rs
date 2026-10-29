@@ -125,6 +125,9 @@ pub enum Message {
     /// an unlocked screen. Runs fast (500ms) so the worst-case window
     /// between crash and respawn is 500ms + child boot (~300ms).
     CheckLockscreenAlive,
+    /// Music cycle press completed — carries the updated state so
+    /// subsequent presses continue from the right position.
+    MusicCycleDone(moon_beauty_shell::libraries::backend::MusicCycleState),
 }
 
 impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message {
@@ -210,6 +213,11 @@ pub struct MoonBeautyShellApp {
     pub lockscreen: LockscreenOverlay,
     #[allow(dead_code)]
     pub weather_tick: bool,
+
+    /// Music cycle state — which player to target next, and which we
+    /// most recently started (for pause priority when multiple are
+    /// playing). See backend/music_cycle.rs.
+    pub music_cycle_state: moon_beauty_shell::libraries::backend::MusicCycleState,
 
     pub last_cursor_x: f32,
     pub last_cursor_time: std::time::Instant,

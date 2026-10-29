@@ -233,6 +233,8 @@ impl MoonBeautyShellApp {
             lockscreen: if matches!(standalone_target, Some(OverlayTarget::Lockscreen)) { LockscreenOverlay::new() } else { LockscreenOverlay::empty() },
             weather_tick: false,
 
+            music_cycle_state: Default::default(),
+
             last_cursor_x: 0.0,
             last_cursor_time: std::time::Instant::now() - std::time::Duration::from_secs(30),
             last_toast_count: 0,

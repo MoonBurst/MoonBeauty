@@ -370,7 +370,11 @@ impl MoonBeautyShellApp {
                         let gpu = SystemCollector::collect_gpu_by_card_id(&gpu_id).await;
                         let audio = AudioBackend::get_sink().await;
                         let mic = AudioBackend::get_source().await;
-                        let mpris = MprisBackend::poll().await;
+                        // Finding 74: MPD-priority-over-MPRIS. Prefer the
+                        // dedicated music daemon over incidental browser
+                        // media when both are Playing.
+                        let (mpris, _source) =
+                            moon_beauty_shell::libraries::backend::poll_track().await;
                         (cpu, ram, gpu, audio, mic, mpris)
                     },
                     |(cpu, ram, gpu, audio, mic, mpris)| {
@@ -507,11 +511,81 @@ impl MoonBeautyShellApp {
                     }
                 }
                 IpcCommand::IncomingNotif { .. } => {}
+                IpcCommand::MusicCycle => {
+                    let mut state = self.music_cycle_state.clone();
+                    return Command::perform(
+                        async move {
+                            moon_beauty_shell::libraries::backend::music_cycle::press(&mut state)
+                                .await;
+                            state
+                        },
+                        Message::MusicCycleDone,
+                    );
+                }
+                IpcCommand::MusicNext => {
+                    return Command::perform(
+                        async {
+                            use moon_beauty_shell::libraries::backend::{
+                                poll_track, MpdBackend, MprisBackend, TrackSource,
+                            };
+                            let (_, src) = poll_track().await;
+                            match src {
+                                TrackSource::Mpd => MpdBackend::next().await,
+                                TrackSource::Mpris => MprisBackend::next().await,
+                                TrackSource::None => {}
+                            }
+                        },
+                        |_| Message::TickHardware,
+                    );
+                }
+                IpcCommand::MusicPrevious => {
+                    return Command::perform(
+                        async {
+                            use moon_beauty_shell::libraries::backend::{
+                                poll_track, MpdBackend, MprisBackend, TrackSource,
+                            };
+                            let (_, src) = poll_track().await;
+                            match src {
+                                TrackSource::Mpd => MpdBackend::previous().await,
+                                TrackSource::Mpris => MprisBackend::previous().await,
+                                TrackSource::None => {}
+                            }
+                        },
+                        |_| Message::TickHardware,
+                    );
+                }
+                IpcCommand::MusicPlayPause => {
+                    return Command::perform(
+                        async {
+                            use moon_beauty_shell::libraries::backend::{
+                                poll_track, MpdBackend, MprisBackend, TrackSource,
+                            };
+                            let (_, src) = poll_track().await;
+                            match src {
+                                TrackSource::Mpd => MpdBackend::toggle_play_pause().await,
+                                TrackSource::Mpris => MprisBackend::toggle_play_pause().await,
+                                TrackSource::None => {}
+                            }
+                        },
+                        |_| Message::TickHardware,
+                    );
+                }
                 IpcCommand::Ping => {}
             },
             Message::PollIpc => {
+                // Finding 75: batch and return the Commands. `let _ =`
+                // discarded them, so any handler that did
+                // `return Command::perform(...)` (MusicCycle, MusicNext,
+                // MusicPrevious, MusicPlayPause) had its future scheduled
+                // then dropped — never ran. Fire-and-forget handlers
+                // (Toggle, TestNotification) worked because they did
+                // side effects directly.
+                let mut cmds = Vec::new();
                 while let Ok(cmd) = self.ipc_rx.try_recv() {
-                    let _ = self.update(Message::IpcReceived(cmd));
+                    cmds.push(self.update(Message::IpcReceived(cmd)));
+                }
+                if !cmds.is_empty() {
+                    return Command::batch(cmds);
                 }
             }
             Message::TopBar(msg) => {
@@ -708,19 +782,54 @@ impl MoonBeautyShellApp {
                             }
                         }
                         CapsuleAction::TogglePlayPause => {
-                            return Command::perform(MprisBackend::toggle_play_pause(), |_| {
-                                Message::TopBar(TopBarMessage::Noop)
-                            });
+                            return Command::perform(
+                                async {
+                                    use moon_beauty_shell::libraries::backend::{
+                                        poll_track, MpdBackend, MprisBackend, TrackSource,
+                                    };
+                                    let (_, src) = poll_track().await;
+                                    match src {
+                                        TrackSource::Mpd => MpdBackend::toggle_play_pause().await,
+                                        TrackSource::Mpris => MprisBackend::toggle_play_pause().await,
+                                        TrackSource::None => {}
+                                    }
+                                },
+                                |_| Message::TopBar(TopBarMessage::Noop),
+                            );
                         }
                         CapsuleAction::NextTrack => {
-                            return Command::perform(MprisBackend::next(), |_| {
-                                Message::TopBar(TopBarMessage::Noop)
-                            });
+                            // Finding 74: dispatch to whichever backend
+                            // is currently serving the music capsule.
+                            return Command::perform(
+                                async {
+                                    use moon_beauty_shell::libraries::backend::{
+                                        poll_track, MpdBackend, MprisBackend, TrackSource,
+                                    };
+                                    let (_, src) = poll_track().await;
+                                    match src {
+                                        TrackSource::Mpd => MpdBackend::next().await,
+                                        TrackSource::Mpris => MprisBackend::next().await,
+                                        TrackSource::None => {}
+                                    }
+                                },
+                                |_| Message::TopBar(TopBarMessage::Noop),
+                            );
                         }
                         CapsuleAction::PreviousTrack => {
-                            return Command::perform(MprisBackend::previous(), |_| {
-                                Message::TopBar(TopBarMessage::Noop)
-                            });
+                            return Command::perform(
+                                async {
+                                    use moon_beauty_shell::libraries::backend::{
+                                        poll_track, MpdBackend, MprisBackend, TrackSource,
+                                    };
+                                    let (_, src) = poll_track().await;
+                                    match src {
+                                        TrackSource::Mpd => MpdBackend::previous().await,
+                                        TrackSource::Mpris => MprisBackend::previous().await,
+                                        TrackSource::None => {}
+                                    }
+                                },
+                                |_| Message::TopBar(TopBarMessage::Noop),
+                            );
                         }
                         CapsuleAction::CycleAudioSink => {
                             return Command::perform(AudioBackend::cycle_sinks(), |_| {
@@ -2402,6 +2511,15 @@ impl MoonBeautyShellApp {
                     return Command::none();
                 }
 
+                // Copy command to clipboard. Handled here (not in
+                // settings_ui.update) because it returns a Command;
+                // settings_ui.update is sync.
+                if let SettingsMessage::CopyIpc(cmd) = &msg {
+                    let cmd = cmd.clone();
+                    eprintln!("[settings] copied to clipboard: {}", cmd);
+                    return iced::clipboard::write(cmd);
+                }
+
                 let is_test = matches!(msg, SettingsMessage::TestNotification);
 
                 if is_test {
@@ -2663,6 +2781,10 @@ impl MoonBeautyShellApp {
                     },
                     None => return Command::none(),
                 }
+            }
+            Message::MusicCycleDone(new_state) => {
+                self.music_cycle_state = new_state;
+                return Command::done(Message::TickHardware);
             }
             Message::Noop => {}
             Message::SetToastInputRegion(_) => {

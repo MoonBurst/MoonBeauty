@@ -85,6 +85,10 @@ pub enum IpcCommand {
     ToggleHistory,
     ReloadSettings,
     TestNotification,
+    MusicCycle,
+    MusicNext,
+    MusicPrevious,
+    MusicPlayPause,
     IncomingNotif {
         app_name: String,
         summary: String,

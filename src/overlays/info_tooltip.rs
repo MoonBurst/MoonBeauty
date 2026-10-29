@@ -38,6 +38,7 @@ pub enum Message {
     MusicPrev,
     MusicNext,
     MusicPlayPause,
+    CyclePlayer,
     MusicSeek(f64),
     MusicSetVolume(u8),
     MusicOpenFolder(Option<String>),
@@ -237,17 +238,46 @@ impl App {
                 self.closing_at = Some(Instant::now());
             }
             Message::MusicPrev => {
-                let _ = std::process::Command::new("playerctl")
-                    .arg("previous")
-                    .status();
+                // Finding 74: route through the bar's backend selector
+                // (MPD if playing, else MPRIS) instead of playerctl,
+                // which would only control the active MPRIS player.
+                if let Ok(exe) = std::env::current_exe() {
+                    let _ = std::process::Command::new(exe)
+                        .arg("--music-previous")
+                        .status();
+                }
             }
             Message::MusicNext => {
-                let _ = std::process::Command::new("playerctl").arg("next").status();
+                if let Ok(exe) = std::env::current_exe() {
+                    let _ = std::process::Command::new(exe)
+                        .arg("--music-next")
+                        .status();
+                }
             }
             Message::MusicPlayPause => {
-                let _ = std::process::Command::new("playerctl")
-                    .arg("play-pause")
-                    .status();
+                if let Ok(exe) = std::env::current_exe() {
+                    let _ = std::process::Command::new(exe)
+                        .arg("--music-play-pause")
+                        .status();
+                }
+            }
+            Message::CyclePlayer => {
+                // Cycle to next player (or pause current), then re-fetch
+                // so the tooltip shows the new state. 500ms gives the
+                // bar time to complete the async cycle.
+                return Task::perform(
+                    async {
+                        if let Ok(exe) = std::env::current_exe() {
+                            let _ = tokio::process::Command::new(exe)
+                                .arg("--music-cycle")
+                                .status()
+                                .await;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        fetch_data("music".to_string()).await
+                    },
+                    Message::Loaded,
+                );
             }
             Message::MusicSeek(secs) => {
                 return Task::perform(
@@ -867,11 +897,21 @@ impl App {
                         6.0,
                         btn_fs,
                     );
-                    let ctrl_row: Element<'_, Message> = row![prev_btn, play_btn, next_btn]
-                        .spacing(8)
-                        .width(Length::Fill)
-                        .height(Length::Fixed(ctrl_h))
-                        .into();
+                    let cycle_btn = make_slanted_button(
+                        "🔄 Cycle".into(),
+                        Message::CyclePlayer,
+                        bg_col_l,
+                        text_col_l,
+                        text_col_l,
+                        6.0,
+                        btn_fs,
+                    );
+                    let ctrl_row: Element<'_, Message> =
+                        row![prev_btn, play_btn, next_btn, cycle_btn]
+                            .spacing(6)
+                            .width(Length::Fill)
+                            .height(Length::Fixed(ctrl_h))
+                            .into();
                     col = col.push(slanted_row(
                         ctrl_row,
                         y + ctrl_h * 0.5,
