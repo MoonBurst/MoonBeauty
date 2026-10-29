@@ -1,0 +1,72 @@
+# Deferred Backlog (moved from problems/ on 2026-10-28)
+
+These items were originally tracked as active problems. Per session end
+review they were classified as DEFERRED — non-bug refactoring, low-
+priority architectural splits, and multi-week feature work. Not fixed;
+parked with rationale. Pick up only if the code they touch is about to
+change for an unrelated reason.
+
+════════════════════════════════════════════════════════
+# 13-duplicate-killbutton.md
+════════════════════════════════════════════════════════
+Duplicate `KillButtonShape`.
+
+Byte-identical struct and canvas impl in both `info_tooltip.rs` and `system_tooltip.rs`.
+
+**Fix:** Move to `tooltip_engine.rs`.
+════════════════════════════════════════════════════════
+# 14-duplicate-slanted-row.md
+════════════════════════════════════════════════════════
+Duplicate `slanted_row`.
+
+In both `info_tooltip.rs` and `system_tooltip.rs`.
+
+**Fix:** Move to `tooltip_engine.rs`.
+════════════════════════════════════════════════════════
+# 15-tray-popup-dup.md
+════════════════════════════════════════════════════════
+`tray_popup.rs` reimplements `tray_watcher`.
+
+Reimplements `TrayItem`, `fetch_tray_items`, `resolve_icon`, `save_pixmap`.
+
+**Fix:** Import from `backend::tray_watcher`.
+════════════════════════════════════════════════════════
+# 16-settings-slider-dup.md
+════════════════════════════════════════════════════════
+Slider duplication in Settings UI.
+
+Font size, slant width, etc., appear in both `StylixSliders` and `BarLayout` tabs.
+
+**Fix:** Consolidate to one tab.
+════════════════════════════════════════════════════════
+# 17-icon-resolvers.md
+════════════════════════════════════════════════════════
+Duplicate icon resolvers.
+
+`resolve_icon_name` in `notifications.rs` and `resolve_icon` in `tray_watcher.rs`.
+
+**Fix:** Document which to use for new code, or merge.
+════════════════════════════════════════════════════════
+# 21-main-rs-size.md
+════════════════════════════════════════════════════════
+`main.rs` is 3,700+ lines.
+
+Contains ~15 free functions (`compute_tooltip_height`, `capsule_center_x`, etc.) that belong in modules.
+
+**Fix:** Extract to `bar_geometry.rs`.
+════════════════════════════════════════════════════════
+# 22-settings-rs-size.md
+════════════════════════════════════════════════════════
+`settings.rs` is 2,000+ lines.
+
+The `view()` match is huge.
+
+**Fix:** Break each tab into its own `fn view_<tab>()`.
+════════════════════════════════════════════════════════
+# 23-capsule-widths-global.md
+════════════════════════════════════════════════════════
+Fragile `CAPSULE_WIDTHS` global.
+
+Widths are recorded in a global mutex during render, then read for position math. If a width changes mid-frame, clicks are off for one frame.
+
+**Fix:** Return widths from render, store on app struct.
