@@ -1,0 +1,18 @@
+69 PARTIAL zombie accumulation from non-reaping spawns
+
+   APPLIED:  src/app/update.rs — PollNotifs runtime respawn uses
+             spawn_and_reap. Monitor-change cycles no longer
+             accumulate zombies (was 8 over one test session).
+
+   DEFERRED: src/main.rs — bar startup spawn still drops the Child
+             without wait(). Impact: 1 zombie per bar restart,
+             reparented to systemd when bar exits → reaped at
+             equilibrium. Not a leak.
+
+   Mitigated by finding 68: the notif-surface that survives on
+   startup-spawn race loss is irrelevant — the D-Bus-spawned child
+   re-reads settings and lands on the correct monitor either way.
+
+   To fully close: wrap the
+     if !is_notif_surface && standalone_target.is_none()
+   block in main.rs with spawn_and_reap. Cosmetic; not urgent.

@@ -30,9 +30,24 @@ impl MoonBeautyShellApp {
                         .status();
                     std::thread::sleep(std::time::Duration::from_millis(300));
                     let exe = resolve_exe();
-                    let _ = std::process::Command::new(exe)
-                        .arg("--notif-surface")
-                        .spawn();
+                    // Finding 65: pass MBS_OUTPUT explicitly from settings. The parent
+                    // env's MBS_OUTPUT is resolved once at bar startup and becomes stale
+                    // when notif_screen_name changes at runtime; external MBS_OUTPUT
+                    // (systemd Environment) silently overrides the setting entirely.
+                    let mut cmd = std::process::Command::new(exe);
+                    cmd.arg("--notif-surface");
+                    // Finding 65/68: env is now irrelevant — notif-surface
+                    // re-reads settings.json itself. Keep this for
+                    // belt-and-suspenders if the child startup override
+                    // is ever disabled.
+                    let target = &self.settings.notif_screen_name;
+                    if !target.is_empty() && target != "Auto" && target != "Auto (Primary)" {
+                        cmd.env("MBS_OUTPUT", target);
+                    } else {
+                        cmd.env_remove("MBS_OUTPUT");
+                    }
+                    // Finding 69: reap so pkill'd children don't accumulate.
+                    let _ = moon_beauty_shell::libraries::process::spawn_and_reap(&mut cmd);
                 }
                 if let Some(rx) = self.notif_rx.as_ref() {
                     while let Ok(n) = rx.try_recv() {

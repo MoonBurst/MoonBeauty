@@ -322,7 +322,14 @@ pub fn safe_icon_candidate(
 ) -> Option<PathBuf> {
     let canon = std::fs::canonicalize(candidate).ok()?;
     let canon_root = std::fs::canonicalize(root).ok()?;
-    if canon.starts_with(&canon_root) {
+    // Finding 64: also accept canonical targets under /nix/store/.
+    // NixOS icons are symlinks from /run/current-system/sw/share/icons
+    // (or /usr/share/icons) into /nix/store/.../share/icons. The store
+    // is read-only and content-addressed — no attacker can drop files
+    // there. A hostile symlink to /etc/passwd or ~/.ssh/id_rsa still
+    // canonicalizes outside both roots and gets rejected.
+    const NIX_STORE: &str = "/nix/store/";
+    if canon.starts_with(&canon_root) || canon.starts_with(NIX_STORE) {
         Some(canon)
     } else {
         eprintln!(

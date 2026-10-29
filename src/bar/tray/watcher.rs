@@ -519,7 +519,12 @@ fn safe_icon_candidate(
 ) -> Option<std::path::PathBuf> {
     let canon = std::fs::canonicalize(candidate).ok()?;
     let canon_root = std::fs::canonicalize(root).ok()?;
-    if canon.starts_with(&canon_root) {
+    // Finding 64: allow canonical targets under /nix/store/ (NixOS icons
+    // are symlinks into the immutable store). Hostile symlinks to
+    // user/system paths outside the store and outside the declared root
+    // are still rejected.
+    const NIX_STORE: &str = "/nix/store/";
+    if canon.starts_with(&canon_root) || canon.starts_with(NIX_STORE) {
         Some(canon)
     } else {
         eprintln!(

@@ -637,6 +637,29 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     }
 
     let is_notif_surface = detect_notif_surface(&args);
+
+    // Finding 68: notif-surface reads its target monitor from
+    // settings.json directly, ignoring inherited MBS_OUTPUT. This
+    // eliminates the dual-spawn-path race between bar-spawn and
+    // D-Bus/systemd activation — whichever parent launches us, the
+    // child resolves the same value that's on disk right now.
+    if is_notif_surface {
+        let s = ShellSettings::load();
+        let target = &s.notif_screen_name;
+        if !target.is_empty() && target != "Auto" && target != "Auto (Primary)" {
+            std::env::set_var("MBS_OUTPUT", target);
+            eprintln!(
+                "[notif-surface] MBS_OUTPUT={:?} (from settings.json, overrides env)",
+                target
+            );
+        } else {
+            std::env::remove_var("MBS_OUTPUT");
+            eprintln!(
+                "[notif-surface] MBS_OUTPUT unset (settings=Auto; using sway primary)"
+            );
+        }
+    }
+
     let standalone_target = detect_standalone_overlay(&args);
     eprintln!(
         "[main-v225] standalone_target={:?} is_notif={}",
@@ -650,9 +673,18 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             .status();
         std::thread::sleep(std::time::Duration::from_millis(300));
         let exe = resolve_exe();
-        let _ = std::process::Command::new(exe)
-            .arg("--notif-surface")
-            .spawn();
+        // Finding 65: pass MBS_OUTPUT explicitly from settings. The parent
+        // env's MBS_OUTPUT is resolved once at bar startup and becomes stale
+        // when notif_screen_name changes at runtime; external MBS_OUTPUT
+        // (systemd Environment) silently overrides the setting entirely.
+        let mut cmd = std::process::Command::new(exe);
+        cmd.arg("--notif-surface");
+        let target = &settings.notif_screen_name;
+        if !target.is_empty() && target != "Auto" && target != "Auto (Primary)" {
+            cmd.env("MBS_OUTPUT", target);
+        }
+        // else: inherit parent MBS_OUTPUT (respects external override)
+        let _ = cmd.spawn();
     }
 
     // Fast path: bar already set MBS_OUTPUT — child inherits it.
