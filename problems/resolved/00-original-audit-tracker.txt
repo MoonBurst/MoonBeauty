@@ -39,25 +39,38 @@
          Attacker symlinks it -> shell writes through to arbitrary path.
    fix:  use $XDG_RUNTIME_DIR/mbs-tmp/ (0700). Panic if XDG unset.
 
-05 HIGH lockscreen debug bypass
+05 RESOLVED 2026-10-28 — compile-time feature gate applied
+   (`lock-debug-bypass = []` in Cargo.toml default = []); warning
+   cfg-gated to only fire when feature is on. Batches 1-3.
+   orig header: 05 HIGH lockscreen debug bypass
    file: overlays/lockscreen/coordinator.rs authenticate
    why:  MBS_DEBUG=1 + MBS_LOCK_DEBUG_PASS=x -> unlock by typing x.
    fix:  remove entirely, or gate behind #[cfg(feature="lock-debug-bypass")].
 
-06 MED unbounded cache growth
+06 RESOLVED 2026-10-28 — 4 sinks capped: save_pixmap dim cap
+   (512x512), tray cache dir budget (20 MB), email attachment
+   (50 MB), email body cache (100 MB). Batches 2 + 9 + 10.
+   orig header: 06 MED unbounded cache growth
    file: tray/watcher save_pixmap, email_client read_message
    why:  no size cap on IconPixmap or attachments. 1GB icon or 5GB
          attachment fills $XDG_RUNTIME_DIR (tmpfs) -> session OOM.
    fix:  cap icon at 256KB, attachment at 50MB, LRU evict by mtime.
 
-07 MED imagemagick RCE surface
+07 RESOLVED 2026-10-28 — tray magick fallback removed; policy.xml
+   written to $XDG_RUNTIME_DIR/mbs-imagemagick/ at startup;
+   `-limit memory/map/disk/width/height` on every remaining
+   magick invocation. Batches 2-3.
+   orig header: 07 MED imagemagick RCE surface
    file: annotator compose_annotations, plate_watermark, tray fallback
    why:  magick has RCE CVEs on MVG, MSL, ghostscript delegate.
          Any crafted image that image-crate fails to decode hits this.
    fix:  drop the tray fallback. For annotator/watermark, ship a
          policy.xml disabling those coders.
 
-08 LOW desktop_entry traversal
+08 RESOLVED 2026-10-28 — desktop_entry + Icon= path whitelist
+   at notifications/ui.rs; launcher resolve_icon also
+   canonicalize+root-checked. Batches 1 + 5 + 9 + 12.
+   orig header: 08 LOW desktop_entry traversal
    file: notifications/ui.rs resolve_desktop_icon
    why:  D-Bus hint "../../.ssh/id_rsa" reads that .desktop Icon=
          (existence check / avatar spoofing).
