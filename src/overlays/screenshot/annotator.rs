@@ -1479,6 +1479,11 @@ pub fn save_annotated_image(
                     }
                 }
 
+                // Drop the custom name + timestamp for the clipboard watcher to pick up
+                let name_file = crate::libraries::process::mbs_runtime_dir().join("mbs-last-clip-name.txt");
+                let display_name = format!("📸 {}", filename);
+                let _ = std::fs::write(&name_file, display_name);
+
                 // Copy the UNIQUE watermarked bytes
                 if let Ok(mut child) = std::process::Command::new("wl-copy")
                     .args(["-t", "image/png"])

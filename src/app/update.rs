@@ -1146,12 +1146,8 @@ impl MoonBeautyShellApp {
                     );
                 }
                 ClipboardMessage::DeleteEntry(id) => {
-                    return Command::perform(
-                        async move {
-                            ClipboardOverlay::delete(id).await;
-                        },
-                        |_| Message::DismissActiveOverlay,
-                    );
+                    ClipboardOverlay::delete(id);
+                    return Command::none();
                 }
                 ClipboardMessage::WipeAll => {
                     return Command::perform(
@@ -1160,6 +1156,13 @@ impl MoonBeautyShellApp {
                         },
                         |_| Message::DismissActiveOverlay,
                     );
+                }
+                ClipboardMessage::SetFilter(f) => {
+                    self.clipboard.filter = f;
+                    self.clipboard.selected_id = None;
+                    self.clipboard.preview_text.clear();
+                    self.clipboard.preview_image_path = None;
+                    return Command::none();
                 }
                 ClipboardMessage::SearchChanged(q) => {
                     self.clipboard.search_query = q;
@@ -1293,6 +1296,19 @@ impl MoonBeautyShellApp {
                                 self.clipboard.selected_id = None;
                                 self.clipboard.preview_text.clear();
                                 self.clipboard.preview_image_path = None;
+                            }
+                        }
+                    }
+                    return Command::none();
+                }
+                                ClipboardMessage::RevealImage(id) => {
+                    let dir = dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("moon-beauty-shell").join("clipboard");
+                    if let Some(path) = ClipboardOverlay::get_file_path(&dir, id) {
+                        if let Ok(bytes) = std::fs::read(&path) {
+                            if let Ok(revealed) = moon_beauty_shell::overlays::plate_watermark::reveal(&bytes) {
+                                let out_path = dir.join(format!("revealed_{}.png", id));
+                                let _ = std::fs::write(&out_path, revealed);
+                                let _ = std::process::Command::new("xdg-open").arg(&out_path).spawn();
                             }
                         }
                     }

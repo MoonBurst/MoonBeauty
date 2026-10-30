@@ -95,6 +95,18 @@ impl MoonBeautyShellApp {
             });
         }
 
+
+        // Spawn wl-paste watchers to replace cliphist
+        if standalone_target.is_none() && !is_notif_surface {
+            let exe = crate::resolve_exe();
+            let exe_str = exe.to_string_lossy().to_string();
+            let _ = std::process::Command::new("wl-paste").args(["--watch", &exe_str, "--clipboard-ingest"]).spawn();
+            let script = format!(
+                "mime=$(wl-paste --list-types | head -n1); if [ -n \"$mime\" ]; then wl-paste --type \"$mime\" | {} --clipboard-ingest \"$mime\"; fi",
+                exe_str
+            );
+                                }
+
         let notif_rx = if is_notif_surface {
             // Finding 55: bounded (256). notify-send can be called at
             // arbitrary rate by any same-user process; unbounded channel

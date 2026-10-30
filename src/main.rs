@@ -197,6 +197,62 @@ fn app_style(_state: &MoonBeautyShellApp, _theme: &iced::Theme) -> iced::theme::
 pub fn main() -> Result<(), iced_layershell::Error> {
     let args: Vec<String> = std::env::args().collect();
 
+    if args.iter().any(|a| a == "--clipboard-ingest") {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        if std::io::stdin().read_to_end(&mut bytes).is_ok() && !bytes.is_empty() {
+            let dir = dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("moon-beauty-shell").join("clipboard");
+            let _ = std::fs::create_dir_all(&dir);
+            let index_path = dir.join("index.json");
+            
+            let id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+            
+            // Detect images by Magic Bytes (PNG, JPEG, GIF, WebP)
+            let is_image = bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47])
+                || bytes.starts_with(&[0xFF, 0xD8, 0xFF])
+                || bytes.starts_with(b"GIF89a")
+                || bytes.starts_with(b"GIF87a")
+                || (bytes.len() > 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP");
+            
+            let ext = if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) { "png" }
+                else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) { "jpg" }
+                else if bytes.starts_with(b"GIF89a") || bytes.starts_with(b"GIF87a") { "gif" }
+                else if bytes.len() > 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" { "webp" }
+                else { "txt" };
+            let path = dir.join(format!("{}.{}", id, ext));
+            let _ = std::fs::write(&path, &bytes);
+            
+            let mut items: Vec<moon_beauty_shell::overlays::clipboard::ClipItem> = Vec::new();
+            if let Ok(content) = std::fs::read_to_string(&index_path) {
+                if let Ok(parsed) = serde_json::from_str(&content) { items = parsed; }
+            }
+            let mut text_preview = if is_image { String::new() } else { String::from_utf8_lossy(&bytes[..bytes.len().min(100)]).to_string() };
+            
+            if is_image {
+                let name_file = moon_beauty_shell::libraries::process::mbs_runtime_dir().join("mbs-last-clip-name.txt");
+                if let Ok(txt) = std::fs::read_to_string(&name_file) {
+                    text_preview = txt.trim().to_string();
+                    let _ = std::fs::remove_file(&name_file);
+                }
+            }
+            
+            items.insert(0, moon_beauty_shell::overlays::clipboard::ClipItem {
+                id, text: text_preview, is_image, thumb_path: None,
+            });
+            items.truncate(100); // Keep last 100
+            
+            if let Ok(json) = serde_json::to_string(&items) {
+                let tmp = dir.join("index.json.tmp");
+                if std::fs::write(&tmp, &json).is_ok() {
+                    let _ = std::fs::rename(&tmp, &index_path);
+                    eprintln!("[clipboard-ingest] Saved {} items, is_image={}", items.len(), is_image);
+                }
+            }
+        }
+        std::process::exit(0);
+    }
+
+
     // Finding 07 defense-in-depth: restrictive ImageMagick policy that
     // every child process (annotator, watermark, reveal) inherits via
     // MAGICK_CONFIGURE_PATH.

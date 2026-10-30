@@ -1,12 +1,12 @@
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Stack};
+use iced::widget::{button, column, container, row, scrollable, text, text_input, Stack, Row};
 use iced::{Alignment, Color, Element, Length, Padding};
 use tokio::process::Command;
 
 use crate::libraries::config::settings::ShellSettings;
 use crate::libraries::config::theme::ShellTheme;
-use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClipItem {
     pub id: u64,
     pub text: String,
@@ -26,6 +26,8 @@ pub enum ClipboardMessage {
     DeleteSelected,
     WipeAll,
     RunOcr(u64),
+    SetFilter(ClipFilter),
+    RevealImage(u64),
     Reloaded(Vec<ClipItem>),
     PreviewLoaded {
         text: String,
@@ -34,12 +36,16 @@ pub enum ClipboardMessage {
     Dismiss,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipFilter { All, Text, Images }
+
 pub struct ClipboardOverlay {
     pub search_query: String,
     pub entries: Vec<ClipItem>,
     pub selected_id: Option<u64>,
     pub preview_text: String,
     pub preview_image_path: Option<String>,
+    pub filter: ClipFilter,
 }
 
 impl Default for ClipboardOverlay {
@@ -52,6 +58,11 @@ impl ClipboardOverlay {
     pub fn filtered_ids(&self) -> Vec<u64> {
         self.entries
             .iter()
+            .filter(|e| match self.filter {
+                ClipFilter::All => true,
+                ClipFilter::Text => !e.is_image,
+                ClipFilter::Images => e.is_image,
+            })
             .filter(|e| {
                 self.search_query.is_empty()
                     || e.text
@@ -69,75 +80,43 @@ impl ClipboardOverlay {
             selected_id: None,
             preview_text: String::new(),
             preview_image_path: None,
+            filter: ClipFilter::All,
         }
     }
 
-    pub async fn reload() -> Vec<ClipItem> {
-        let cache_dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
-        let map_path = cache_dir.join("mbs-clip-names.txt");
-        let mut name_map = std::collections::HashMap::new();
-
-        if let Ok(map_content) = std::fs::read_to_string(&map_path) {
-            for line in map_content.lines() {
-                if let Some((id_str, name)) = line.split_once('\t') {
-                    if let Ok(id) = id_str.parse::<u64>() {
-                        name_map.insert(id, name.to_string());
-                    }
-                }
-            }
+    pub fn get_file_path(dir: &std::path::Path, id: u64) -> Option<std::path::PathBuf> {
+        for ext in &["png", "jpg", "gif", "webp", "txt", "bin"] {
+            let p = dir.join(format!("{}.{}", id, ext));
+            if p.exists() { return Some(p); }
         }
+        None
+    }
 
-        let Ok(out) = Command::new("cliphist").arg("list").output().await else {
-            return Vec::new();
-        };
-
-        let raw = String::from_utf8_lossy(&out.stdout);
+    pub async fn reload() -> Vec<ClipItem> {
+        let dir = dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("moon-beauty-shell").join("clipboard");
+        let index_path = dir.join("index.json");
+        
         let mut list = Vec::new();
-        let tmp_dir = crate::libraries::process::mbs_subdir("mbs-clip");
-
-        for line in raw.lines() {
-            if let Some((id_str, content)) = line.split_once('\t') {
-                if let Ok(id) = id_str.trim().parse::<u64>() {
-                    let is_image =
-                        content.contains("[[ binary data") || content.contains("binary data");
-                    let thumb_path = if is_image {
-                        let thumb = tmp_dir.join(format!("mbs-clip-thumb-{}.png", id));
-                        let decode = Command::new("cliphist")
-                            .args(["decode", &id.to_string()])
-                            .output()
-                            .await;
-                        match decode {
-                            Ok(d) if !d.stdout.is_empty() => {
-                                if std::fs::write(&thumb, &d.stdout).is_ok() {
-                                    Some(thumb.to_string_lossy().into_owned())
+        if let Ok(content) = std::fs::read_to_string(&index_path) {
+            if let Ok(items) = serde_json::from_str::<Vec<ClipItem>>(&content) {
+                for mut item in items {
+                    if item.is_image {
+                        if let Some(path) = Self::get_file_path(&dir, item.id) {
+                            if item.text.is_empty() || item.text == "📸 Image" || item.text.starts_with("📸 Image 1") {
+                                if let Ok((w, h)) = ::image::image_dimensions(&path) {
+                                    item.text = format!("📸 Image {}x{}", w, h);
                                 } else {
-                                    None
+                                    item.text = format!("📸 Image {}", item.id);
                                 }
                             }
-                            _ => None,
-                        }
-                    } else {
-                        None
-                    };
-
-                    // Use mapped filename if it exists
-                    let text_val = if is_image {
-                        if let Some(name) = name_map.get(&id) {
-                            format!("📸 {}", name)
+                            item.thumb_path = Some(path.to_string_lossy().into_owned());
                         } else {
-                            let clean = content.replace("[[ binary data ", "").replace(" ]]", "");
-                            format!("📸 Screenshot {}", clean.trim())
+                            if item.text.is_empty() {
+                                item.text = format!("📸 Image {}", item.id);
+                            }
                         }
-                    } else {
-                        content.to_string()
-                    };
-
-                    list.push(ClipItem {
-                        id,
-                        text: text_val,
-                        is_image,
-                        thumb_path,
-                    });
+                    }
+                    list.push(item);
                 }
             }
         }
@@ -145,109 +124,68 @@ impl ClipboardOverlay {
     }
 
     pub async fn load_preview(id: u64) -> (String, Option<String>) {
-        let out = match Command::new("cliphist")
-            .args(["decode", &id.to_string()])
-            .output()
-            .await
-        {
-            Ok(o) => o,
-            Err(_) => return (String::new(), None),
-        };
-        if out.stdout.is_empty() {
-            return (String::new(), None);
-        }
-        if out.stdout.len() > 8 * 1024 * 1024 {
-            return ("[entry too large to preview]".into(), None);
-        }
-        match String::from_utf8(out.stdout.clone()) {
-            Ok(text) => (text, None),
-            Err(_) => {
-                let tmp = crate::libraries::process::mbs_subdir("mbs-clip")
-                    .join(format!("mbs-clip-preview-{}.png", id));
-                if std::fs::write(&tmp, &out.stdout).is_ok() {
-                    (String::new(), Some(tmp.to_string_lossy().into_owned()))
-                } else {
-                    (String::new(), None)
+        let dir = dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("moon-beauty-shell").join("clipboard");
+        if let Some(path) = Self::get_file_path(&dir, id) {
+            if let Ok(bytes) = std::fs::read(&path) {
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                if ext == "txt" || ext == "bin" {
+                    if let Ok(text) = String::from_utf8(bytes) {
+                        return (text, None);
+                    }
                 }
+                return (String::new(), Some(path.to_string_lossy().into_owned()));
             }
         }
+        (String::new(), None)
     }
 
     pub async fn copy(id: u64) {
-        let decode = match Command::new("cliphist")
-            .args(["decode", &id.to_string()])
-            .output()
-            .await
-        {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("[clipboard] cliphist decode failed: {e}");
-                return;
-            }
-        };
-        if decode.stdout.is_empty() {
-            return;
-        }
-        let mut child = match Command::new("wl-copy")
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-        {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("[clipboard] wl-copy spawn failed: {e}");
-                return;
-            }
-        };
-        if let Some(mut stdin) = child.stdin.take() {
+        let dir = dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("moon-beauty-shell").join("clipboard");
+        let path = dir.join(format!("{}.bin", id));
+        if let Ok(bytes) = std::fs::read(&path) {
             use tokio::io::AsyncWriteExt;
-            let _ = stdin.write_all(&decode.stdout).await;
-            drop(stdin);
+            let mut child = match tokio::process::Command::new("wl-copy")
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(&bytes).await;
+            }
+            let _ = child.wait().await;
         }
-        let _ = child.wait().await;
     }
 
-    pub async fn delete(id: u64) {
-        let child = Command::new("cliphist")
-            .arg("delete")
-            .stdin(std::process::Stdio::piped())
-            .spawn()
-            .ok();
-        if let Some(mut c) = child {
-            use tokio::io::AsyncWriteExt;
-            if let Some(mut stdin) = c.stdin.take() {
-                let _ = stdin.write_all(format!("{}\t\n", id).as_bytes()).await;
+    pub fn delete(id: u64) {
+        let dir = dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("moon-beauty-shell").join("clipboard");
+        let index_path = dir.join("index.json");
+        
+        if let Some(path) = Self::get_file_path(&dir, id) {
+            let _ = std::fs::remove_file(path);
+        }
+        
+        if let Ok(content) = std::fs::read_to_string(&index_path) {
+            if let Ok(mut items) = serde_json::from_str::<Vec<ClipItem>>(&content) {
+                items.retain(|i| i.id != id);
+                if let Ok(new_json) = serde_json::to_string(&items) {
+                    let _ = std::fs::write(&index_path, new_json);
+                }
             }
         }
     }
 
     pub async fn wipe() {
-        let _ = Command::new("cliphist").arg("wipe").status().await;
+        let dir = dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("moon-beauty-shell").join("clipboard");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
-    pub async fn ocr(id: u64) -> String {
-        let tmp_img = crate::libraries::process::mbs_subdir("mbs-clip")
-            .join(format!("qs_ocr_{}.png", id));
-
-        if let Ok(decode) = Command::new("cliphist")
-            .args(["decode", &id.to_string()])
-            .output()
-            .await
-        {
-            if std::fs::write(&tmp_img, &decode.stdout).is_ok() {
-                if let Ok(tess) = Command::new("tesseract")
-                    .args([tmp_img.to_str().unwrap(), "stdout"])
-                    .output()
-                    .await
-                {
-                    let _ = std::fs::remove_file(&tmp_img);
-                    return String::from_utf8_lossy(&tess.stdout).trim().to_string();
-                }
-            }
-        }
-        String::new()
+    pub async fn ocr(_id: u64) -> String {
+        String::new() // OCR can be re-added via external tool if needed
     }
 
-    pub fn view<'a>(
+        pub fn view<'a>(
         &'a self,
         theme: &'a ShellTheme,
         settings: &ShellSettings,
@@ -289,15 +227,10 @@ impl ClipboardOverlay {
         };
         let list_side_inset = list_top_inset.max(list_bottom_inset).max(20.0);
 
-        // Header
+        // Top Row
         let search_input = text_input("Search clipboard...", &self.search_query)
             .on_input(ClipboardMessage::SearchChanged)
-            .padding(Padding {
-                top: 12.0,
-                right: 24.0,
-                bottom: 12.0,
-                left: 24.0,
-            })
+            .padding(Padding { top: 12.0, right: 24.0, bottom: 12.0, left: 24.0 })
             .size((theme.font_size_overlay) as f32)
             .width(Length::Fill)
             .style(move |_t, _s| text_input::Style {
@@ -319,22 +252,12 @@ impl ClipboardOverlay {
             .height(Length::Fixed(48.0));
 
         let wipe_btn = button(
-            container(
-                text("Wipe All")
-                    .size((theme.font_size_overlay) as f32)
-                    .color(theme.danger),
-            )
-            .center_y(Length::Fill)
-            .center_x(Length::Fill),
+            container(text("Wipe").size((theme.font_size_overlay) as f32).color(theme.danger))
+                .center_y(Length::Fill).center_x(Length::Fill),
         )
         .on_press(ClipboardMessage::WipeAll)
-        .height(Length::Fixed(48.0))
-        .width(Length::Fixed(100.0))
-        .style(move |_t, _s| button::Style {
-            background: Some(iced::Background::Color(Color::TRANSPARENT)),
-            border: iced::Border::default(),
-            ..Default::default()
-        });
+        .height(Length::Fixed(48.0)).width(Length::Fixed(100.0))
+        .style(move |_t, _s| button::Style { background: Some(iced::Background::Color(Color::TRANSPARENT)), border: iced::Border::default(), ..Default::default() });
 
         let wipe_bg = ShapeBox::new()
             .shape(ShapeType::Hexagon { cut })
@@ -342,81 +265,113 @@ impl ClipboardOverlay {
             .border(theme.danger, theme.control_border_width)
             .size(Length::Fixed(100.0), Length::Fixed(48.0));
 
+        let wipe_bar = container(Stack::new().push(wipe_bg.view()).push(wipe_btn))
+            .height(Length::Fixed(48.0)).width(Length::Fixed(100.0));
+
         let ocr_btn = button(
-            container(text("OCR").size((theme.font_size_overlay) as f32).color(
-                if is_image_selected {
-                    theme.text
-                } else {
-                    theme.muted
-                },
-            ))
-            .center_y(Length::Fill)
-            .center_x(Length::Fill),
+            container(text("OCR").size((theme.font_size_overlay) as f32).color(if is_image_selected { theme.text } else { theme.muted }))
+                .center_y(Length::Fill).center_x(Length::Fill),
         )
-        .on_press_maybe(Some(ClipboardMessage::RunOcr(
-            self.selected_id.unwrap_or(0),
-        )))
-        .height(Length::Fixed(48.0))
-        .width(Length::Fixed(80.0))
-        .style(move |_t, _s| button::Style {
-            background: Some(iced::Background::Color(Color::TRANSPARENT)),
-            border: iced::Border::default(),
-            ..Default::default()
-        });
+        .on_press_maybe(Some(ClipboardMessage::RunOcr(self.selected_id.unwrap_or(0))))
+        .height(Length::Fixed(48.0)).width(Length::Fixed(80.0))
+        .style(move |_t, _s| button::Style { background: Some(iced::Background::Color(Color::TRANSPARENT)), border: iced::Border::default(), ..Default::default() });
 
         let ocr_bg = ShapeBox::new()
             .shape(ShapeType::Hexagon { cut })
             .background(theme.background)
-            .border(
-                if is_image_selected {
-                    theme.text
-                } else {
-                    theme.border
-                },
-                theme.control_border_width,
-            )
+            .border(if is_image_selected { theme.text } else { theme.border }, theme.control_border_width)
             .size(Length::Fixed(80.0), Length::Fixed(48.0));
 
         let ocr_bar = container(Stack::new().push(ocr_bg.view()).push(ocr_btn))
-            .height(Length::Fixed(48.0))
-            .width(Length::Fixed(80.0));
+            .height(Length::Fixed(48.0)).width(Length::Fixed(80.0));
 
-        let wipe_bar = container(Stack::new().push(wipe_bg.view()).push(wipe_btn))
-            .height(Length::Fixed(48.0))
-            .width(Length::Fixed(100.0));
+        let mut top_row = Row::new().spacing(12).align_y(Alignment::Center);
+        top_row = top_row.push(search_bar);
+        top_row = top_row.push(ocr_bar);
+        top_row = top_row.push(wipe_bar);
 
-        let input_row = container(
-            row![search_bar, ocr_bar, wipe_bar]
-                .spacing(12)
-                .align_y(Alignment::Center),
+        let input_row = container(top_row)
+            .width(Length::Fill)
+            .padding(Padding { top: 0.0, right: search_inward, bottom: 0.0, left: search_inward });
+
+        // Bottom Row
+        let mk_tab = |label: &'static str, filter: ClipFilter| -> Element<'a, ClipboardMessage> {
+            let is_active = self.filter == filter;
+            let bg = if is_active { theme.surface_alt } else { theme.background };
+            let border = if is_active { theme.text } else { theme.border };
+            let text_w = label.chars().count() as f32 * (theme.font_size_overlay as f32) * 0.6;
+            let w = (text_w + (cut as f32 * 2.0) + 24.0).max(80.0);
+            let shape = ShapeBox::new()
+                .shape(ShapeType::Hexagon { cut })
+                .background(bg)
+                .border(border, theme.control_border_width)
+                .size(Length::Fixed(w), Length::Fixed(48.0));
+            button(Stack::new().push(shape.view()).push(
+                container(text(label).size((theme.font_size_overlay) as f32).color(theme.text))
+                    .center_x(Length::Fill).center_y(Length::Fill)
+                    .width(Length::Fixed(w)).height(Length::Fixed(48.0))
+            ))
+            .on_press(ClipboardMessage::SetFilter(filter))
+            .padding(0)
+            .style(|_t, _s| button::Style { background: None, ..Default::default() })
+            .into()
+        };
+
+        let reveal_bg_col = if is_image_selected { theme.surface_alt } else { theme.background };
+        let reveal_border_col = if is_image_selected { theme.text } else { theme.border };
+
+        let reveal_text_w = "Reveal".chars().count() as f32 * (theme.font_size_overlay as f32) * 0.6;
+        let reveal_w = (reveal_text_w + (cut as f32 * 2.0) + 24.0).max(80.0);
+
+        let reveal_shape = ShapeBox::new()
+            .shape(ShapeType::Hexagon { cut })
+            .background(reveal_bg_col)
+            .border(reveal_border_col, theme.control_border_width)
+            .size(Length::Fixed(reveal_w), Length::Fixed(48.0));
+
+        let reveal_btn = button(
+            Stack::new().push(reveal_shape.view()).push(
+                container(text("Reveal").size((theme.font_size_overlay) as f32).color(theme.text))
+                    .center_x(Length::Fill).center_y(Length::Fill)
+                    .width(Length::Fixed(reveal_w)).height(Length::Fixed(48.0))
+            )
         )
-        .width(Length::Fill)
-        .padding(Padding {
-            top: 0.0,
-            right: search_inward,
-            bottom: 0.0,
-            left: search_inward,
-        });
+        .on_press_maybe(if is_image_selected { Some(ClipboardMessage::RevealImage(self.selected_id.unwrap_or(0))) } else { None })
+        .padding(0)
+        .style(|_t, _s| button::Style { background: None, ..Default::default() });
+
+        let reveal_bar = container(reveal_btn).height(Length::Fixed(48.0)).width(Length::Fixed(reveal_w));
+
+        let mut bot_row = Row::new().spacing(12).align_y(Alignment::Center);
+        bot_row = bot_row.push(mk_tab("Text", ClipFilter::Text));
+        bot_row = bot_row.push(mk_tab("Images", ClipFilter::Images));
+        bot_row = bot_row.push(reveal_bar);
+
+        let filter_row = container(bot_row)
+            .width(Length::Fill)
+            .padding(Padding { top: 12.0, right: search_inward, bottom: 0.0, left: search_inward });
 
         // Left Pane (List)
         let mut list_col = column![].spacing(8);
         for item in &self.entries {
+            if let ClipFilter::Text = self.filter {
+                if item.is_image { continue; }
+            } else if let ClipFilter::Images = self.filter {
+                if !item.is_image { continue; }
+            }
+
             if !self.search_query.is_empty()
-                && !item
-                    .text
-                    .to_lowercase()
-                    .contains(&self.search_query.to_lowercase())
-            {
+                && !item.text.to_lowercase().contains(&self.search_query.to_lowercase()) {
                 continue;
             }
+            
             let is_sel = self.selected_id == Some(item.id);
-            let border_color = if is_sel { theme.danger } else { theme.border }; // Base08 outline
-            let text_color = if is_sel { theme.text } else { theme.text }; // Keep text normal
+            let border_color = if is_sel { theme.danger } else { theme.border };
+            let text_color = if is_sel { theme.text } else { theme.text };
 
             let raw_text = item.text.lines().next().unwrap_or("").to_string();
-
-            let display_text = if raw_text.chars().count() > 30 {
-                let truncated: String = raw_text.chars().take(30).collect();
+            let display_text = if raw_text.chars().count() > 45 {
+                let truncated: String = raw_text.chars().take(42).collect();
                 format!("{}...", truncated)
             } else {
                 raw_text
@@ -426,126 +381,62 @@ impl ClipboardOverlay {
             if let Some(thumb) = &item.thumb_path {
                 item_row = item_row.push(
                     iced::widget::image(iced::widget::image::Handle::from_path(thumb.clone()))
-                        .width(Length::Fixed(40.0))
-                        .height(Length::Fixed(40.0))
-                        .content_fit(iced::ContentFit::Contain),
+                        .width(Length::Fixed(40.0)).height(Length::Fixed(40.0)).content_fit(iced::ContentFit::Contain),
                 );
             } else {
                 item_row = item_row.push(text("■").size(10).color(theme.muted));
             }
 
-            // Force the text to stay strictly within the box
-            let text_container = container(
-                text(display_text)
-                    .size((theme.font_size_overlay) as f32)
-                    .color(text_color),
-            )
-            .width(Length::Fill)
-            .clip(true);
+            let text_container = container(text(display_text).size((theme.font_size_overlay) as f32).color(text_color)).width(Length::Fill).clip(true);
             item_row = item_row.push(text_container);
 
             let btn_content = container(item_row)
-                .padding(Padding {
-                    top: 0.0,
-                    right: 24.0,
-                    bottom: 0.0,
-                    left: 24.0,
-                })
-                .width(Length::Fill)
-                .height(Length::Fixed(56.0))
-                .align_y(Alignment::Center);
+                .padding(Padding { top: 0.0, right: 24.0, bottom: 0.0, left: 24.0 })
+                .width(Length::Fill).height(Length::Fixed(56.0)).align_y(Alignment::Center);
 
             let item_bg = ShapeBox::new()
                 .shape(ShapeType::Hexagon { cut })
-                .background(theme.background) // Always dark background
+                .background(theme.background)
                 .border(border_color, theme.control_border_width)
                 .size(Length::Fill, Length::Fixed(56.0));
 
             let item_btn = button(Stack::new().push(item_bg.view()).push(btn_content))
                 .on_press(ClipboardMessage::SelectEntry(item.id))
-                .width(Length::Fill)
-                .height(Length::Fixed(56.0))
-                .style(move |_t, _s| button::Style {
-                    background: Some(iced::Background::Color(Color::TRANSPARENT)),
-                    border: iced::Border::default(),
-                    ..Default::default()
-                });
+                .width(Length::Fill).height(Length::Fixed(56.0))
+                .style(move |_t, _s| button::Style { background: Some(iced::Background::Color(Color::TRANSPARENT)), border: iced::Border::default(), ..Default::default() });
 
             list_col = list_col.push(item_btn);
         }
 
         let left_pane = container(
-            scrollable(list_col)
-                .id(iced::widget::Id::new("clip_list"))
-                .width(Length::Fill)
-                .height(Length::Fill),
+            scrollable(list_col).id(iced::widget::Id::new("clip_list")).width(Length::Fill).height(Length::Fill),
         )
-        .width(Length::FillPortion(1))
-        .height(Length::Fill)
-        .clip(true)
-        .padding(Padding {
-            top: list_top_inset,
-            right: 24.0, // Increased to keep scrollbar away from right pane
-            bottom: list_bottom_inset,
-            left: list_side_inset,
-        });
+        .width(Length::FillPortion(1)).height(Length::Fill).clip(true)
+        .padding(Padding { top: list_top_inset, right: 24.0, bottom: list_bottom_inset, left: list_side_inset });
 
         // Right Pane (Preview)
-        // Dynamic padding based on the chamfer cut to prevent spilling out of the octagon
-        let inner_pad = cut_f + 4.0; // Tight padding: just enough to clear the chamfer
-        let inner_padding = Padding {
-            top: inner_pad,
-            right: inner_pad,
-            bottom: inner_pad,
-            left: inner_pad,
-        };
+        let inner_pad = cut_f + 4.0;
+        let inner_padding = Padding { top: inner_pad, right: inner_pad, bottom: inner_pad, left: inner_pad };
 
-        let preview_content: Element<'a, ClipboardMessage> = if let Some(img_path) =
-            &self.preview_image_path
-        {
+        let preview_content: Element<'a, ClipboardMessage> = if let Some(img_path) = &self.preview_image_path {
             container(
                 container(
                     iced::widget::image(iced::widget::image::Handle::from_path(img_path.clone()))
-                        .width(Length::Fill)
-                        .content_fit(iced::ContentFit::Contain),
-                )
-                .padding(inner_padding)
-                .center_x(Length::Fill)
-                .center_y(Length::Fill)
-                .width(Length::Fill)
-                .height(Length::Fill),
-            )
-            .into()
+                        .width(Length::Fill).content_fit(iced::ContentFit::Contain),
+                ).padding(inner_padding).center_x(Length::Fill).center_y(Length::Fill).width(Length::Fill).height(Length::Fill),
+            ).into()
         } else if !self.preview_text.is_empty() {
             container(
                 scrollable(
                     container(
-                        text(&self.preview_text)
-                            .size((theme.font_size_overlay) as f32)
-                            .font(iced::Font::MONOSPACE)
-                            .color(theme.text)
-                            .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
-                    )
-                    .width(Length::Fill),
-                )
-                .width(Length::Fill)
-                .height(Length::Fill),
-            )
-            .padding(inner_padding)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+                        text(&self.preview_text).size((theme.font_size_overlay) as f32).font(iced::Font::MONOSPACE).color(theme.text).wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+                    ).width(Length::Fill),
+                ).width(Length::Fill).height(Length::Fill),
+            ).padding(inner_padding).width(Length::Fill).height(Length::Fill).into()
         } else {
             container(
-                text("Select an entry to preview")
-                    .size((theme.font_size_overlay) as f32)
-                    .color(theme.muted),
-            )
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
+                text("Select an entry to preview").size((theme.font_size_overlay) as f32).color(theme.muted),
+            ).center_x(Length::Fill).center_y(Length::Fill).width(Length::Fill).height(Length::Fill).into()
         };
 
         let right_bg = ShapeBox::new()
@@ -554,29 +445,17 @@ impl ClipboardOverlay {
             .border(theme.border, theme.control_border_width)
             .size(Length::Fill, Length::Fill);
 
-        // Wrap the Stack in a container with .clip(true) so the text inside the right pane doesn't bleed out
         let right_pane = container(Stack::new().push(right_bg.view()).push(preview_content))
-            .width(Length::FillPortion(2))
-            .clip(true)
-            .height(Length::Fill)
-            .clip(true);
+            .width(Length::FillPortion(2)).clip(true).height(Length::Fill).clip(true);
 
         let content = column![
             input_row,
-            row![left_pane, right_pane]
-                .spacing(16)
-                .height(Length::Fill)
-                .width(Length::Fill)
+            filter_row,
+            row![left_pane, right_pane].spacing(16).height(Length::Fill).width(Length::Fill)
         ]
         .spacing(16)
-        .padding(Padding {
-            top: pad_top,
-            right: 0.0,
-            bottom: pad_bottom,
-            left: 0.0,
-        })
-        .width(Length::Fixed(win_w))
-        .height(Length::Fixed(win_h));
+        .padding(Padding { top: pad_top, right: 0.0, bottom: pad_bottom, left: 0.0 })
+        .width(Length::Fixed(win_w)).height(Length::Fixed(win_h));
 
         let bg_shape = ShapeBox::new()
             .shape(ShapeType::Hexagon { cut })
@@ -585,10 +464,7 @@ impl ClipboardOverlay {
             .size(Length::Fixed(win_w), Length::Fixed(win_h));
 
         container(Stack::new().push(bg_shape.view()).push(content))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .into()
+            .width(Length::Fill).height(Length::Fill).center_x(Length::Fill).center_y(Length::Fill).into()
     }
+
 }
