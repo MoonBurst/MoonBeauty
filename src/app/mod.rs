@@ -68,6 +68,7 @@ pub enum Message {
     ComposeTabPressed(bool),
     WeatherLoaded(Option<moon_beauty_shell::bar::weather::WeatherData>),
     TickClock,
+    IdleTick,
     TickToasts,
     MetricsCollected(
         CpuMetrics,
@@ -78,7 +79,6 @@ pub enum Message {
         Option<MprisTrack>,
     ),
     IpcReceived(IpcCommand),
-    PollIpc,
     PollNotifs,
     ResizeNotifSurface(u32, u32),
     // WindowResized removed (problem 07): emitted by resize_sub but
@@ -168,7 +168,6 @@ pub struct MoonBeautyShellApp {
     pub is_standalone: bool,
     pub system_collector: SystemCollector,
     pub standalone_child: Option<(OverlayTarget, std::process::Child)>,
-    pub ipc_rx: std::sync::mpsc::Receiver<IpcCommand>,
     pub is_notif_surface: bool,
     pub notif_rx: Option<
         std::sync::mpsc::Receiver<moon_beauty_shell::overlays::notifications::IncomingNotification>,

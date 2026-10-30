@@ -11,6 +11,13 @@ impl MoonBeautyShellApp {
                     w, h
                 );
             }
+            Message::IdleTick => {
+                let c1 = self.update(Message::TickClock);
+                let c2 = self.update(Message::TickHardware);
+                let c3 = self.update(Message::PollNotifs);
+                let c4 = self.update(Message::CheckLockscreenAlive);
+                return Command::batch(vec![c1, c2, c3, c4]);
+            }
             Message::PollNotifs => {
                 let mtime = std::fs::metadata(ShellSettings::config_path())
                     .ok()
@@ -228,6 +235,7 @@ impl MoonBeautyShellApp {
                     self.settings.notif_hold_duration_sec,
                     self.settings.notif_volume,
                 );
+                self.notifs.flush_history();
             }
             Message::ComposeTabPressed(shift) => {
                 if self.email.is_composing {
@@ -365,8 +373,7 @@ impl MoonBeautyShellApp {
 
                 return Command::perform(
                     async move {
-                        let cpu = SystemCollector::collect_cpu().await;
-                        let ram = SystemCollector::collect_ram().await;
+                        let (cpu, ram) = SystemCollector::collect_all().await;
                         let gpu = SystemCollector::collect_gpu_by_card_id(&gpu_id).await;
                         let audio = AudioBackend::get_sink().await;
                         let mic = AudioBackend::get_source().await;
@@ -572,22 +579,6 @@ impl MoonBeautyShellApp {
                 }
                 IpcCommand::Ping => {}
             },
-            Message::PollIpc => {
-                // Finding 75: batch and return the Commands. `let _ =`
-                // discarded them, so any handler that did
-                // `return Command::perform(...)` (MusicCycle, MusicNext,
-                // MusicPrevious, MusicPlayPause) had its future scheduled
-                // then dropped — never ran. Fire-and-forget handlers
-                // (Toggle, TestNotification) worked because they did
-                // side effects directly.
-                let mut cmds = Vec::new();
-                while let Ok(cmd) = self.ipc_rx.try_recv() {
-                    cmds.push(self.update(Message::IpcReceived(cmd)));
-                }
-                if !cmds.is_empty() {
-                    return Command::batch(cmds);
-                }
-            }
             Message::TopBar(msg) => {
                 eprintln!("[topbar-msg] {:?}", msg);
                 if let TopBarMessage::Action(act) = msg {

@@ -1,15 +1,29 @@
 use super::*;
 
+
+pub(crate) static IPC_RX: std::sync::OnceLock<std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<IpcCommand>>>> = std::sync::OnceLock::new();
+
+fn ipc_stream() -> impl futures_util::Stream<Item = Message> {
+    let rx = IPC_RX.get().expect("IPC_RX not initialized").clone();
+    futures_util::stream::unfold(rx, |rx| async move {
+        let mut guard = rx.lock().await;
+        let cmd = guard.recv().await;
+        drop(guard);
+        cmd.map(|c| (Message::IpcReceived(c), rx))
+    })
+}
+
 impl MoonBeautyShellApp {
     pub fn subscription(&self) -> iced::Subscription<Message> {
         let is_bar = !self.is_standalone && !self.is_notif_surface;
         let clock_sub = if is_bar {
-            iced::time::every(std::time::Duration::from_millis(1500)).map(|_| Message::TickClock)
+            iced::Subscription::none()
         } else {
             iced::Subscription::none()
         };
-        let toast_sub = if self.is_notif_surface && !self.notifs.active_toasts.is_empty() {
-            iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::TickToasts)
+        let toast_sub = if self.is_notif_surface {
+            let interval = if self.notifs.active_toasts.is_empty() { 1000 } else { 16 };
+            iced::time::every(std::time::Duration::from_millis(interval)).map(|_| Message::TickToasts)
         } else {
             iced::Subscription::none()
         };
@@ -29,10 +43,7 @@ impl MoonBeautyShellApp {
         };
 
         let hw_sub = if is_bar {
-            iced::time::every(std::time::Duration::from_millis(
-                self.settings.hardware_poll_interval_ms,
-            ))
-            .map(|_| Message::TickHardware)
+            iced::Subscription::none()
         } else {
             iced::Subscription::none()
         };
@@ -440,10 +451,15 @@ impl MoonBeautyShellApp {
             iced::Subscription::none()
         };
 
+        let idle_tick_sub = if is_bar {
+            iced::time::every(std::time::Duration::from_millis(1500)).map(|_| Message::IdleTick)
+        } else {
+            iced::Subscription::none()
+        };
         let ipc_sub = if self.is_standalone || self.is_notif_surface {
             iced::Subscription::none()
         } else {
-            iced::time::every(std::time::Duration::from_millis(100)).map(|_| Message::PollIpc)
+            iced::Subscription::run(ipc_stream)
         };
 
         // Lockscreen watchdog: 500ms cadence. Combined with the
@@ -454,14 +470,13 @@ impl MoonBeautyShellApp {
         let lockscreen_watchdog_sub = if self.is_standalone || self.is_notif_surface {
             iced::Subscription::none()
         } else {
-            iced::time::every(std::time::Duration::from_millis(1500))
-                .map(|_| Message::CheckLockscreenAlive)
+            iced::Subscription::none()
         };
 
         let notif_sub = if self.is_notif_surface {
             iced::time::every(std::time::Duration::from_millis(50)).map(|_| Message::PollNotifs)
         } else if !self.is_standalone {
-            iced::time::every(std::time::Duration::from_millis(1500)).map(|_| Message::PollNotifs)
+            iced::Subscription::none()
         } else {
             iced::Subscription::none()
         };
@@ -522,6 +537,7 @@ impl MoonBeautyShellApp {
         };
         iced::Subscription::batch(vec![
             clock_sub,
+            idle_tick_sub,
             toast_sub,
             hw_sub,
             email_sync_sub,

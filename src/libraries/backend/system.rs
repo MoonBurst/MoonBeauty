@@ -70,9 +70,13 @@ pub struct ProcessItem {
     pub is_highlight: bool,
 }
 
+
+
+
+
 fn sys_state() -> &'static Mutex<System> {
     static SYS: OnceLock<Mutex<System>> = OnceLock::new();
-    SYS.get_or_init(|| Mutex::new(System::new()))
+    SYS.get_or_init(|| Mutex::new(System::new_all()))
 }
 
 fn read_cpu_temp() -> u32 {
@@ -108,6 +112,7 @@ fn read_cpu_temp() -> u32 {
 }
 
 pub struct SystemCollector {
+    prev_bandwidth: std::collections::HashMap<u32, (u64, u64)>,
     prev_rx_bytes: u64,
     prev_tx_bytes: u64,
     prev_iface: String,
@@ -140,6 +145,7 @@ fn short_gpu_name(full: &str) -> String {
 impl SystemCollector {
     pub fn new() -> Self {
         Self {
+            prev_bandwidth: std::collections::HashMap::new(),
             prev_rx_bytes: 0,
             prev_tx_bytes: 0,
             prev_iface: String::new(),
@@ -147,85 +153,143 @@ impl SystemCollector {
         }
     }
 
-    pub async fn collect_cpu() -> CpuMetrics {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        static FIRST_CALL: AtomicBool = AtomicBool::new(true);
-        let is_first = FIRST_CALL.swap(false, Ordering::Relaxed);
+    pub async fn collect_all() -> (CpuMetrics, RamMetrics) {
         let temp_c = read_cpu_temp();
 
         tokio::task::spawn_blocking(move || {
-            let mut sys = sys_state().lock().unwrap();
+            use std::collections::HashMap;
+            use std::sync::Mutex;
+            static PREV_TOTAL: Mutex<Option<(u64, u64)>> = Mutex::new(None);
+            static PREV_PROCS: Mutex<Option<HashMap<u32, u64>>> = Mutex::new(None);
 
-            // Cheap: per-core CPU usage (reads /proc/stat, ~1-2ms)
-            sys.refresh_cpu_usage();
+            let is_first = PREV_TOTAL.lock().unwrap().is_none();
+            let loops = if is_first { 2 } else { 1 };
+            let mut usage_pct = 0;
+            let mut top_procs_cpu = Vec::new();
+            let mut procs_ram_raw = Vec::new();
 
-            // Expensive: full process list. On a 250+ process system this reads
-            // ~1500 files per call. Throttle to 15s — the aggregate usage number
-            // is what matters every poll; the per-process breakdown is only
-            // surfaced in tooltips, which are fine with 15s freshness.
-            let should_refresh_procs = {
-                use std::sync::Mutex;
-                use std::time::Instant;
-                static LAST: Mutex<Option<Instant>> = Mutex::new(None);
-                let mut g = LAST.lock().unwrap();
-                let refresh = g.map(|t| t.elapsed().as_secs() >= 15).unwrap_or(true);
-                if refresh {
-                    *g = Some(Instant::now());
+            for i in 0..loops {
+                if i == 1 {
+                    std::thread::sleep(std::time::Duration::from_millis(200));
                 }
-                refresh
+
+                let stat_str = std::fs::read_to_string("/proc/stat").unwrap_or_default();
+                let mut delta_total = 0;
+                if let Some(line) = stat_str.lines().next() {
+                    let parts: Vec<u64> = line.split_whitespace().skip(1).filter_map(|x| x.parse().ok()).collect();
+                    if parts.len() >= 4 {
+                        let idle = parts[3] + parts.get(4).copied().unwrap_or(0);
+                        let total = parts.iter().sum::<u64>();
+                        let mut g = PREV_TOTAL.lock().unwrap();
+                        if let Some((prev_idle, prev_total)) = *g {
+                            delta_total = total.saturating_sub(prev_total);
+                            let delta_idle = idle.saturating_sub(prev_idle);
+                            if delta_total > 0 {
+                                usage_pct = (((delta_total - delta_idle) as f64 / delta_total as f64) * 100.0) as u8;
+                            }
+                        }
+                        *g = Some((idle, total));
+                    }
+                }
+
+                let mut next_procs = HashMap::new();
+                let mut procs_cpu = Vec::new();
+                let mut seen_ram = std::collections::HashSet::new();
+                procs_ram_raw.clear();
+
+                if let Ok(entries) = std::fs::read_dir("/proc") {
+                    for entry in entries.flatten() {
+                        if let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() {
+                            if let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) {
+                                if let (Some(open), Some(close)) = (stat.find('('), stat.rfind(')')) {
+                                    let name = &stat[open + 1..close];
+                                    let rest = &stat[close + 2..];
+                                    let fields: Vec<&str> = rest.split_whitespace().collect();
+                                    
+                                    // CPU
+                                    if fields.len() > 12 {
+                                        if let (Ok(utime), Ok(stime)) = (fields[11].parse::<u64>(), fields[12].parse::<u64>()) {
+                                            let proc_ticks = utime + stime;
+                                            next_procs.insert(pid, proc_ticks);
+                                            
+                                            let g_procs = PREV_PROCS.lock().unwrap();
+                                            if let Some(prev_map) = g_procs.as_ref() {
+                                                if let Some(&prev_ticks) = prev_map.get(&pid) {
+                                                    let delta_proc = proc_ticks.saturating_sub(prev_ticks);
+                                                    let cpu_pct = if delta_total > 0 {
+                                                        (delta_proc as f64 / delta_total as f64) * 100.0
+                                                    } else { 0.0 };
+                                                    procs_cpu.push((pid, name.to_string(), cpu_pct as f32));
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // RAM (read statm on the final loop)
+                                    if i == loops - 1 {
+                                        if let Ok(statm) = std::fs::read_to_string(entry.path().join("statm")) {
+                                            if let Some(rss_str) = statm.split_whitespace().nth(1) {
+                                                if let Ok(rss_pages) = rss_str.parse::<u64>() {
+                                                    let rss_bytes = rss_pages * 4096; // Assuming 4KB pages
+                                                    let base_name = name.split(" #").next().unwrap_or("").to_string();
+                                                    if seen_ram.insert(base_name) {
+                                                        procs_ram_raw.push((pid, name.to_string(), rss_bytes));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                *PREV_PROCS.lock().unwrap() = Some(next_procs);
+
+                if i == loops - 1 {
+                    procs_cpu.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+                    top_procs_cpu = procs_cpu.into_iter().take(15).map(|(pid, name, pct)| ProcessItem {
+                        pid, name, metric: format!("{:.1}%", pct), is_highlight: false,
+                    }).collect();
+                }
+            }
+
+            let cpu = CpuMetrics { usage_pct, temp_c, top_procs: top_procs_cpu };
+
+            // System Totals from /proc/meminfo
+            let mut total_kb = 0;
+            let mut avail_kb = 0;
+            if let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") {
+                for line in meminfo.lines() {
+                    if line.starts_with("MemTotal:") {
+                        total_kb = line.split_whitespace().nth(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                    } else if line.starts_with("MemAvailable:") {
+                        avail_kb = line.split_whitespace().nth(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                    }
+                }
+            }
+            let total_gib = total_kb as f32 / (1024.0 * 1024.0);
+            let avail_gib = avail_kb as f32 / (1024.0 * 1024.0);
+
+            // ZRAM
+            let zram_orig = std::fs::read_to_string("/sys/block/zram0/orig_data_size").ok().and_then(|s| s.trim().parse::<f32>().ok()).unwrap_or(0.0);
+            let zram_comp = std::fs::read_to_string("/sys/block/zram0/compr_data_size").ok().and_then(|s| s.trim().parse::<f32>().ok()).unwrap_or(0.0);
+            let (zram_ratio, zram_saved_gib) = if zram_comp > 0.0 && zram_orig > 0.0 {
+                (zram_orig / zram_comp, (zram_orig - zram_comp) / (1024.0 * 1024.0 * 1024.0))
+            } else { (1.0, 0.0) };
+
+            procs_ram_raw.sort_by_key(|x| std::cmp::Reverse(x.2));
+            let top_procs_ram = procs_ram_raw.into_iter().take(15).map(|(pid, name, bytes)| ProcessItem {
+                pid, name, metric: format!("{} MiB", bytes / (1024 * 1024)), is_highlight: false,
+            }).collect();
+
+            let ram = RamMetrics {
+                total_gib, available_gib: avail_gib, effective_avail_gib: avail_gib + zram_saved_gib,
+                zram_ratio, zram_saved_gib, top_procs: top_procs_ram,
             };
-            if should_refresh_procs || is_first {
-                if is_first {
-                    std::thread::sleep(std::time::Duration::from_millis(250));
-                    sys.refresh_cpu_usage();
-                }
-                sys.refresh_processes_specifics(
-                    ProcessesToUpdate::All,
-                    sysinfo::ProcessRefreshKind::new(),
-                );
-            }
 
-            let usage_pct = sys.global_cpu_usage().round().clamp(0.0, 100.0) as u8;
-
-            let mut procs: Vec<(u32, String, f32)> = sys
-                .processes()
-                .iter()
-                .map(|(pid, p)| {
-                    (
-                        pid.as_u32(),
-                        p.name().to_string_lossy().to_string(),
-                        p.cpu_usage(),
-                    )
-                })
-                .collect();
-            procs.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-
-            let top_procs = procs
-                .into_iter()
-                .take(15)
-                .map(|(pid, name, pct)| ProcessItem {
-                    pid,
-                    name,
-                    metric: format!("{:.1}%", pct),
-                    is_highlight: false,
-                })
-                .collect();
-
-            CpuMetrics {
-                usage_pct,
-                temp_c,
-                top_procs,
-            }
-        })
-        .await
-        .unwrap_or_else(|e| {
-            eprintln!("[cpu] sysinfo task failed: {:?}", e);
-            CpuMetrics {
-                usage_pct: 0,
-                temp_c,
-                top_procs: Vec::new(),
-            }
-        })
+            (cpu, ram)
+        }).await.unwrap_or_default()
     }
 
     pub async fn collect_gpu(card_id: &str, is_nvidia: bool, nv_index: u32) -> GpuMetrics {
@@ -331,91 +395,6 @@ impl SystemCollector {
         }
     }
 
-    pub async fn collect_ram() -> RamMetrics {
-        tokio::task::spawn_blocking(|| {
-            let mut sys = sys_state().lock().unwrap();
-            sys.refresh_memory();
-
-            // Same 15s throttle as collect_cpu — the process list is the
-            // expensive part. refresh_memory() (which reads /proc/meminfo) is
-            // cheap and stays at poll rate.
-            let should_refresh_procs = {
-                use std::sync::Mutex;
-                use std::time::Instant;
-                static LAST: Mutex<Option<Instant>> = Mutex::new(None);
-                let mut g = LAST.lock().unwrap();
-                let refresh = g.map(|t| t.elapsed().as_secs() >= 15).unwrap_or(true);
-                if refresh {
-                    *g = Some(Instant::now());
-                }
-                refresh
-            };
-            if should_refresh_procs {
-                sys.refresh_processes_specifics(
-                    ProcessesToUpdate::All,
-                    sysinfo::ProcessRefreshKind::new(),
-                );
-            }
-
-            let total_gib = sys.total_memory() as f32 / (1024.0 * 1024.0 * 1024.0);
-            let avail_gib = sys.available_memory() as f32 / (1024.0 * 1024.0 * 1024.0);
-
-            // zram stats — sysinfo doesn't expose these
-            let zram_orig = fs::read_to_string("/sys/block/zram0/orig_data_size")
-                .ok()
-                .and_then(|s| s.trim().parse::<f32>().ok())
-                .unwrap_or(0.0);
-            let zram_comp = fs::read_to_string("/sys/block/zram0/compr_data_size")
-                .ok()
-                .and_then(|s| s.trim().parse::<f32>().ok())
-                .unwrap_or(0.0);
-
-            let (zram_ratio, zram_saved_gib) = if zram_comp > 0.0 && zram_orig > 0.0 {
-                (
-                    zram_orig / zram_comp,
-                    (zram_orig - zram_comp) / (1024.0 * 1024.0 * 1024.0),
-                )
-            } else {
-                (1.0, 0.0)
-            };
-
-            let mut procs: Vec<(u32, String, u64)> = sys
-                .processes()
-                .iter()
-                .map(|(pid, p)| {
-                    (
-                        pid.as_u32(),
-                        p.name().to_string_lossy().to_string(),
-                        p.memory(),
-                    )
-                })
-                .collect();
-            procs.sort_by_key(|x| std::cmp::Reverse(x.2));
-
-            let top_procs = procs
-                .into_iter()
-                .take(15)
-                .map(|(pid, name, bytes)| ProcessItem {
-                    pid,
-                    name,
-                    metric: format!("{} MiB", bytes / (1024 * 1024)),
-                    is_highlight: false,
-                })
-                .collect();
-
-            RamMetrics {
-                total_gib,
-                available_gib: avail_gib,
-                effective_avail_gib: avail_gib + zram_saved_gib,
-                zram_ratio,
-                zram_saved_gib,
-                top_procs,
-            }
-        })
-        .await
-        .unwrap_or_default()
-    }
-
     pub fn collect_battery() -> BatteryMetrics {
         let ps = Path::new("/sys/class/power_supply");
         if !ps.exists() {
@@ -467,42 +446,31 @@ impl SystemCollector {
     }
 
     pub fn update_net(&mut self) -> NetMetrics {
-        use sysinfo::Networks;
-        static NETWORKS: OnceLock<Mutex<Networks>> = OnceLock::new();
-        let mut networks = NETWORKS
-            .get_or_init(|| Mutex::new(Networks::new_with_refreshed_list()))
-            .lock()
-            .unwrap();
-        networks.refresh();
+        let mut chosen_iface = String::from("none");
+        let mut chosen_rx = 0;
+        let mut chosen_tx = 0;
 
-        // Prefer a non-loopback interface with data
-        let mut chosen: Option<(String, u64, u64)> = None;
-        for (name, data) in networks.iter() {
-            if name == "lo" {
-                continue;
+        // Read directly from /proc/net/dev to bypass sysinfo 0.31 bugs
+        if let Ok(dev) = fs::read_to_string("/proc/net/dev") {
+            for line in dev.lines().skip(2) {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 10 {
+                    let name = parts[0].trim_end_matches(':');
+                    if name == "lo" || name.starts_with("docker") || name.starts_with("veth") || name.starts_with("br-") {
+                        continue;
+                    }
+                    let rx: u64 = parts[1].parse().unwrap_or(0);
+                    let tx: u64 = parts[9].parse().unwrap_or(0);
+                    
+                    // Pick the active interface (the one with the most traffic)
+                    if chosen_iface == "none" || rx > chosen_rx {
+                        chosen_iface = name.to_string();
+                        chosen_rx = rx;
+                        chosen_tx = tx;
+                    }
+                }
             }
-            chosen = Some((
-                name.clone(),
-                data.total_received(),
-                data.total_transmitted(),
-            ));
-            break;
         }
-
-        let (chosen_iface, chosen_rx, chosen_tx) = match chosen {
-            Some(c) => c,
-            None => {
-                return NetMetrics {
-                    iface: "none".into(),
-                    hw_type: "".into(),
-                    ip: "".into(),
-                    down_str: "0.0Kb".into(),
-                    up_str: "0.0Kb".into(),
-                    ping_str: "--".into(),
-                    top_procs: Vec::new(),
-                };
-            }
-        };
 
         if self.prev_iface != chosen_iface {
             self.prev_iface = chosen_iface.clone();
@@ -521,10 +489,7 @@ impl SystemCollector {
         }
 
         let now = std::time::Instant::now();
-        let dt = now
-            .duration_since(self.prev_net_time)
-            .as_secs_f32()
-            .max(0.1);
+        let dt = now.duration_since(self.prev_net_time).as_secs_f32().max(0.1);
         let rx_rate = (chosen_rx.saturating_sub(self.prev_rx_bytes) as f32 / dt) * 8.0;
         let tx_rate = (chosen_tx.saturating_sub(self.prev_tx_bytes) as f32 / dt) * 8.0;
 
@@ -532,17 +497,12 @@ impl SystemCollector {
         self.prev_tx_bytes = chosen_tx;
         self.prev_net_time = now;
 
-        let hw_type = if chosen_iface.starts_with("wl") {
-            "WiFi"
-        } else if chosen_iface.starts_with("ww") {
-            "Cellular"
-        } else if chosen_iface.starts_with("wg") {
-            "WireGuard"
-        } else {
-            "Ethernet"
-        };
+        let hw_type = if chosen_iface.starts_with("wl") { "WiFi" }
+            else if chosen_iface.starts_with("ww") { "Cellular" }
+            else if chosen_iface.starts_with("wg") { "WireGuard" }
+            else { "Ethernet" };
 
-        // Lightweight TCP ping
+        // Keep the cached ping
         let ping_str = {
             use std::sync::{Mutex, OnceLock};
             use std::time::Instant;
@@ -573,6 +533,99 @@ impl SystemCollector {
         }
     }
 
+
+    pub fn get_top_net_procs_bandwidth(&mut self) -> Vec<ProcessItem> {
+        let out = std::process::Command::new("ss").args(["-tunapi"]).output();
+        let Ok(out) = out else { return Vec::new(); };
+        let text = String::from_utf8_lossy(&out.stdout);
+        
+        let mut current_snapshot: std::collections::HashMap<u32, (u64, u64)> = std::collections::HashMap::new();
+        let mut pid_to_name = std::collections::HashMap::new();
+        let mut current_pid: Option<u32> = None;
+        
+        for line in text.lines() {
+            if let Some(pid_idx) = line.find("pid=") {
+                let rest = &line[pid_idx + 4..];
+                if let Some(end) = rest.find(',') {
+                    if let Ok(pid) = rest[..end].parse::<u32>() {
+                        current_pid = Some(pid);
+                        let mut name = "unknown".to_string();
+                        if let Some(u_idx) = line.find("users:((\"") {
+                            let n_rest = &line[u_idx + 9..];
+                            if let Some(n_end) = n_rest.find("\"") {
+                                name = n_rest[..n_end].to_string();
+                            }
+                        }
+                        pid_to_name.insert(pid, name);
+                    }
+                }
+            }
+            
+            if let Some(pid) = current_pid {
+                let mut sent = 0;
+                let mut recv = 0;
+                if let Some(s_idx) = line.find("bytes_sent:") {
+                    let rest = &line[s_idx + 11..];
+                    if let Some(end) = rest.find(|c: char| !c.is_ascii_digit()) { sent = rest[..end].parse::<u64>().unwrap_or(0); } 
+                    else { sent = rest.parse::<u64>().unwrap_or(0); }
+                }
+                if let Some(r_idx) = line.find("bytes_received:") {
+                    let rest = &line[r_idx + 15..];
+                    if let Some(end) = rest.find(|c: char| !c.is_ascii_digit()) { recv = rest[..end].parse::<u64>().unwrap_or(0); } 
+                    else { recv = rest.parse::<u64>().unwrap_or(0); }
+                }
+                if sent > 0 || recv > 0 {
+                    let entry = current_snapshot.entry(pid).or_insert((0, 0));
+                    entry.0 += recv;
+                    entry.1 += sent;
+                }
+            }
+        }
+
+        let mut procs = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        
+        for (&pid, &(recv, sent)) in &current_snapshot {
+            let (delta_recv, delta_sent) = if let Some((prev_recv, prev_sent)) = self.prev_bandwidth.get(&pid) {
+                (recv.saturating_sub(*prev_recv), sent.saturating_sub(*prev_sent))
+            } else { (0, 0) };
+            
+            let name = pid_to_name.get(&pid).cloned().unwrap_or_default();
+            let base_name = name.split(" #").next().unwrap_or("").to_string();
+            
+            if seen.insert(base_name) {
+                let rx_rate = delta_recv as f32 * 8.0; // bits
+                let tx_rate = delta_sent as f32 * 8.0;
+                procs.push(ProcessItem {
+                    pid,
+                    name,
+                    metric: format!("▼{}/s ▲{}/s", Self::format_bits(rx_rate), Self::format_bits(tx_rate)),
+                    is_highlight: false,
+                });
+            }
+        }
+        
+        self.prev_bandwidth = current_snapshot;
+        
+        procs.sort_by(|a, b| {
+            let parse = |s: &str| -> f32 {
+                let parts: Vec<&str> = s.split_whitespace().collect();
+                let p1 = parts.get(0).unwrap_or(&"0").trim_start_matches('▼').trim_end_matches("/s");
+                let p2 = parts.get(1).unwrap_or(&"0").trim_start_matches('▲').trim_end_matches("/s");
+                let parse_val = |v: &str| -> f32 {
+                    if v.ends_with("Mb") { v.trim_end_matches("Mb").parse::<f32>().unwrap_or(0.0) * 1_000_000.0 }
+                    else if v.ends_with("Kb") { v.trim_end_matches("Kb").parse::<f32>().unwrap_or(0.0) * 1_000.0 }
+                    else { v.trim_end_matches("b").parse::<f32>().unwrap_or(0.0) }
+                };
+                parse_val(p1) + parse_val(p2)
+            };
+            let va = parse(&a.metric);
+            let vb = parse(&b.metric);
+            vb.partial_cmp(&va).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        procs
+    }
+
     pub fn get_top_net_procs() -> Vec<ProcessItem> {
         // Cached for 15s. The `ss` subprocess takes 20-50ms and this is
         // called synchronously on the UI thread every hardware tick — which
@@ -585,7 +638,7 @@ impl SystemCollector {
         {
             let g = cache.lock().unwrap();
             if let Some(t) = g.0 {
-                if t.elapsed().as_secs() < 15 {
+                if t.elapsed().as_secs() < 3 {
                     return g.1.clone();
                 }
             }
@@ -598,25 +651,28 @@ impl SystemCollector {
         };
         let text = String::from_utf8_lossy(&out.stdout);
         let mut procs = Vec::new();
-        let mut seen = std::collections::HashSet::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         for line in text.lines().skip(1) {
             if let Some(idx) = line.find("pid=") {
                 let rest = &line[idx + 4..];
                 if let Some(end) = rest.find(',') {
                     if let Ok(pid) = rest[..end].parse::<u32>() {
-                        if seen.insert(pid) {
-                            let mut name = "unknown".to_string();
-                            if let Some(u_idx) = line.find("users:((\"") {
-                                let n_rest = &line[u_idx + 9..];
-                                if let Some(n_end) = n_rest.find("\"") {
-                                    name = n_rest[..n_end].to_string();
-                                }
+                        let mut name = "unknown".to_string();
+                        if let Some(u_idx) = line.find("users:((\"") {
+                            let n_rest = &line[u_idx + 9..];
+                            if let Some(n_end) = n_rest.find("\"") {
+                                name = n_rest[..n_end].to_string();
                             }
+                        }
+                        
+                        // Deduplicate by process name instead of PID
+                        let base_name = name.split(" #").next().unwrap_or("").to_string();
+                        if seen.insert(base_name) {
                             procs.push(ProcessItem {
                                 pid,
                                 name,
-                                metric: "active".into(),
+                                metric: "net".into(), // Changed from "active"
                                 is_highlight: false,
                             });
                         }
@@ -634,7 +690,7 @@ impl SystemCollector {
         procs
     }
 
-    fn format_bits(bps: f32) -> String {
+    pub fn format_bits(bps: f32) -> String {
         if bps >= 1_000_000_000.0 {
             format!("{:.1}Gb", bps / 1_000_000_000.0)
         } else if bps >= 1_000_000.0 {

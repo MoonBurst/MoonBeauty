@@ -137,6 +137,27 @@ impl MpdBackend {
     /// unreachable, or has no current song. Silent — the poll loop
     /// falls back to MPRIS on None.
     pub async fn poll() -> Option<MprisTrack> {
+        use std::sync::{Mutex, OnceLock};
+        use std::time::Instant;
+        static CACHE: OnceLock<Mutex<Option<(Instant, Option<MprisTrack>)>>> = OnceLock::new();
+        let c = CACHE.get_or_init(|| Mutex::new(None));
+        {
+            let g = c.lock().unwrap();
+            if let Some((t, tr)) = &*g {
+                if t.elapsed().as_secs() < 5 {
+                    return tr.clone();
+                }
+            }
+        }
+        let result = Self::poll_uncached().await;
+        {
+            let mut g = c.lock().unwrap();
+            *g = Some((Instant::now(), result.clone()));
+        }
+        result
+    }
+
+    async fn poll_uncached() -> Option<MprisTrack> {
         let client = Self::connect().await?;
         // One round-trip: status (state/elapsed/volume) + current song
         // (tags/duration). `Status.current_song` only has IDs, so the

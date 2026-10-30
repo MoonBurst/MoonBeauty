@@ -438,6 +438,8 @@ pub struct NotificationOverlay {
     pub stack_from_count: usize,
     pub stack_anim_start: Instant,
     pub selected_history_id: Option<u32>,
+    pub last_saved: Instant,
+    pub history_dirty: bool,
 }
 
 impl Default for NotificationOverlay {
@@ -459,6 +461,8 @@ impl NotificationOverlay {
             stack_from_count: 0,
             stack_anim_start: Instant::now(),
             selected_history_id,
+            last_saved: Instant::now(),
+            history_dirty: false,
         }
     }
 
@@ -472,6 +476,8 @@ impl NotificationOverlay {
             stack_from_count: 0,
             stack_anim_start: Instant::now(),
             selected_history_id: None,
+            last_saved: Instant::now(),
+            history_dirty: false,
         }
     }
 
@@ -609,7 +615,20 @@ impl NotificationOverlay {
         Vec::new()
     }
 
-    pub fn save_history(&self) {
+
+    pub fn mark_history_dirty(&mut self) {
+        self.history_dirty = true;
+    }
+
+    pub fn flush_history(&mut self) {
+        if self.history_dirty && self.last_saved.elapsed().as_millis() > 2000 {
+            self.history_dirty = false;
+            self.last_saved = Instant::now();
+            self.save_history_immediate();
+        }
+    }
+
+    fn save_history_immediate(&self) {
         let path = Self::history_path();
         if let Ok(data) = serde_json::to_string_pretty(&self.history) {
             let tmp = path.with_extension("tmp");
@@ -828,7 +847,7 @@ impl NotificationOverlay {
             if self.history.len() > 80 {
                 self.history.truncate(80);
             }
-            self.save_history();
+            self.mark_history_dirty();
             let mut held = load_held_notifs();
             held.push(item);
             save_held_notifs(&held);
@@ -854,7 +873,7 @@ impl NotificationOverlay {
         if self.history.len() > 80 {
             self.history.truncate(80);
         }
-        self.save_history();
+        self.mark_history_dirty();
     }
 
     pub fn play_sound(path: String, volume: u32) {
@@ -1183,7 +1202,7 @@ impl NotificationOverlay {
                 self.history.clear();
                 self.pending_toasts.clear();
                 self.selected_history_id = None;
-                self.save_history();
+                self.mark_history_dirty();
                 if let Ok(mut g) = LOGGED_ICONS.lock() {
                     if let Some(set) = g.as_mut() {
                         set.clear();
@@ -1195,7 +1214,7 @@ impl NotificationOverlay {
                 if self.selected_history_id == Some(id) {
                     self.selected_history_id = None;
                 }
-                self.save_history();
+                self.mark_history_dirty();
             }
             NotifMessage::HistorySelectNext => {
                 if self.history.is_empty() {
@@ -1228,7 +1247,7 @@ impl NotificationOverlay {
                 if let Some(id) = self.selected_history_id {
                     let pos = self.history.iter().position(|t| t.id == id);
                     self.history.retain(|t| t.id != id);
-                    self.save_history();
+                    self.mark_history_dirty();
 
                     self.selected_history_id = if self.history.is_empty() {
                         None

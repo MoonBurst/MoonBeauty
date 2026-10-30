@@ -45,7 +45,8 @@ impl MoonBeautyShellApp {
         );
         let theme = ShellTheme::from_settings(&settings);
 
-        let (ipc_tx, ipc_rx) = std::sync::mpsc::channel::<IpcCommand>();
+        let (ipc_tx, ipc_rx) = tokio::sync::mpsc::unbounded_channel::<IpcCommand>();
+        let _ = crate::app::subscription::IPC_RX.set(std::sync::Arc::new(tokio::sync::Mutex::new(ipc_rx)));
         if standalone_target.is_none() && !is_notif_surface {
             std::thread::spawn(move || {
                 use std::io::Read;
@@ -137,7 +138,6 @@ impl MoonBeautyShellApp {
             is_standalone,
             system_collector: SystemCollector::new(),
             standalone_child: None,
-            ipc_rx,
             is_notif_surface,
             notif_rx,
             settings_json_mtime: std::fs::metadata(ShellSettings::config_path())
@@ -252,7 +252,6 @@ impl MoonBeautyShellApp {
         if is_bar {
             init_tasks.push(Command::done(Message::FetchTrayItems));
             init_tasks.push(Command::done(Message::TickHardware));
-            init_tasks.push(Command::done(Message::TickEmailSync));
             init_tasks.push(Command::perform(
                 async {
                     moon_beauty_shell::bar::weather::WeatherBackend::fetch()

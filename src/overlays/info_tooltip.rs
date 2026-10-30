@@ -1838,7 +1838,7 @@ fn render_net_proc_row<'a>(
     let kill_border = t.control_border_width;
     let half_k = kill_border * 0.5;
     let x_slant = tooltip_slope * (kill_h - 2.0 * half_k);
-    let metric_w = 140.0;
+    let metric_w = 180.0;
     let spacing = 8.0;
 
     let kill_shape = KillButtonShape {
@@ -1949,9 +1949,12 @@ async fn fetch_data(mode: String) -> InfoData {
         }
         "net" => {
             let mut sc = SystemCollector::new();
-            let _ = sc.update_net();
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            InfoData::Net(sc.update_net())
+            let _ = sc.update_net(); // Prime global rate
+            let _ = sc.get_top_net_procs_bandwidth(); // Prime process bandwidth
+            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+            let mut net = sc.update_net();
+            net.top_procs = sc.get_top_net_procs_bandwidth(); // Calculate delta
+            InfoData::Net(net)
         }
         "clock" => InfoData::Clock(ClockBackend::get_world_matrix()),
         _ => InfoData::Custom,

@@ -167,7 +167,7 @@ impl App {
             theme,
         };
         let task = if target == "cpu" {
-            Task::perform(SystemCollector::collect_cpu(), |d| {
+            Task::perform(async { SystemCollector::collect_all().await.0 }, |d| {
                 Message::Loaded(Data::Cpu(d))
             })
         } else if target == "gpu" {
@@ -186,7 +186,7 @@ impl App {
                 |d| Message::Loaded(Data::Gpu(d)),
             )
         } else if target == "ram" {
-            Task::perform(SystemCollector::collect_ram(), |d| {
+            Task::perform(async { SystemCollector::collect_all().await.1 }, |d| {
                 Message::Loaded(Data::Ram(d))
             })
         } else {
@@ -266,11 +266,11 @@ impl App {
                         async move {
                             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                             match target.as_str() {
-                                "cpu" => Data::Cpu(SystemCollector::collect_cpu().await),
+                                "cpu" => Data::Cpu(async { SystemCollector::collect_all().await.0 }.await),
                                 "gpu" => {
                                     Data::Gpu(SystemCollector::collect_gpu_by_info(&gpu_info).await)
                                 }
-                                _ => Data::Ram(SystemCollector::collect_ram().await),
+                                _ => Data::Ram(async { SystemCollector::collect_all().await.1 }.await),
                             }
                         },
                         Message::Loaded,
