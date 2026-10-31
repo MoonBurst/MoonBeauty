@@ -732,7 +732,7 @@ impl Default for ShellSettings {
 impl ShellSettings {
     pub fn config_path() -> PathBuf {
         let config_dir = dirs::config_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-        config_dir.join("moon-beauty-shell").join("settings.json")
+        config_dir.join("moonbeauty").join("settings.json")
     }
 
     pub fn tooltip_size(&self, id: &str) -> (u32, u32) {

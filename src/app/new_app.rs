@@ -103,7 +103,7 @@ impl MoonBeautyShellApp {
         // clipboard entries after N bar restarts.
         if standalone_target.is_none() && !is_notif_surface {
             let _ = std::process::Command::new("pkill")
-                .args(["-f", "wl-paste --watch.*moon-beauty-shell"])
+                .args(["-f", "wl-paste --watch.*(moon-beauty-shell|moonbeauty)"])
                 .status();
             std::thread::sleep(std::time::Duration::from_millis(50));
             let exe = crate::resolve_exe();

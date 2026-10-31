@@ -44,7 +44,7 @@ impl MoonBeautyShellApp {
                         "-KILL",
                         "-f",
                         "--",
-                        "(^|/)moon-beauty-shell --lockscreen-instance( .*)?$",
+                        "(^|/)(moon-beauty-shell|moonbeauty) --lockscreen-instance( .*)?$",
                     ])
                     .status();
             }

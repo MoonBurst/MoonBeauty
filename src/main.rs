@@ -457,12 +457,12 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         // binary name and end-of-argv after the flag. Prevents matching
         // scripts / editors that merely mention the strings.
         let _ = std::process::Command::new("pkill")
-            .args(["-f", "(^|/)moon-beauty-shell$"])
+            .args(["-f", "(^|/)(moon-beauty-shell|moonbeauty)$"])
             .status();
         let _ = std::process::Command::new("pkill")
             .args([
                 "-f",
-                "(^|/)moon-beauty-shell (--(sys|weather|alarm|info)-tooltip|--tray-popup)$",
+                "(^|/)(moon-beauty-shell|moonbeauty) (--(sys|weather|alarm|info)-tooltip|--tray-popup)$",
             ])
             .status();
         std::thread::sleep(std::time::Duration::from_millis(400));
@@ -849,7 +849,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     if !is_notif_surface && standalone_target.is_none() {
         let _ = std::process::Command::new("pkill")
-            .args(["-f", "--", "(^|/)moon-beauty-shell --notif-surface$"])
+            .args(["-f", "--", "(^|/)(moon-beauty-shell|moonbeauty) --notif-surface$"])
             .status();
         std::thread::sleep(std::time::Duration::from_millis(300));
         let exe = resolve_exe();
