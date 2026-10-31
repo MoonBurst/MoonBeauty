@@ -1,7 +1,7 @@
 //! App core: Message enum + MoonBeautyShellApp struct.
 //!
 //! Bin-only module (submodule of main.rs). Not part of the
-//! `moon_beauty_shell` library crate — the app orchestrator is
+//! `moonbeauty` library crate — the app orchestrator is
 //! binary-only.
 //!
 //! Commit 10a scope: type definitions only. All `impl MoonBeautyShellApp`
