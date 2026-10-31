@@ -1,10 +1,9 @@
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Row, Stack};
 use iced::{Alignment, Color, Element, Length, Padding};
-use tokio::process::Command;
 
 use crate::libraries::config::settings::ShellSettings;
 use crate::libraries::config::theme::ShellTheme;
-use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
+use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ClipItem {
@@ -165,13 +164,6 @@ impl ClipboardOverlay {
     }
 
     /// Look up a ClipItem by id from index.json.
-    fn find_item(id: u64) -> Option<ClipItem> {
-        let dir = dirs::data_dir().unwrap_or_else(std::env::temp_dir)
-            .join("moon-beauty-shell").join("clipboard");
-        let content = std::fs::read_to_string(dir.join("index.json")).ok()?;
-        serde_json::from_str::<Vec<ClipItem>>(&content).ok()?
-            .into_iter().find(|i| i.id == id)
-    }
 
     /// Ingest a file into the index by reference. Used by annotator
     /// save and URI-list ingest. Sync — no tokio runtime needed.

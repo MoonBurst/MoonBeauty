@@ -32,3 +32,4 @@ email.json
 email.enc.json
 email.enc.json.keypath
 test_*.txt
+/.lock-backup/

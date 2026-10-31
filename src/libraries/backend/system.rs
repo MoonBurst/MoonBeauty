@@ -2,8 +2,6 @@
 #![allow(clippy::empty_line_after_doc_comments)]
 use std::fs;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
-use sysinfo::{ProcessesToUpdate, System};
 use tokio::process::Command;
 
 #[derive(Debug, Clone, Default)]
@@ -70,10 +68,6 @@ pub struct ProcessItem {
     pub is_highlight: bool,
 }
 
-fn sys_state() -> &'static Mutex<System> {
-    static SYS: OnceLock<Mutex<System>> = OnceLock::new();
-    SYS.get_or_init(|| Mutex::new(System::new_all()))
-}
 
 fn read_cpu_temp() -> u32 {
     // Thermal zones first

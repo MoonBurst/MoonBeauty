@@ -1809,7 +1809,7 @@ impl MoonBeautyShellApp {
                                 };
 
                                 match jxl_bytes_opt {
-                                    Some(jxl_bytes) => {
+                                    Some(_jxl_bytes) => {
                                         eprintln!("[annotator] saved revealed proof -> {:?}", out);
 
                                         // Copy the revealed JXL bytes and map its name
