@@ -117,11 +117,8 @@ pub fn add_plate_watermark(bytes: &[u8], name: &str) -> Result<Vec<u8>, String> 
     // Finding 07: bound ImageMagick resource use.
     let status = std::process::Command::new(bin)
         .args([
-            "-limit", "memory", "512MiB",
-            "-limit", "map", "1GiB",
-            "-limit", "disk", "2GiB",
-            "-limit", "width", "16384",
-            "-limit", "height", "16384",
+            "-limit", "memory", "512MiB", "-limit", "map", "1GiB", "-limit", "disk", "2GiB",
+            "-limit", "width", "16384", "-limit", "height", "16384",
         ])
         .args(&args)
         .status()
@@ -174,33 +171,67 @@ pub fn reveal(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let tmp_in = dir.join(format!("reveal-in-{}.png", stamp));
     let tmp_out = dir.join(format!("REVEALED_{}.png", stamp));
 
-    std::fs::write(&tmp_in, bytes).map_err(|e| format!("write: {e}"))?;
+    // JXL decode via djxl before magick. Stock ImageMagick often lacks
+    // a JXL delegate; when it lacks one, a failed decode can still exit
+    // 0 while creating a directory at the output path, which then makes
+    // std::fs::read fail with EISDIR — silently breaking reveal.
+    let is_jxl = bytes.starts_with(&[0xFF, 0x0A])
+        || bytes.starts_with(&[0x00, 0x00, 0x00, 0x0C, 0x4A, 0x58, 0x4C, 0x20, 0x0D, 0x0A, 0x87, 0x0A]);
+    if is_jxl {
+        let tmp_raw = dir.join(format!("reveal-raw-{}.jxl", stamp));
+        std::fs::write(&tmp_raw, bytes).map_err(|e| format!("write: {e}"))?;
+        let status = std::process::Command::new("djxl")
+            .arg(&tmp_raw)
+            .arg(&tmp_in)
+            .status()
+            .map_err(|e| format!("spawn djxl: {e}"))?;
+        let _ = std::fs::remove_file(&tmp_raw);
+        if !status.success() {
+            return Err("djxl failed (install libjxl-tools)".into());
+        }
+    } else {
+        std::fs::write(&tmp_in, bytes).map_err(|e| format!("write: {e}"))?;
+    }
 
     // Finding 07: bound ImageMagick resource use.
     let mut cmd = std::process::Command::new(bin);
     cmd.args([
-        "-limit", "memory", "512MiB",
-        "-limit", "map", "1GiB",
-        "-limit", "disk", "2GiB",
-        "-limit", "width", "16384",
-        "-limit", "height", "16384",
+        "-limit", "memory", "512MiB", "-limit", "map", "1GiB", "-limit", "disk", "2GiB", "-limit",
+        "width", "16384", "-limit", "height", "16384",
     ]);
     cmd.args([
         tmp_in.to_str().unwrap(),
-        "-channel", "B", "-separate", "(", "+clone", "-blur", "0x2", ")",
-        "-compose", "Subtract", "-composite", "-auto-level",
-        "-define", "png:compression-level=1",
+        "-channel",
+        "B",
+        "-separate",
+        "(",
+        "+clone",
+        "-blur",
+        "0x2",
+        ")",
+        "-compose",
+        "Subtract",
+        "-composite",
+        "-auto-level",
+        "-define",
+        "png:compression-level=1",
         tmp_out.to_str().unwrap(),
     ]);
-    let status = cmd
-        .status()
-        .map_err(|e| format!("spawn {bin}: {e}"))?;
+    let status = cmd.status().map_err(|e| format!("spawn {bin}: {e}"))?;
 
     let _ = std::fs::remove_file(&tmp_in);
 
     if !status.success() {
         let _ = std::fs::remove_file(&tmp_out);
         return Err(format!("{bin} exited nonzero"));
+    }
+
+    // Magick can exit 0 while writing a directory at the output path
+    // when its decoder delegate is missing. Detect explicitly so the
+    // caller sees a clear error instead of EISDIR from std::fs::read.
+    if std::path::Path::new(&tmp_out).is_dir() {
+        let _ = std::fs::remove_dir_all(&tmp_out);
+        return Err(format!("{bin} produced a directory at {tmp_out:?} — decoder delegate missing"));
     }
 
     let result = std::fs::read(&tmp_out).map_err(|e| format!("read: {e}"))?;

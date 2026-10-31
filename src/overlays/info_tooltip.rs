@@ -1,5 +1,5 @@
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke};
-use iced::widget::{button, column, container, row, text, text_input, Stack};
+use iced::widget::{button, column, container, row, scrollable, text, text_input, Stack};
 use iced::{Alignment, Color, Element, Length, Padding, Point, Rectangle, Task, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
@@ -44,6 +44,13 @@ pub enum Message {
     MusicOpenFolder(Option<String>),
     MusicTrashConfirm,
     MusicTrashExecute(Option<String>),
+    MusicSearchChanged(String),
+    MusicSearchSubmit,
+    MusicSearchResults(Vec<(String, String)>),
+    MusicPlaySong(String),
+    MusicSelectNext,
+    MusicSelectPrev,
+    MusicPlaySelected,
     MusicToggleSource(usize),
     PodmanRestart(String),
     UnifiedToggle(usize),
@@ -77,10 +84,13 @@ pub struct App {
     closing_at: Option<Instant>,
     search_query: String,
     trash_confirm: bool,
-    sources_enabled: [bool; 3],
     anim_frame: u64,
     settings: ShellSettings,
     theme: ShellTheme,
+    music_search_query: String,
+    music_search_results: Vec<(String, String)>,
+    music_selected_idx: usize,
+    music_sources: crate::libraries::backend::music_cycle::MusicSources,
 }
 
 #[allow(dead_code)]
@@ -152,10 +162,13 @@ impl App {
             closing_at: None,
             search_query: String::new(),
             trash_confirm: false,
-            sources_enabled: [true, true, true],
             anim_frame: 0,
             settings,
             theme,
+            music_search_query: String::new(),
+            music_search_results: Vec::new(),
+            music_selected_idx: 0,
+            music_sources: crate::libraries::backend::music_cycle::MusicSources::load(),
         };
         let task = Task::perform(fetch_data(mode), Message::Loaded);
         (
@@ -249,9 +262,7 @@ impl App {
             }
             Message::MusicNext => {
                 if let Ok(exe) = std::env::current_exe() {
-                    let _ = std::process::Command::new(exe)
-                        .arg("--music-next")
-                        .status();
+                    let _ = std::process::Command::new(exe).arg("--music-next").status();
                 }
             }
             Message::MusicPlayPause => {
@@ -329,7 +340,82 @@ impl App {
                 }
             }
             Message::MusicToggleSource(idx) => {
-                self.sources_enabled[idx] = !self.sources_enabled[idx];
+                match idx {
+                    0 => self.music_sources.local = !self.music_sources.local,
+                    1 => self.music_sources.spotify = !self.music_sources.spotify,
+                    2 => self.music_sources.browser = !self.music_sources.browser,
+                    _ => {}
+                }
+                self.music_sources.save();
+            }
+            Message::MusicSearchChanged(q) => {
+                self.music_search_query = q.clone();
+                self.music_selected_idx = 0;
+                if q.is_empty() {
+                    self.music_search_results.clear();
+                    return Task::none();
+                }
+                return Task::perform(
+                    async move { crate::libraries::backend::MpdBackend::search_songs(&q).await },
+                    Message::MusicSearchResults,
+                );
+            }
+            Message::MusicSearchSubmit => {
+                return Task::done(Message::MusicPlaySelected);
+            }
+            Message::MusicSearchResults(res) => {
+                self.music_search_results = res;
+                self.music_selected_idx = 0;
+            }
+            Message::MusicSelectNext => {
+                if !self.music_search_results.is_empty() {
+                    self.music_selected_idx =
+                        (self.music_selected_idx + 1).min(self.music_search_results.len() - 1);
+                    return iced::widget::operation::scroll_to(
+                        iced::widget::Id::new("music_scroll"),
+                        iced::widget::scrollable::AbsoluteOffset {
+                            x: 0.0,
+                            y: (self.music_selected_idx as f32 * 24.0 - 40.0).max(0.0),
+                        },
+                    )
+                    .map(|_: ()| Message::Tick);
+                }
+            }
+            Message::MusicSelectPrev => {
+                if !self.music_search_results.is_empty() {
+                    self.music_selected_idx = self.music_selected_idx.saturating_sub(1);
+                    return iced::widget::operation::scroll_to(
+                        iced::widget::Id::new("music_scroll"),
+                        iced::widget::scrollable::AbsoluteOffset {
+                            x: 0.0,
+                            y: (self.music_selected_idx as f32 * 24.0 - 40.0).max(0.0),
+                        },
+                    )
+                    .map(|_: ()| Message::Tick);
+                }
+            }
+            Message::MusicPlaySelected => {
+                if let Some((_, url)) = self.music_search_results.get(self.music_selected_idx) {
+                    let url_clone = url.clone();
+                    self.music_search_query.clear();
+                    self.music_search_results.clear();
+                    return Task::perform(
+                        async move {
+                            crate::libraries::backend::MpdBackend::play_url(&url_clone).await;
+                        },
+                        |_| Message::Tick,
+                    );
+                }
+            }
+            Message::MusicPlaySong(url) => {
+                self.music_search_query.clear();
+                self.music_search_results.clear();
+                return Task::perform(
+                    async move {
+                        crate::libraries::backend::MpdBackend::play_url(&url).await;
+                    },
+                    |_| Message::Tick,
+                );
             }
             Message::MusicTrashConfirm => {
                 self.trash_confirm = true;
@@ -359,7 +445,7 @@ impl App {
                 let weeks = total_cells.div_ceil(7);
                 40.0 + 36.0 + 24.0 + (weeks as f32) * 50.0 + 20.0 + settings.bar_height as f32
             }
-            Some(InfoData::Music(_)) => 400.0 + settings.bar_height as f32,
+            Some(InfoData::Music(_)) => 520.0 + settings.bar_height as f32,
             Some(InfoData::Unified(..)) => 400.0 + settings.bar_height as f32,
             Some(InfoData::Net(_)) => 450.0 + settings.bar_height as f32,
             Some(InfoData::Clock(_)) => 320.0 + settings.bar_height as f32,
@@ -447,9 +533,28 @@ impl App {
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
-        // Animation is driven by Command::perform recursion in update(),
-        // not by a subscription timer. Subscriptions here only handle ESC.
-        iced::event::listen_with(|event, _status, _window| {
+        let music_search_nav = if self.mode == "music" && !self.music_search_results.is_empty() {
+            iced::event::listen_with(|event, _status, _window| {
+                if let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event
+                {
+                    match key {
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => {
+                            Some(Message::MusicSelectNext)
+                        }
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
+                            Some(Message::MusicSelectPrev)
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            })
+        } else {
+            iced::Subscription::none()
+        };
+
+        let esc_sub = iced::event::listen_with(|event, _status, _window| {
             let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                 key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
                 ..
@@ -458,7 +563,9 @@ impl App {
                 return None;
             };
             Some(Message::Dismiss)
-        })
+        });
+
+        iced::Subscription::batch(vec![music_search_nav, esc_sub])
     }
     fn theme(&self) -> Theme {
         Theme::Dark
@@ -859,7 +966,7 @@ impl App {
                     let bg_col_l = a(t.background);
 
                     let prev_btn = make_slanted_button(
-                        "⏮ Prev".into(),
+                        "< Prev".into(),
                         Message::MusicPrev,
                         bg_col_l,
                         text_col_l,
@@ -869,7 +976,7 @@ impl App {
                     );
                     let play_btn = if playing {
                         make_slanted_button(
-                            "⏸ Pause".into(),
+                            "Pause".into(),
                             Message::MusicPlayPause,
                             text_col_l,
                             bg_col_l,
@@ -879,7 +986,7 @@ impl App {
                         )
                     } else {
                         make_slanted_button(
-                            "⏵ Play".into(),
+                            "Play".into(),
                             Message::MusicPlayPause,
                             bg_col_l,
                             text_col_l,
@@ -889,7 +996,7 @@ impl App {
                         )
                     };
                     let next_btn = make_slanted_button(
-                        "⏭ Next".into(),
+                        "Next >".into(),
                         Message::MusicNext,
                         bg_col_l,
                         text_col_l,
@@ -898,7 +1005,7 @@ impl App {
                         btn_fs,
                     );
                     let cycle_btn = make_slanted_button(
-                        "🔄 Cycle".into(),
+                        "Cycle".into(),
                         Message::CyclePlayer,
                         bg_col_l,
                         text_col_l,
@@ -972,11 +1079,87 @@ impl App {
                         act_h,
                     ));
                     y += act_h + gap * 2.0;
+                    // ── Search UI ──
+                    let search_h = 32.0;
+                    let search_input = text_input("Search MPD...", &self.music_search_query)
+                        .on_input(Message::MusicSearchChanged)
+                        .on_submit(Message::MusicSearchSubmit)
+                        .padding(6)
+                        .size((fs - 2) as f32)
+                        .style(move |_t, _s| iced::widget::text_input::Style {
+                            background: iced::Background::Color(bg_col_l),
+                            border: iced::Border {
+                                color: text_col_l,
+                                width: 1.0,
+                                radius: 4.0.into(),
+                            },
+                            icon: text_col_l,
+                            placeholder: text_col_l,
+                            value: text_col_l,
+                            selection: text_col_l,
+                        });
+
+                    col = col.push(slanted_row(
+                        search_input.into(),
+                        y + search_h * 0.5,
+                        total_h,
+                        slant_h,
+                        slant_right,
+                        safe,
+                        w_f,
+                        search_h,
+                    ));
+                    y += search_h + gap;
+
+                    if !self.music_search_results.is_empty() {
+                        let mut results_col = column![].spacing(2);
+                        for (i, (title, url)) in self.music_search_results.iter().enumerate() {
+                            let url_clone = url.clone();
+                            let is_sel = i == self.music_selected_idx;
+                            let bg = if is_sel { text_col_l } else { bg_col_l };
+                            let fg = if is_sel { bg_col_l } else { text_col_l };
+
+                            let btn = button(text(title).size((fs - 3) as f32).color(fg))
+                                .on_press(Message::MusicPlaySong(url_clone))
+                                .padding(4)
+                                .width(Length::Fill)
+                                .style(move |_t, _s| button::Style {
+                                    background: Some(iced::Background::Color(bg)),
+                                    border: iced::Border {
+                                        color: text_col_l,
+                                        width: 1.0,
+                                        radius: 4.0.into(),
+                                    },
+                                    ..Default::default()
+                                });
+                            results_col = results_col.push(btn);
+                        }
+                        let scroll_results = scrollable(results_col)
+                            .id(iced::widget::Id::new("music_scroll"))
+                            .height(Length::Fixed(100.0));
+
+                        col = col.push(slanted_row(
+                            scroll_results.into(),
+                            y + 50.0,
+                            total_h,
+                            slant_h,
+                            slant_right,
+                            safe,
+                            w_f,
+                            100.0,
+                        ));
+                        y += 100.0 + gap;
+                    }
 
                     // Sources row
                     let src_h = 36.0;
                     let src_btn = |label: &'static str, idx: usize| -> Element<'_, Message> {
-                        let active = self.sources_enabled[idx];
+                        let active = match idx {
+                            0 => self.music_sources.local,
+                            1 => self.music_sources.spotify,
+                            2 => self.music_sources.browser,
+                            _ => false,
+                        };
                         let bg = if active { a(t.text) } else { a(t.background) };
                         let fg = if active { a(t.background) } else { a(t.text) };
                         let border = a(t.text);

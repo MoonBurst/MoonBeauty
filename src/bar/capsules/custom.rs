@@ -1,6 +1,6 @@
-use iced::{Color, Element};
-use crate::libraries::config::theme::ShellTheme;
 use super::{label, CapsuleAction};
+use crate::libraries::config::theme::ShellTheme;
+use iced::{Color, Element};
 
 pub(super) fn render<'a, Message: 'a>(
     theme: &ShellTheme,
@@ -15,5 +15,9 @@ pub(super) fn fallback<'a, Message: 'a>(
     theme: &ShellTheme,
 ) -> (Element<'a, Message>, CapsuleAction, Color) {
     let elem = label::<Message>(&[(id.to_uppercase(), theme.text)], theme.font_size_normal);
-    (elem, CapsuleAction::OpenOverlay(id.to_string()), theme.border)
+    (
+        elem,
+        CapsuleAction::OpenOverlay(id.to_string()),
+        theme.border,
+    )
 }

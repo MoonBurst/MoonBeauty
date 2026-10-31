@@ -71,8 +71,7 @@ impl MpdBackend {
     fn connect_target() -> String {
         let host = std::env::var("MPD_HOST").ok();
         let port = std::env::var("MPD_PORT").ok();
-        let xdg: Option<PathBuf> =
-            std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
+        let xdg: Option<PathBuf> = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
         let xdg_sock_exists = xdg
             .as_ref()
             .map(|d| d.join("mpd").join("socket").exists())
@@ -137,10 +136,7 @@ impl MpdBackend {
     /// unreachable, or has no current song. Silent — the poll loop
     /// falls back to MPRIS on None.
     pub async fn poll() -> Option<MprisTrack> {
-        use std::sync::{Mutex, OnceLock};
-        use std::time::Instant;
-        static CACHE: OnceLock<Mutex<Option<(Instant, Option<MprisTrack>)>>> = OnceLock::new();
-        let c = CACHE.get_or_init(|| Mutex::new(None));
+        let c = Self::cache();
         {
             let g = c.lock().unwrap();
             if let Some((t, tr)) = &*g {
@@ -152,9 +148,22 @@ impl MpdBackend {
         let result = Self::poll_uncached().await;
         {
             let mut g = c.lock().unwrap();
-            *g = Some((Instant::now(), result.clone()));
+            *g = Some((std::time::Instant::now(), result.clone()));
         }
         result
+    }
+
+    fn cache() -> &'static std::sync::Mutex<Option<(std::time::Instant, Option<MprisTrack>)>> {
+        use std::sync::{Mutex, OnceLock};
+        static CACHE: OnceLock<Mutex<Option<(std::time::Instant, Option<MprisTrack>)>>> =
+            OnceLock::new();
+        CACHE.get_or_init(|| Mutex::new(None))
+    }
+
+    pub fn clear_cache() {
+        let c = Self::cache();
+        let mut g = c.lock().unwrap();
+        *g = None;
     }
 
     async fn poll_uncached() -> Option<MprisTrack> {
@@ -162,25 +171,42 @@ impl MpdBackend {
         // One round-trip: status (state/elapsed/volume) + current song
         // (tags/duration). `Status.current_song` only has IDs, so the
         // second command is required.
-        let (status, song) = match client
-            .command_list((Status, CurrentSong))
-            .await
-        {
-            Ok(pair) => pair,
+        let song_opt = match client.command_list((Status, CurrentSong)).await {
+            Ok((status, song)) => (status, song),
             Err(e) => {
                 crate::dbg_log!("[mpd] command_list failed: {}", e);
                 return None;
             }
         };
-        // Finding 74: `CurrentSong` returns `Option<SongInQueue>`, which
-        // wraps the metadata in `.song` alongside queue position/id.
-        // Unwrap to `Song` for tag/duration access.
-        let song = song?.song;
+        let (status, song_opt) = song_opt;
 
-        let title = Self::first_tag(&song, Tag::Title);
+        let song = match song_opt {
+            Some(s) => s.song,
+            None => {
+                return Some(MprisTrack {
+                    title: "MPD (Idle)".into(),
+                    artist: "No Track".into(),
+                    album: "".into(),
+                    is_playing: false,
+                    position_sec: 0.0,
+                    length_sec: 0.0,
+                    volume_pct: status.volume,
+                    url: None,
+                });
+            }
+        };
+
+        let mut title = Self::first_tag(&song, Tag::Title);
         let artist = Self::first_tag(&song, Tag::Artist);
-        // Empty metadata: nothing meaningful to render. Matches MPRIS
-        // backend's `if title.is_empty() && artist.is_empty() → None`.
+
+        if title.is_empty() && artist.is_empty() {
+            if let Some(filename) = song.url.rsplit('/').next() {
+                title = filename.to_string();
+            } else if !song.url.is_empty() {
+                title = song.url.clone();
+            }
+        }
+
         if title.is_empty() && artist.is_empty() {
             return None;
         }
@@ -195,6 +221,69 @@ impl MpdBackend {
             volume_pct: status.volume,
             url: None, // MPD doesn't expose a file:// URL in Status
         })
+    }
+
+    pub async fn search_songs(query: &str) -> Vec<(String, String)> {
+        let Some(client) = Self::connect().await else {
+            return Vec::new();
+        };
+        let filter = mpd_client::filter::Filter::new(
+            Tag::Title,
+            mpd_client::filter::Operator::Contain,
+            query.to_string(),
+        );
+        match client
+            .command(mpd_client::commands::Find::new(filter))
+            .await
+        {
+            Ok(songs) => {
+                eprintln!("[mpd-search] found {} songs for '{}'", songs.len(), query);
+                songs
+                    .into_iter()
+                    .map(|s| (Self::first_tag(&s, Tag::Title), s.url))
+                    .filter(|(t, _)| !t.is_empty())
+                    .take(10)
+                    .collect()
+            }
+            Err(e) => {
+                eprintln!("[mpd-search] error: {:?}", e);
+                Vec::new()
+            }
+        }
+    }
+
+    pub async fn play_url(url: &str) {
+        let Some(client) = Self::connect().await else {
+            eprintln!("[mpd] play_url: connection failed");
+            return;
+        };
+        eprintln!("[mpd] play_url: {}", url);
+
+        let current_len = match client.command(mpd_client::commands::Queue).await {
+            Ok(q) => q.len(),
+            Err(e) => {
+                eprintln!("[mpd] queue failed: {:?}", e);
+                0
+            }
+        };
+
+        match client.command(mpd_client::commands::Add::uri(url)).await {
+            Ok(_) => eprintln!("[mpd] added to queue"),
+            Err(e) => eprintln!("[mpd] add failed: {:?}", e),
+        }
+
+        match client
+            .command(mpd_client::commands::Play::song(
+                mpd_client::commands::SongPosition(current_len),
+            ))
+            .await
+        {
+            Ok(_) => eprintln!("[mpd] played song at index {}", current_len),
+            Err(e) => {
+                eprintln!("[mpd] play index failed: {:?}, trying Play::current()", e);
+                let _ = client.command(mpd_client::commands::Play::current()).await;
+            }
+        }
     }
 
     pub async fn next() {

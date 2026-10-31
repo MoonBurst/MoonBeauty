@@ -77,7 +77,14 @@ pub fn sender_key(email: &str, display: &str) -> String {
 /// Derive a human folder name from sender.
 pub fn folder_name_from_sender(email: &str, display: &str) -> String {
     let mut d = display.trim().to_string();
-    for suffix in [" Support", " Team", " Notifications", " Notification", " Alerts", " Alert"] {
+    for suffix in [
+        " Support",
+        " Team",
+        " Notifications",
+        " Notification",
+        " Alerts",
+        " Alert",
+    ] {
         if let Some(stripped) = d.strip_suffix(suffix) {
             d = stripped.to_string();
             break;
@@ -91,19 +98,21 @@ pub fn folder_name_from_sender(email: &str, display: &str) -> String {
         let domain = &email[at + 1..];
         let root = domain.split('.').next().unwrap_or(domain);
         let mut c = root.chars();
-        return crate::libraries::process::sanitize_folder_name(
-            &match c.next() {
-                Some(f) => f.to_uppercase().chain(c).collect::<String>(),
-                None => "Unknown".to_string(),
-            },
-        );
+        return crate::libraries::process::sanitize_folder_name(&match c.next() {
+            Some(f) => f.to_uppercase().chain(c).collect::<String>(),
+            None => "Unknown".to_string(),
+        });
     }
     "Unknown".to_string()
 }
 
 /// Run auto-sort. Idempotent — running twice creates nothing new.
 /// Returns (folders_created, emails_assigned).
-pub fn auto_sort(envelopes: &[NativeEnvelope], gmail_folder: &str, threshold: usize) -> (usize, usize) {
+pub fn auto_sort(
+    envelopes: &[NativeEnvelope],
+    gmail_folder: &str,
+    threshold: usize,
+) -> (usize, usize) {
     if envelopes.is_empty() || threshold == 0 {
         return (0, 0);
     }
@@ -303,7 +312,8 @@ mod folder_name_tests {
             assert_eq!(
                 folder_name_from_sender("x@example.com", name),
                 *name,
-                "{:?} changed", name
+                "{:?} changed",
+                name
             );
         }
     }

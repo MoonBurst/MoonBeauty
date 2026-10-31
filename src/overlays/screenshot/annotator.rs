@@ -173,6 +173,8 @@ impl AnnotatorOverlay {
             );
             return;
         }
+        register_jxl_decoder();
+        register_jxl_decoder();
         let dims = ::image::ImageReader::new(std::io::Cursor::new(&bytes))
             .with_guessed_format()
             .ok()
@@ -1140,6 +1142,59 @@ fn draw_ann<F: Fn(Point) -> Point>(
 
 // ── ImageMagick annotation compose ────────────────────────────────────
 
+/// Register the JPEG XL decoder with the `image` crate so that
+/// `image::load_from_memory` (and `ImageReader`) can transparently
+/// handle `.jxl` input. Safe to call multiple times.
+pub fn register_jxl_decoder() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        jxl_image_rs_integration::register_image_decoding_hook();
+    });
+}
+
+/// Encode `input` (PNG) to `output` (JXL) via ImageMagick, with a
+/// `cjxl` fallback if the ImageMagick build lacks JXL support.
+pub fn png_to_jxl(input: &Path, output: &Path) -> Result<(), String> {
+    // LOSSLESS first. The LSB steganography watermark lives in the low
+    // bit of every RGB channel; any lossy JXL encode (magick's default
+    // quality 90) destroys it before the file ever leaves the shell.
+    // cjxl -d 0 is pixel-perfect; magick is fallback only, with explicit
+    // lossless flags so LSB stego still survives.
+    if let Ok(status) = std::process::Command::new("cjxl")
+        .args(["-d", "0", "-e", "7"])
+        .arg(input)
+        .arg(output)
+        .status()
+    {
+        if status.success() {
+            return Ok(());
+        }
+        eprintln!("[jxl] cjxl failed; trying magick (lossless)");
+    } else {
+        eprintln!("[jxl] cjxl not installed; trying magick (lossless)");
+    }
+    if let Some(bin) = magick_or_convert() {
+        let status = std::process::Command::new(bin)
+            .args([
+                "-limit", "memory", "512MiB",
+                "-limit", "map", "1GiB",
+                "-limit", "disk", "2GiB",
+                "-limit", "width", "16384",
+                "-limit", "height", "16384",
+            ])
+            .args(["-quality", "100", "-define", "jxl:lossless=true", "-define", "jxl:effort=7"])
+            .arg(input)
+            .arg(output)
+            .status()
+            .map_err(|e| format!("spawn {bin}: {e}"))?;
+        if status.success() {
+            return Ok(());
+        }
+    }
+    Err("JXL encode failed (cjxl and magick both failed)".into())
+}
+
 pub fn magick_or_convert() -> Option<&'static str> {
     if std::process::Command::new("magick")
         .arg("--version")
@@ -1451,12 +1506,25 @@ pub fn save_annotated_image(
             })
             .collect();
 
-        let out = save_dir.join(format!("{} {} {}.png", safe_name, date_str, time_str));
+        let out = save_dir.join(format!("{} {} {}.jxl", safe_name, date_str, time_str));
 
         match crate::overlays::plate_watermark::add_plate_watermark(&composed_bytes, name) {
             Ok(wm_bytes) => {
-                std::fs::write(&out, &wm_bytes).map_err(|e| format!("write: {e}"))?;
-                eprintln!("[save] plate OK, {} bytes -> {:?}", wm_bytes.len(), out);
+                // Watermarked bytes arrive as PNG (libjxl isn't a `image`
+                // crate feature). Encode to JXL on the way to disk.
+                let tmp_png = save_dir.join(format!(".mbs-jxl-{}-{}.png", stamp, i));
+                std::fs::write(&tmp_png, &wm_bytes)
+                    .map_err(|e| format!("write tmp png: {e}"))?;
+                png_to_jxl(&tmp_png, &out)?;
+                let jxl_bytes = std::fs::read(&out)
+                    .map_err(|e| format!("read jxl: {e}"))?;
+                let _ = std::fs::remove_file(&tmp_png);
+                eprintln!(
+                    "[save] plate OK: {} bytes PNG -> {} bytes JXL -> {:?}",
+                    wm_bytes.len(),
+                    jxl_bytes.len(),
+                    out
+                );
 
                 let filename = out
                     .file_name()
@@ -1479,69 +1547,19 @@ pub fn save_annotated_image(
                     }
                 }
 
-                // Drop the custom name + timestamp for the clipboard watcher to pick up
-                let name_file = crate::libraries::process::mbs_runtime_dir().join("mbs-last-clip-name.txt");
+                // Index by reference; URI-list is served once at the end of the loop.
                 let display_name = format!("📸 {}", filename);
-                let _ = std::fs::write(&name_file, display_name);
-
-                // Copy the UNIQUE watermarked bytes
-                if let Ok(mut child) = std::process::Command::new("wl-copy")
-                    .args(["-t", "image/png"])
-                    .stdin(std::process::Stdio::piped())
-                    .spawn()
-                {
-                    use std::io::Write;
-                    if let Some(mut stdin) = child.stdin.take() {
-                        let _ = stdin.write_all(&wm_bytes);
-                    }
-                    let _ = child.wait();
-
-                    let cache_dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
-                    let _ = std::fs::create_dir_all(&cache_dir);
-                    let map_path = cache_dir.join("mbs-clip-names.txt");
-
-                    let mut found = false;
-                    for _ in 0..20 {
-                        std::thread::sleep(std::time::Duration::from_millis(50));
-                        if let Ok(list_out) = std::process::Command::new("cliphist")
-                            .args(["list"])
-                            .output()
-                        {
-                            let text = String::from_utf8_lossy(&list_out.stdout);
-                            for line in text.lines() {
-                                if let Some((id_str, _)) = line.split_once('\t') {
-                                    if let Ok(id) = id_str.trim().parse::<u64>() {
-                                        if !existing_clip_ids.contains(&id) {
-                                            let entry = format!("{}\t{}\n", id, filename);
-                                            if let Ok(mut f) = std::fs::OpenOptions::new()
-                                                .create(true)
-                                                .append(true)
-                                                .open(&map_path)
-                                            {
-                                                let _ = f.write_all(entry.as_bytes());
-                                                eprintln!(
-                                                    "[save] Mapped ID {} to {}",
-                                                    id, filename
-                                                );
-                                            }
-                                            found = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if found {
-                            break;
-                        }
-                    }
-                }
+                let _ = crate::overlays::clipboard::ClipboardOverlay::add_entry(
+                    &out, Some(display_name),
+                );
+                eprintln!("[save] indexed {}", out.display());
                 produced.push(out);
             }
             Err(e) => eprintln!("[save] plate FAILED: {e}"),
         }
     }
 
+    crate::overlays::clipboard::serve_uri_list(&produced);
     Ok(produced)
 }
 

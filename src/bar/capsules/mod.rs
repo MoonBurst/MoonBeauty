@@ -8,22 +8,22 @@ use crate::libraries::config::theme::ShellTheme;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
 use crate::libraries::style::shell_font;
 
-mod calendar;
-mod music;
 mod alarm;
-mod weather;
-mod unified;
-mod notify;
-mod clock;
 mod audio;
-mod mic;
-mod net;
-mod cpu;
-mod gpu;
-mod ram;
 mod battery;
+mod calendar;
+mod clock;
+mod cpu;
 mod custom;
+mod gpu;
+mod mic;
+mod music;
+mod net;
+mod notify;
+mod ram;
 mod tray;
+mod unified;
+mod weather;
 
 // ══════════════ Shared helpers ══════════════
 
@@ -75,7 +75,6 @@ pub fn record_width(id: &str, w: f32) {
     }
 }
 
-
 pub fn tooltip_bias(id: &str, theme: &ShellTheme) -> (i32, i32) {
     match id {
         "tray" => tray::tooltip_bias(theme),
@@ -86,10 +85,7 @@ pub fn lookup_width(id: &str) -> Option<f32> {
     widths_map().lock().ok().and_then(|m| m.get(id).copied())
 }
 
-pub fn compute_expanded_visible_width(
-    settings: &ShellSettings,
-    item_count: usize,
-) -> f32 {
+pub fn compute_expanded_visible_width(settings: &ShellSettings, item_count: usize) -> f32 {
     let shown = item_count.min(8);
     let icon_size = settings.tray_icon_size as f32;
     let icon_slot = icon_size + 8.0;
@@ -139,26 +135,26 @@ impl CapsuleRenderer {
         on_action: impl Fn(CapsuleAction) -> Message + 'static + Copy,
     ) -> Element<'a, Message> {
         LABEL_W.with(|w| w.set(0.0));
-        let (content, action, border_color): (Element<'a, Message>, CapsuleAction, Color) =
-            match id {
-                "calendar" => calendar::render::<Message>(theme),
-                "music" => music::render::<Message>(telemetry, theme),
-                "alarm" => alarm::render::<Message>(theme),
-                "weather" => weather::render::<Message>(telemetry, theme),
-                "unified" => unified::render::<Message>(telemetry, theme),
-                "notify" | "notifications" => notify::render::<Message>(theme),
-                "clock" => clock::render::<Message>(telemetry, theme),
-                "audio" => audio::render::<Message>(telemetry, theme),
-                "mic" => mic::render::<Message>(telemetry, theme),
-                "net" => net::render::<Message>(telemetry, theme),
-                "cpu" => cpu::render::<Message>(telemetry, theme),
-                "gpu" => gpu::render::<Message>(telemetry, theme, settings),
-                "ram" => ram::render::<Message>(telemetry, theme),
-                "battery" => battery::render::<Message>(telemetry, theme),
-                "custom" => custom::render::<Message>(theme),
-                "tray" => tray::render::<Message>(theme, region),
-                _ => custom::fallback::<Message>(id, theme),
-            };
+        let (content, action, border_color): (Element<'a, Message>, CapsuleAction, Color) = match id
+        {
+            "calendar" => calendar::render::<Message>(theme),
+            "music" => music::render::<Message>(telemetry, theme),
+            "alarm" => alarm::render::<Message>(theme),
+            "weather" => weather::render::<Message>(telemetry, theme),
+            "unified" => unified::render::<Message>(telemetry, theme),
+            "notify" | "notifications" => notify::render::<Message>(theme),
+            "clock" => clock::render::<Message>(telemetry, theme),
+            "audio" => audio::render::<Message>(telemetry, theme),
+            "mic" => mic::render::<Message>(telemetry, theme),
+            "net" => net::render::<Message>(telemetry, theme),
+            "cpu" => cpu::render::<Message>(telemetry, theme),
+            "gpu" => gpu::render::<Message>(telemetry, theme, settings),
+            "ram" => ram::render::<Message>(telemetry, theme),
+            "battery" => battery::render::<Message>(telemetry, theme),
+            "custom" => custom::render::<Message>(theme),
+            "tray" => tray::render::<Message>(theme, region),
+            _ => custom::fallback::<Message>(id, theme),
+        };
 
         let text_w = LABEL_W.with(|w| w.get());
         let bounding_w = if id == "tray" {
@@ -237,8 +233,14 @@ impl CapsuleRenderer {
         on_action: impl Fn(CapsuleAction) -> Message + 'static + Copy,
     ) -> Element<'a, Message> {
         tray::render_expanded(
-            items, theme, settings, slant_left, slant_right, region,
-            display_width, on_action,
+            items,
+            theme,
+            settings,
+            slant_left,
+            slant_right,
+            region,
+            display_width,
+            on_action,
         )
     }
 }

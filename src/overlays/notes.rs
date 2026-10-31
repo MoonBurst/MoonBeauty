@@ -81,7 +81,12 @@ impl NotesOverlay {
     }
 
     pub fn empty() -> Self {
-        Self { input_text: String::new(), notes: Vec::new(), selected_id: None, sort_mode: SortMode::Newest }
+        Self {
+            input_text: String::new(),
+            notes: Vec::new(),
+            selected_id: None,
+            sort_mode: SortMode::Newest,
+        }
     }
 
     fn visible_notes(&self) -> Vec<u64> {

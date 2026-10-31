@@ -17,11 +17,9 @@ pub const COMPOSE_MANUAL_ATTACH_ID: &str = "compose_manual_attach";
 /// the user but routes xdg-open → desktop file Exec= → RCE.
 fn is_safe_to_auto_open(path: &std::path::Path) -> bool {
     const DENY_EXT: &[&str] = &[
-        "desktop", "service", "sh", "bash", "zsh", "ksh", "csh", "fish",
-        "py", "pl", "rb", "php", "lua",
-        "exe", "bat", "cmd", "ps1", "vbs", "app", "command", "run", "bin",
-        "msi", "dmg", "pkg", "deb", "rpm", "appimage",
-        "lnk", "url", "scf", "reg", "hta",
+        "desktop", "service", "sh", "bash", "zsh", "ksh", "csh", "fish", "py", "pl", "rb", "php",
+        "lua", "exe", "bat", "cmd", "ps1", "vbs", "app", "command", "run", "bin", "msi", "dmg",
+        "pkg", "deb", "rpm", "appimage", "lnk", "url", "scf", "reg", "hta",
     ];
     match path.extension().and_then(|s| s.to_str()) {
         Some(ext) => !DENY_EXT.iter().any(|d| ext.eq_ignore_ascii_case(d)),
@@ -33,8 +31,14 @@ fn is_safe_to_auto_open(path: &std::path::Path) -> bool {
 pub enum EmailMessage {
     SelectFolder(String),
     SelectMail(String),
-    EnvelopesLoaded(String, Vec<crate::libraries::backend::email_client::NativeEnvelope>),
-    NetworkEnvelopesLoaded(String, Vec<crate::libraries::backend::email_client::NativeEnvelope>),
+    EnvelopesLoaded(
+        String,
+        Vec<crate::libraries::backend::email_client::NativeEnvelope>,
+    ),
+    NetworkEnvelopesLoaded(
+        String,
+        Vec<crate::libraries::backend::email_client::NativeEnvelope>,
+    ),
     FoldersLoaded(Vec<String>),
     SyncDone,
     MessageLoaded(crate::libraries::backend::email_client::ParsedEmail),
@@ -251,21 +255,26 @@ impl EmailOverlay {
                 self.active_mail_id = Some(id);
                 self.parsed_email = None; // Show loading state
             }
-            EmailMessage::EnvelopesLoaded(_, envs) | EmailMessage::NetworkEnvelopesLoaded(_, envs) => {
+            EmailMessage::EnvelopesLoaded(_, envs)
+            | EmailMessage::NetworkEnvelopesLoaded(_, envs) => {
                 self.envelopes = envs;
                 self.is_loading = false;
                 self.imap_error = None;
             }
             EmailMessage::SyncDone => {}
             EmailMessage::FoldersLoaded(raw) => {
-                let aliases = ["INBOX", "Unread", "Starred", "Sent", "Drafts", "Trash", "Spam"];
+                let aliases = [
+                    "INBOX", "Unread", "Starred", "Sent", "Drafts", "Trash", "Spam",
+                ];
                 let mut merged: Vec<String> = aliases.iter().map(|s| s.to_string()).collect();
                 let mut user_folders: Vec<String> = raw
                     .into_iter()
-                    .filter(|f| !f.is_empty()
-                        && f != "INBOX"
-                        && !f.starts_with("[Gmail]")
-                        && !aliases.contains(&f.as_str()))
+                    .filter(|f| {
+                        !f.is_empty()
+                            && f != "INBOX"
+                            && !f.starts_with("[Gmail]")
+                            && !aliases.contains(&f.as_str())
+                    })
                     .collect();
                 user_folders.sort();
                 user_folders.dedup();
@@ -406,7 +415,9 @@ impl EmailOverlay {
                 let name = self.new_folder_name.trim().to_string();
                 if !name.is_empty() && !self.folders.contains(&name) {
                     self.folders.push(name);
-                    let aliases = ["INBOX", "Unread", "Starred", "Sent", "Drafts", "Trash", "Spam"];
+                    let aliases = [
+                        "INBOX", "Unread", "Starred", "Sent", "Drafts", "Trash", "Spam",
+                    ];
                     let user_folders: Vec<String> = self
                         .folders
                         .iter()
@@ -502,7 +513,9 @@ impl EmailOverlay {
                             if is_safe_to_auto_open(&out_path) {
                                 let _ = std::process::Command::new("notify-send")
                                     .args([
-                                        "-a", "Email", "Attachment Saved",
+                                        "-a",
+                                        "Email",
+                                        "Attachment Saved",
                                         &format!("Saved to {}", out_path.display()),
                                     ])
                                     .spawn();
@@ -512,7 +525,9 @@ impl EmailOverlay {
                             } else {
                                 let _ = std::process::Command::new("notify-send")
                                     .args([
-                                        "-a", "Email", "Attachment Saved",
+                                        "-a",
+                                        "Email",
+                                        "Attachment Saved",
                                         &format!(
                                             "Saved (not auto-opened for safety) → {}",
                                             out_path.display()
@@ -796,18 +811,14 @@ impl EmailOverlay {
                 .padding(8)
                 .width(Length::FillPortion(1));
 
-            let copy_filter_btn = button(
-                text("📋")
-                    .size(fs_main)
-                    .color(theme.background)
-            )
-            .on_press(EmailMessage::CopyGmailFilter)
-            .style(move |_t, _s| button::Style {
-                background: Some(iced::Background::Color(theme.text)),
-                ..Default::default()
-            })
-            .padding(8)
-            .width(Length::FillPortion(1));
+            let copy_filter_btn = button(text("📋").size(fs_main).color(theme.background))
+                .on_press(EmailMessage::CopyGmailFilter)
+                .style(move |_t, _s| button::Style {
+                    background: Some(iced::Background::Color(theme.text)),
+                    ..Default::default()
+                })
+                .padding(8)
+                .width(Length::FillPortion(1));
 
             folder_col = folder_col.push(row![add_btn, rem_btn, copy_filter_btn].spacing(4));
         }
@@ -1111,7 +1122,11 @@ impl EmailOverlay {
             // Action bar for the currently-viewed message
             let in_spam = self.active_folder == "Spam" || self.active_folder == "[Gmail]/Spam";
             let spam_label = if in_spam { "Not Spam" } else { "Mark Spam" };
-            let spam_msg = if in_spam { EmailMessage::MarkNotSpam } else { EmailMessage::MarkSpam };
+            let spam_msg = if in_spam {
+                EmailMessage::MarkNotSpam
+            } else {
+                EmailMessage::MarkSpam
+            };
             let action_bar = row![
                 button(
                     text(spam_label)

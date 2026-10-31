@@ -1,7 +1,7 @@
-use iced::{Color, Element};
+use super::{label, CapsuleAction};
 use crate::bar::unified::UnifiedTelemetry;
 use crate::libraries::config::theme::ShellTheme;
-use super::{label, CapsuleAction};
+use iced::{Color, Element};
 
 pub(super) fn render<'a, Message: 'a>(
     telemetry: &'a UnifiedTelemetry,
@@ -15,7 +15,11 @@ pub(super) fn render<'a, Message: 'a>(
             ],
             theme.font_size_normal,
         );
-        return (elem, CapsuleAction::OpenOverlay("power".into()), theme.border);
+        return (
+            elem,
+            CapsuleAction::OpenOverlay("power".into()),
+            theme.border,
+        );
     }
     let pct = telemetry.battery.percent;
     let status = telemetry.battery.status.to_lowercase();
@@ -26,19 +30,23 @@ pub(super) fn render<'a, Message: 'a>(
     } else {
         "🔋 "
     };
-    let val_col = if status.contains("charging") || status.contains("full") || status.contains("mains") {
-        theme.success
-    } else if pct <= 20 {
-        theme.danger
-    } else if pct <= 40 {
-        theme.warning
-    } else {
-        theme.text
-    };
+    let val_col =
+        if status.contains("charging") || status.contains("full") || status.contains("mains") {
+            theme.success
+        } else if pct <= 20 {
+            theme.danger
+        } else if pct <= 40 {
+            theme.warning
+        } else {
+            theme.text
+        };
     let elem = label::<Message>(
         &[
             (format!("{}BAT:", icon), theme.text),
-            (format!(" {}% ({:.1}W)", pct, telemetry.battery.power_w), val_col),
+            (
+                format!(" {}% ({:.1}W)", pct, telemetry.battery.power_w),
+                val_col,
+            ),
         ],
         theme.font_size_normal,
     );

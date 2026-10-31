@@ -1,7 +1,7 @@
-use iced::{Color, Element};
+use super::{label, CapsuleAction};
 use crate::bar::unified::UnifiedTelemetry;
 use crate::libraries::config::theme::ShellTheme;
-use super::{label, CapsuleAction};
+use iced::{Color, Element};
 
 pub(super) fn render<'a, Message: 'a>(
     telemetry: &'a UnifiedTelemetry,
@@ -22,5 +22,9 @@ pub(super) fn render<'a, Message: 'a>(
         display
     };
     let elem = label::<Message>(&[(truncated, theme.text)], theme.font_size_normal);
-    (elem, CapsuleAction::OpenOverlay("music".into()), theme.border)
+    (
+        elem,
+        CapsuleAction::OpenOverlay("music".into()),
+        theme.border,
+    )
 }

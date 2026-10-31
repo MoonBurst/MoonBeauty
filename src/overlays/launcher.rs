@@ -655,9 +655,7 @@ impl AppLauncher {
                             // Finding 39: spec-compliant %-code stripping
                             // (previous split('%').next() lost everything
                             // after the first %, breaking multi-arg Exec).
-                            let cleaned = Self::strip_field_codes(raw)
-                                .trim()
-                                .to_string();
+                            let cleaned = Self::strip_field_codes(raw).trim().to_string();
                             // Finding 45: cap Exec at 4 KB before render.
                             exec = Some(cleaned.chars().take(4096).collect::<String>());
                         }
@@ -792,8 +790,10 @@ impl AppLauncher {
         // ~/.local/share/applications/.
         if icon_name.starts_with('/') {
             let known = [
-                "/usr/share/icons/", "/usr/share/pixmaps/",
-                "/usr/local/share/icons/", "/usr/local/share/pixmaps/",
+                "/usr/share/icons/",
+                "/usr/share/pixmaps/",
+                "/usr/local/share/icons/",
+                "/usr/local/share/pixmaps/",
                 "/run/current-system/sw/share/icons/",
                 "/run/current-system/sw/share/pixmaps/",
                 "/var/lib/flatpak/exports/share/icons/",
@@ -807,7 +807,9 @@ impl AppLauncher {
                     ok = icon_name.starts_with(&format!("{}/.local/share/icons/", h))
                         || icon_name.starts_with(&format!("{}/.nix-profile/share/icons/", h))
                         || icon_name.starts_with(&format!(
-                            "{}/.local/share/flatpak/exports/share/icons/", h));
+                            "{}/.local/share/flatpak/exports/share/icons/",
+                            h
+                        ));
                 }
             }
             if !ok {
@@ -1135,28 +1137,40 @@ impl AppLauncher {
         while let Some(c) = it.next() {
             match (c, in_single, in_double) {
                 ('\\', false, false) => {
-                    if let Some(&n) = it.peek() { cur.push(n); it.next(); }
-                    else { cur.push('\\'); }
+                    if let Some(&n) = it.peek() {
+                        cur.push(n);
+                        it.next();
+                    } else {
+                        cur.push('\\');
+                    }
                 }
                 ('\'', false, false) => in_single = true,
                 ('\'', true, _) => in_single = false,
                 ('"', false, false) => in_double = true,
                 ('"', _, true) => in_double = false,
                 (' ', false, false) | ('\t', false, false) => {
-                    if !cur.is_empty() { tokens.push(std::mem::take(&mut cur)); }
+                    if !cur.is_empty() {
+                        tokens.push(std::mem::take(&mut cur));
+                    }
                 }
                 _ => cur.push(c),
             }
         }
-        if in_single || in_double { return None; }
-        if !cur.is_empty() { tokens.push(cur); }
+        if in_single || in_double {
+            return None;
+        }
+        if !cur.is_empty() {
+            tokens.push(cur);
+        }
         let mut tok_it = tokens.into_iter();
         let prog = tok_it.next()?;
         Some((prog, tok_it.collect()))
     }
 
     pub async fn launch(exec: &str) {
-        if exec.is_empty() { return; }
+        if exec.is_empty() {
+            return;
+        }
         // Finding 39: NEVER invoke a shell on .desktop Exec content.
         // Tokenize + exec directly. A hostile .desktop with
         // `Exec=foo; rm -rf ~` now becomes program="foo" with args
@@ -1610,7 +1624,6 @@ impl AppLauncher {
     }
 }
 
-
 #[cfg(test)]
 mod parse_exec_tests {
     use super::AppLauncher;
@@ -1631,16 +1644,14 @@ mod parse_exec_tests {
 
     #[test]
     fn double_quoted_argument() {
-        let (prog, args) =
-            AppLauncher::parse_exec_for_test(r#"foo "bar baz""#).unwrap();
+        let (prog, args) = AppLauncher::parse_exec_for_test(r#"foo "bar baz""#).unwrap();
         assert_eq!(prog, "foo");
         assert_eq!(args, vec!["bar baz"]);
     }
 
     #[test]
     fn single_quoted_argument() {
-        let (prog, args) =
-            AppLauncher::parse_exec_for_test("foo 'bar baz'").unwrap();
+        let (prog, args) = AppLauncher::parse_exec_for_test("foo 'bar baz'").unwrap();
         assert_eq!(prog, "foo");
         assert_eq!(args, vec!["bar baz"]);
     }
@@ -1648,16 +1659,14 @@ mod parse_exec_tests {
     #[test]
     fn shell_metachars_are_literal_args() {
         // Finding 39 regression: ; | & $ ( ) must NOT be interpreted.
-        let (prog, args) =
-            AppLauncher::parse_exec_for_test("foo; rm -rf ~").unwrap();
+        let (prog, args) = AppLauncher::parse_exec_for_test("foo; rm -rf ~").unwrap();
         assert_eq!(prog, "foo;");
         assert_eq!(args, vec!["rm", "-rf", "~"]);
     }
 
     #[test]
     fn dollar_command_substitution_literal() {
-        let (prog, args) =
-            AppLauncher::parse_exec_for_test("firefox $(id)").unwrap();
+        let (prog, args) = AppLauncher::parse_exec_for_test("firefox $(id)").unwrap();
         assert_eq!(prog, "firefox");
         assert_eq!(args, vec!["$(id)"]);
     }
@@ -1676,8 +1685,7 @@ mod parse_exec_tests {
 
     #[test]
     fn backslash_escape() {
-        let (prog, args) =
-            AppLauncher::parse_exec_for_test(r"foo\bar").unwrap();
+        let (prog, args) = AppLauncher::parse_exec_for_test(r"foo\bar").unwrap();
         assert_eq!(prog, "foobar");
         assert!(args.is_empty());
     }

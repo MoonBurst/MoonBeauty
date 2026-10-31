@@ -316,10 +316,7 @@ pub fn is_safe_app_id(s: &str) -> bool {
 /// declared root. Blocks symlink-to-sensitive-file — same class as the
 /// tray/watcher.rs version added for finding 27. Used by launcher.rs
 /// and any future icon resolver that wants the same guarantee.
-pub fn safe_icon_candidate(
-    candidate: &std::path::Path,
-    root: &std::path::Path,
-) -> Option<PathBuf> {
+pub fn safe_icon_candidate(candidate: &std::path::Path, root: &std::path::Path) -> Option<PathBuf> {
     let canon = std::fs::canonicalize(candidate).ok()?;
     let canon_root = std::fs::canonicalize(root).ok()?;
     // Finding 64: also accept canonical targets under /nix/store/.
@@ -353,7 +350,9 @@ pub fn read_json_capped<T: serde::de::DeserializeOwned>(
         Ok(m) if m.len() > max_bytes => {
             eprintln!(
                 "[json] {} is {} bytes, exceeds {} cap; skipping",
-                path.display(), m.len(), max_bytes
+                path.display(),
+                m.len(),
+                max_bytes
             );
             None
         }
@@ -610,10 +609,7 @@ mod runtime_dir_tests {
         };
         let xdg = std::path::PathBuf::from(xdg);
         let result = mbs_subdir("mbs-test-subdir");
-        assert!(
-            result.starts_with(&xdg),
-            "{:?} not under {:?}", result, xdg
-        );
+        assert!(result.starts_with(&xdg), "{:?} not under {:?}", result, xdg);
         assert_eq!(mode(&result), 0o700, "subdir mode");
         let _ = std::fs::remove_dir_all(&result);
     }
@@ -671,7 +667,11 @@ mod tighten_tests {
         assert_eq!(mode(&f2), 0o600);
         assert_eq!(mode(&f3), 0o600);
         assert_eq!(mode(&foreign_dir), 0o755, "foreign dir must not be touched");
-        assert_eq!(mode(&foreign_file), 0o644, "foreign file must not be touched");
+        assert_eq!(
+            mode(&foreign_file),
+            0o644,
+            "foreign file must not be touched"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -706,11 +706,7 @@ mod unique_tmp_tests {
     }
 
     fn scratch(tag: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!(
-            "mbs-uniq-{}-{}",
-            tag,
-            std::process::id()
-        ));
+        let d = std::env::temp_dir().join(format!("mbs-uniq-{}-{}", tag, std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -777,7 +773,10 @@ mod unique_tmp_tests {
         private_write_new(&p, b"content").unwrap();
         assert_eq!(std::fs::read(&p).unwrap(), b"content");
         assert_eq!(mode(&p), 0o600);
-        assert!(private_write_new(&p, b"other").is_err(), "second call must fail");
+        assert!(
+            private_write_new(&p, b"other").is_err(),
+            "second call must fail"
+        );
         assert_eq!(std::fs::read(&p).unwrap(), b"content");
         let _ = std::fs::remove_dir_all(&d);
     }
@@ -793,6 +792,10 @@ mod unique_tmp_tests {
         assert_ne!(a, b);
         let xdg = std::path::PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR").unwrap());
         assert!(a.starts_with(&xdg), "{:?} not under {:?}", a, xdg);
-        assert!(a.starts_with(xdg.join("mbs-tmp")), "{:?} not under mbs-tmp", a);
+        assert!(
+            a.starts_with(xdg.join("mbs-tmp")),
+            "{:?} not under mbs-tmp",
+            a
+        );
     }
 }

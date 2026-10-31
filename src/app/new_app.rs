@@ -46,7 +46,8 @@ impl MoonBeautyShellApp {
         let theme = ShellTheme::from_settings(&settings);
 
         let (ipc_tx, ipc_rx) = tokio::sync::mpsc::unbounded_channel::<IpcCommand>();
-        let _ = crate::app::subscription::IPC_RX.set(std::sync::Arc::new(tokio::sync::Mutex::new(ipc_rx)));
+        let _ = crate::app::subscription::IPC_RX
+            .set(std::sync::Arc::new(tokio::sync::Mutex::new(ipc_rx)));
         if standalone_target.is_none() && !is_notif_surface {
             std::thread::spawn(move || {
                 use std::io::Read;
@@ -95,17 +96,22 @@ impl MoonBeautyShellApp {
             });
         }
 
-
-        // Spawn wl-paste watchers to replace cliphist
+        // Spawn exactly one wl-paste watcher. Kill any orphaned watcher
+        // from previous runs first — the shell pkill pattern anchors on
+        // "moon-beauty-shell$", but the watcher cmdline ends with
+        // "--clipboard-ingest" and so escapes it, causing N-duplicate
+        // clipboard entries after N bar restarts.
         if standalone_target.is_none() && !is_notif_surface {
+            let _ = std::process::Command::new("pkill")
+                .args(["-f", "wl-paste --watch.*moon-beauty-shell"])
+                .status();
+            std::thread::sleep(std::time::Duration::from_millis(50));
             let exe = crate::resolve_exe();
             let exe_str = exe.to_string_lossy().to_string();
-            let _ = std::process::Command::new("wl-paste").args(["--watch", &exe_str, "--clipboard-ingest"]).spawn();
-            let script = format!(
-                "mime=$(wl-paste --list-types | head -n1); if [ -n \"$mime\" ]; then wl-paste --type \"$mime\" | {} --clipboard-ingest \"$mime\"; fi",
-                exe_str
-            );
-                                }
+            let _ = std::process::Command::new("wl-paste")
+                .args(["--watch", &exe_str, "--clipboard-ingest"])
+                .spawn();
+        }
 
         let notif_rx = if is_notif_surface {
             // Finding 55: bounded (256). notify-send can be called at
@@ -173,7 +179,9 @@ impl MoonBeautyShellApp {
                 SystemCollector::list_gpus_sync()
             },
 
-            launcher: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Launcher)) {
+            launcher: if is_standalone
+                && !matches!(standalone_target, Some(OverlayTarget::Launcher))
+            {
                 // Cheap constructor: no desktop file scan. Saves 200-400ms
                 // on every non-launcher overlay spawn (clipboard, notes,
                 // email, todo, reminders, calc, pass, unicode, websearch,
@@ -190,16 +198,35 @@ impl MoonBeautyShellApp {
                 }
             },
             clipboard: ClipboardOverlay::new(),
-            notes: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Notes)) { NotesOverlay::empty() } else { NotesOverlay::new() },
+            notes: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Notes)) {
+                NotesOverlay::empty()
+            } else {
+                NotesOverlay::new()
+            },
             pass: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Pass)) {
                 PassOverlay::empty()
             } else {
                 PassOverlay::new()
             },
             power: PowerOverlay::new(),
-            todo: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Todo)) { TodoOverlay::empty() } else { TodoOverlay::new() },
-            reminders: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Reminders)) { RemindersOverlay::empty() } else { RemindersOverlay::new() },
-            dict: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Dictionary)) { DictionaryOverlay::empty() } else { DictionaryOverlay::new() },
+            todo: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Todo)) {
+                TodoOverlay::empty()
+            } else {
+                TodoOverlay::new()
+            },
+            reminders: if is_standalone
+                && !matches!(standalone_target, Some(OverlayTarget::Reminders))
+            {
+                RemindersOverlay::empty()
+            } else {
+                RemindersOverlay::new()
+            },
+            dict: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Dictionary))
+            {
+                DictionaryOverlay::empty()
+            } else {
+                DictionaryOverlay::new()
+            },
             unicode: UnicodeOverlay::new(),
             web: WebSearchOverlay::new(),
             amogus: AmogusOverlay::new(),
@@ -213,18 +240,15 @@ impl MoonBeautyShellApp {
                     let pb = std::path::PathBuf::from(&p);
                     let safe = pb.is_absolute() && !p.contains("..");
                     if !safe {
-                        eprintln!(
-                            "[annotator] rejecting unsafe MBS_ANNOTATOR_PATH: {:?}",
-                            p
-                        );
+                        eprintln!("[annotator] rejecting unsafe MBS_ANNOTATOR_PATH: {:?}", p);
                     } else {
-                    match std::fs::read(&pb) {
-                        Ok(bytes) => {
-                            a.load_image(pb, bytes);
-                            eprintln!("[annotator] loaded capture from {p}");
+                        match std::fs::read(&pb) {
+                            Ok(bytes) => {
+                                a.load_image(pb, bytes);
+                                eprintln!("[annotator] loaded capture from {p}");
+                            }
+                            Err(e) => eprintln!("[annotator] failed to read {p}: {e}"),
                         }
-                        Err(e) => eprintln!("[annotator] failed to read {p}: {e}"),
-                    }
                     }
                 }
                 a
@@ -242,10 +266,15 @@ impl MoonBeautyShellApp {
             } else {
                 NotificationOverlay::empty()
             },
-            lockscreen: if matches!(standalone_target, Some(OverlayTarget::Lockscreen)) { LockscreenOverlay::new() } else { LockscreenOverlay::empty() },
+            lockscreen: if matches!(standalone_target, Some(OverlayTarget::Lockscreen)) {
+                LockscreenOverlay::new()
+            } else {
+                LockscreenOverlay::empty()
+            },
             weather_tick: false,
 
             music_cycle_state: Default::default(),
+            is_cycling: false,
 
             last_cursor_x: 0.0,
             last_cursor_time: std::time::Instant::now() - std::time::Duration::from_secs(30),
@@ -388,7 +417,9 @@ impl MoonBeautyShellApp {
                         .await
                 },
                 |res| match res {
-                    Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded("INBOX".to_string(), envs)),
+                    Ok(envs) => {
+                        Message::Email(EmailMessage::EnvelopesLoaded("INBOX".to_string(), envs))
+                    }
                     Err(e) => Message::Email(EmailMessage::Error(e)),
                 },
             ));

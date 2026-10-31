@@ -39,10 +39,7 @@ impl TrayWatcher {
         {
             let g = self.items.lock().unwrap();
             if g.len() >= MAX_ITEMS && !g.contains(&normalize_service(&service)) {
-                crate::dbg_log!(
-                    "[tray-watcher] reject registration: at cap ({})",
-                    MAX_ITEMS
-                );
+                crate::dbg_log!("[tray-watcher] reject registration: at cap ({})", MAX_ITEMS);
                 return Ok(());
             }
         }
@@ -184,7 +181,8 @@ pub async fn fetch_tray_items() -> Vec<TrayItem> {
     if raw_items.len() > MAX_ITEMS {
         crate::dbg_log!(
             "[tray-fetch] capping item enumeration {} → {}",
-            raw_items.len(), MAX_ITEMS
+            raw_items.len(),
+            MAX_ITEMS
         );
     }
     let mut out = Vec::new();
@@ -392,7 +390,8 @@ pub async fn get_menu_tree(bus: &str, path: &str) -> Option<(String, Vec<TrayMen
             if items.len() >= MAX_ITEMS_PER_LEVEL {
                 crate::dbg_log!(
                     "[tray-menu] level width cap {} at depth {}",
-                    MAX_ITEMS_PER_LEVEL, depth
+                    MAX_ITEMS_PER_LEVEL,
+                    depth
                 );
                 break;
             }
@@ -553,7 +552,10 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
     {
-        eprintln!("[tray-icon] rejecting icon_name with invalid chars: {:?}", icon_name);
+        eprintln!(
+            "[tray-icon] rejecting icon_name with invalid chars: {:?}",
+            icon_name
+        );
         return None;
     }
 
@@ -651,7 +653,9 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
         Ok(meta) if meta.len() > MAX_ICON_BYTES => {
             eprintln!(
                 "[tray-icon] {} exceeds {} byte cap ({} bytes), skipping",
-                icon_name, MAX_ICON_BYTES, meta.len()
+                icon_name,
+                MAX_ICON_BYTES,
+                meta.len()
             );
             return None;
         }

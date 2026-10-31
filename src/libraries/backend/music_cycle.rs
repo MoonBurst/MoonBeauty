@@ -12,6 +12,40 @@
 
 use super::mpd::MpdBackend;
 use super::mpris::MprisBackend;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MusicSources {
+    pub local: bool,
+    pub spotify: bool,
+    pub browser: bool,
+}
+
+impl Default for MusicSources {
+    fn default() -> Self {
+        Self {
+            local: true,
+            spotify: true,
+            browser: true,
+        }
+    }
+}
+
+impl MusicSources {
+    fn path() -> std::path::PathBuf {
+        crate::libraries::process::mbs_runtime_dir().join("mbs-music-sources.json")
+    }
+
+    pub fn load() -> Self {
+        crate::libraries::process::read_json_capped(&Self::path(), 1024).unwrap_or_default()
+    }
+
+    pub fn save(&self) {
+        if let Ok(json) = serde_json::to_string(self) {
+            let _ = crate::libraries::process::private_write_file(&Self::path(), json.as_bytes());
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlayerKind {
@@ -33,13 +67,14 @@ pub struct MusicCycleState {
 
 /// Pure state-machine step. Separated from the async `press` so
 /// tests can exercise every branch without spawning D-Bus connections.
-pub(crate) enum Decision {
+#[derive(Debug)]
+pub enum Decision {
     Pause(PlayerKind, usize),
     Play(PlayerKind, usize),
     Nothing,
 }
 
-pub(crate) fn decide_step(
+pub fn decide_step(
     available: &[PlayerKind],
     playing_set: &[PlayerKind],
     last_playing: Option<&PlayerKind>,
@@ -68,16 +103,32 @@ pub(crate) fn decide_step(
     Decision::Play(target.clone(), (next_idx + 1) % n)
 }
 
-async fn probe_all() -> Vec<(PlayerKind, bool)> {
+pub async fn probe_all() -> Vec<(PlayerKind, bool)> {
     let mut out = Vec::new();
+    let sources = MusicSources::load();
 
-    // MPD appears only if it has a current song. Empty-queue MPD can't
-    // be "played" via Play::current() — nothing to play, so exclude.
-    if let Some(track) = MpdBackend::poll().await {
-        out.push((PlayerKind::Mpd, track.is_playing));
+    if sources.local {
+        if let Some(track) = MpdBackend::poll().await {
+            out.push((PlayerKind::Mpd, track.is_playing));
+        }
     }
 
     for bus in MprisBackend::list_players().await {
+        let b = bus.to_lowercase();
+        let is_spotify = b.contains("spotify");
+        let is_browser = b.contains("firefox")
+            || b.contains("chrome")
+            || b.contains("chromium")
+            || b.contains("brave")
+            || b.contains("vivaldi");
+
+        if is_spotify && !sources.spotify {
+            continue;
+        }
+        if is_browser && !sources.browser {
+            continue;
+        }
+
         if let Some(track) = MprisBackend::poll_for(&bus).await {
             out.push((PlayerKind::Mpris(bus), track.is_playing));
         }
@@ -103,6 +154,7 @@ async fn dispatch_play(kind: &PlayerKind, play: bool) {
 /// was acted on (for logging / UI feedback), or None if no players
 /// are available.
 pub async fn press(state: &mut MusicCycleState) -> Option<(PlayerKind, PressOutcome)> {
+    super::mpd::MpdBackend::clear_cache();
     let probed = probe_all().await;
     let available: Vec<PlayerKind> = probed.iter().map(|(k, _)| k.clone()).collect();
     let playing: Vec<PlayerKind> = probed
@@ -126,6 +178,7 @@ pub async fn press(state: &mut MusicCycleState) -> Option<(PlayerKind, PressOutc
         Decision::Pause(target, new_next) => {
             crate::dbg_log!("[music-cycle] pausing {:?}", target);
             dispatch_play(&target, false).await;
+            super::mpd::MpdBackend::clear_cache();
             state.last_playing = None;
             state.next_idx = new_next;
             Some((target, PressOutcome::Paused))
@@ -133,6 +186,7 @@ pub async fn press(state: &mut MusicCycleState) -> Option<(PlayerKind, PressOutc
         Decision::Play(target, new_next) => {
             crate::dbg_log!("[music-cycle] playing {:?}", target);
             dispatch_play(&target, true).await;
+            super::mpd::MpdBackend::clear_cache();
             state.last_playing = Some(target.clone());
             state.next_idx = new_next;
             Some((target, PressOutcome::Played))
@@ -153,10 +207,7 @@ mod decide_tests {
 
     #[test]
     fn empty_available_returns_nothing() {
-        assert!(matches!(
-            decide_step(&[], &[], None, 0),
-            Decision::Nothing
-        ));
+        assert!(matches!(decide_step(&[], &[], None, 0), Decision::Nothing));
     }
 
     #[test]

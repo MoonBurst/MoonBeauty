@@ -405,8 +405,7 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
 
     // Finding 76: per-capsule bias added to the slant-shift correction.
-    let (bias_l, bias_r) =
-        crate::bar::tooltip_spawn::read_offset_extra();
+    let (bias_l, bias_r) = crate::bar::tooltip_spawn::read_offset_extra();
     let (anchor, margin) = if grow_right {
         let sl_left = sl_str == "L";
         let shift = if sl_left { sw_cap } else { 0.0 };

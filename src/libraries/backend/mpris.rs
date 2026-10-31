@@ -132,18 +132,16 @@ impl MprisBackend {
         // Finding 32: outer 10s timeout caps worst case for the whole
         // poll_uncached invocation. Per-player timeout is 2s × 20 cap =
         // 40s worst case; this brings it to 10s.
-        let result = match tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            Self::poll_uncached(),
-        )
-        .await
-        {
-            Ok(r) => r,
-            Err(_) => {
-                eprintln!("[mpris] poll timed out at 10s (finding 32)");
-                None
-            }
-        };
+        let result =
+            match tokio::time::timeout(std::time::Duration::from_secs(10), Self::poll_uncached())
+                .await
+            {
+                Ok(r) => r,
+                Err(_) => {
+                    eprintln!("[mpris] poll timed out at 10s (finding 32)");
+                    None
+                }
+            };
         {
             let mut g = c.lock().unwrap();
             *g = Some((Instant::now(), result.clone()));
@@ -267,7 +265,9 @@ impl MprisBackend {
     /// List all currently registered MPRIS bus names, capped at 20.
     /// Used by the music cycle to enumerate available players.
     pub async fn list_players() -> Vec<String> {
-        let Ok(conn) = Connection::session().await else { return Vec::new() };
+        let Ok(conn) = Connection::session().await else {
+            return Vec::new();
+        };
         let Ok(reply) = conn
             .call_method(
                 Some("org.freedesktop.DBus"),
@@ -398,37 +398,13 @@ impl MprisBackend {
             crate::dbg_log!("[mpris] set_playing_for({}): proxy failed", bus);
             return;
         };
-        let current = match proxy.get_property::<String>("PlaybackStatus").await {
-            Ok(s) => s,
-            Err(e) => {
-                crate::dbg_log!("[mpris] set_playing_for({}): status read: {}", bus, e);
-                return;
+        let method = if play { "Play" } else { "Pause" };
+        match proxy.call_method(method, &()).await {
+            Ok(_) => crate::dbg_log!("[mpris] set_playing_for({}): {} (idempotent)", bus, method),
+            Err(_) => {
+                let _ = proxy.call_method("PlayPause", &()).await;
+                crate::dbg_log!("[mpris] set_playing_for({}): PlayPause fallback", bus);
             }
-        };
-        let is_playing = current == "Playing";
-        if is_playing == play {
-            crate::dbg_log!(
-                "[mpris] set_playing_for({}): already {} (no-op)",
-                bus, if play { "playing" } else { "paused" }
-            );
-            return;
-        }
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            proxy.call_method("PlayPause", &()),
-        )
-        .await
-        {
-            Ok(Ok(_)) => crate::dbg_log!(
-                "[mpris] set_playing_for({}): → {} (PlayPause)",
-                bus, if play { "playing" } else { "paused" }
-            ),
-            Ok(Err(e)) => crate::dbg_log!(
-                "[mpris] set_playing_for({}): PlayPause failed: {}", bus, e
-            ),
-            Err(_) => crate::dbg_log!(
-                "[mpris] set_playing_for({}): PlayPause timeout", bus
-            ),
         }
     }
 

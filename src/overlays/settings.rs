@@ -325,12 +325,8 @@ impl SettingsOverlay {
             SettingsMessage::TooltipOffsetRight(v) => {
                 settings.tooltip_offset_right = Some(v.clamp(-100, 200))
             }
-            SettingsMessage::TooltipOffsetLeftReset => {
-                settings.tooltip_offset_left = None
-            }
-            SettingsMessage::TooltipOffsetRightReset => {
-                settings.tooltip_offset_right = None
-            }
+            SettingsMessage::TooltipOffsetLeftReset => settings.tooltip_offset_left = None,
+            SettingsMessage::TooltipOffsetRightReset => settings.tooltip_offset_right = None,
             SettingsMessage::BorderWidth(v) => {
                 settings.global_border_width = (v as f32).clamp(1.0, 12.0)
             }
@@ -462,13 +458,11 @@ impl SettingsOverlay {
                     sound_path: None,
                     tts: true,
                     default_readout: Some("Message from {name}: {body}".into()),
-                    content_rules: vec![
-                        crate::libraries::config::settings::ContentRule {
-                            pattern: "logged in".into(),
-                            readout: "{name} has logged in".into(),
-                            sound_path: None,
-                        }
-                    ],
+                    content_rules: vec![crate::libraries::config::settings::ContentRule {
+                        pattern: "logged in".into(),
+                        readout: "{name} has logged in".into(),
+                        sound_path: None,
+                    }],
                 });
                 self.selected_profile = settings.friend_profiles.len().saturating_sub(1);
                 let _ = crate::libraries::config::settings::save_friend_profiles(
@@ -2683,12 +2677,7 @@ impl SettingsOverlay {
                 ]
                 .spacing(4)
                 .align_y(Alignment::Center),
-                slider(
-                    -50..=100,
-                    eff,
-                    SettingsMessage::TooltipOffsetLeft
-                )
-                .width(Length::Fill),
+                slider(-50..=100, eff, SettingsMessage::TooltipOffsetLeft).width(Length::Fill),
             ]
             .spacing(3)
             .width(Length::FillPortion(1))
@@ -2740,12 +2729,7 @@ impl SettingsOverlay {
                 ]
                 .spacing(4)
                 .align_y(Alignment::Center),
-                slider(
-                    -50..=100,
-                    eff,
-                    SettingsMessage::TooltipOffsetRight
-                )
-                .width(Length::Fill),
+                slider(-50..=100, eff, SettingsMessage::TooltipOffsetRight).width(Length::Fill),
             ]
             .spacing(3)
             .width(Length::FillPortion(1))
@@ -3493,114 +3477,133 @@ impl SettingsOverlay {
         theme: &'a ShellTheme,
     ) -> Element<'a, SettingsMessage> {
         let base_sz = theme.font_size_overlay;
-        let scale_sz = |factor: f32| -> u16 {
-            ((base_sz as f32) * factor).round().max(9.0) as u16
-        };
+        let scale_sz = |factor: f32| -> u16 { ((base_sz as f32) * factor).round().max(9.0) as u16 };
         let fs_desc = scale_sz(0.72) as f32;
         let fs_cmd = scale_sz(0.75) as f32;
         let fs_head = scale_sz(0.85) as f32;
 
         // (title, [(description, command), ...])
         let sections: &[(&str, &[(&str, &str)])] = &[
-            ("MUSIC", &[
-                (
-                    "Cycle through active players (play, pause, next player, play, ...)",
-                    "moon-beauty-shell --music-cycle",
-                ),
-                (
-                    "Play/pause the currently active player",
-                    "moon-beauty-shell --music-play-pause",
-                ),
-                (
-                    "Skip to the next track on the active player",
-                    "moon-beauty-shell --music-next",
-                ),
-                (
-                    "Go to the previous track on the active player",
-                    "moon-beauty-shell --music-previous",
-                ),
-            ]),
-            ("OVERLAYS — toggle (press the same keybind twice to close)", &[
-                ("Application launcher", "moon-beauty-shell --toggle launcher"),
-                ("Clipboard manager", "moon-beauty-shell --toggle clipboard"),
-                ("Notification history", "moon-beauty-shell --toggle history"),
-                ("Settings", "moon-beauty-shell --toggle settings"),
-                ("Calculator & units", "moon-beauty-shell --toggle calc"),
-                ("Password store", "moon-beauty-shell --toggle pass"),
-                ("Dictionary", "moon-beauty-shell --toggle dict"),
-                ("Unicode glyphs", "moon-beauty-shell --toggle unicode"),
-                ("Tasks & todos", "moon-beauty-shell --toggle todo"),
-                ("Reminders & alarms", "moon-beauty-shell --toggle reminders"),
-                ("Dice & RNG", "moon-beauty-shell --toggle rng"),
-                ("Web search", "moon-beauty-shell --toggle web"),
-                ("Email client", "moon-beauty-shell --toggle email"),
-                ("Among Us tracker", "moon-beauty-shell --toggle amogus"),
-                ("Lock screen", "moon-beauty-shell --toggle lockscreen"),
-            ]),
-            ("NOTIFICATIONS", &[
-                (
-                    "Send a notification from a script or shell",
-                    "moon-beauty-shell --notify \"Title\" \"Body\"",
-                ),
-                (
-                    "Focus the app that sent the newest toast",
-                    "moon-beauty-shell --activate-latest-notif",
-                ),
-                (
-                    "Dismiss the newest toast",
-                    "moon-beauty-shell --dismiss-notif",
-                ),
-                (
-                    "Toggle the notification history panel",
-                    "moon-beauty-shell --notif-history",
-                ),
-            ]),
-            ("SCREENSHOTS", &[
-                (
-                    "Capture a region, save to ~/Pictures/Screenshots",
-                    "moon-beauty-shell --screenshot",
-                ),
-                (
-                    "Capture a region, open the annotator",
-                    "moon-beauty-shell --screenshot --annotate",
-                ),
-            ]),
-            ("SYSTEM", &[
-                (
-                    "Restart the bar (picks up new settings)",
-                    "moon-beauty-shell --restart-bar",
-                ),
-                (
-                    "Test IMAP/SMTP email connection",
-                    "moon-beauty-shell --test-email",
-                ),
-                (
-                    "Test lockscreen password authentication",
-                    "moon-beauty-shell --test-lock-auth",
-                ),
-            ]),
-            ("SWAY KEYBIND EXAMPLES", &[
-                (
-                    "Cycle music players with Super+M",
-                    "bindsym $mod+m exec moon-beauty-shell --music-cycle",
-                ),
-                (
-                    "Play/pause with Super+Shift+M",
-                    "bindsym $mod+Shift+m exec moon-beauty-shell --music-play-pause",
-                ),
-                (
-                    "Next track with Super+Shift+Right",
-                    "bindsym $mod+Shift+Right exec moon-beauty-shell --music-next",
-                ),
-                (
-                    "Toggle notification history with Super+N",
-                    "bindsym $mod+n exec moon-beauty-shell --toggle history",
-                ),
-                (
-                    "Region screenshot with Print",
-                    "bindsym Print exec moon-beauty-shell --screenshot",
-                ),
-            ]),
+            (
+                "MUSIC",
+                &[
+                    (
+                        "Cycle through active players (play, pause, next player, play, ...)",
+                        "moon-beauty-shell --music-cycle",
+                    ),
+                    (
+                        "Play/pause the currently active player",
+                        "moon-beauty-shell --music-play-pause",
+                    ),
+                    (
+                        "Skip to the next track on the active player",
+                        "moon-beauty-shell --music-next",
+                    ),
+                    (
+                        "Go to the previous track on the active player",
+                        "moon-beauty-shell --music-previous",
+                    ),
+                ],
+            ),
+            (
+                "OVERLAYS — toggle (press the same keybind twice to close)",
+                &[
+                    (
+                        "Application launcher",
+                        "moon-beauty-shell --toggle launcher",
+                    ),
+                    ("Clipboard manager", "moon-beauty-shell --toggle clipboard"),
+                    ("Notification history", "moon-beauty-shell --toggle history"),
+                    ("Settings", "moon-beauty-shell --toggle settings"),
+                    ("Calculator & units", "moon-beauty-shell --toggle calc"),
+                    ("Password store", "moon-beauty-shell --toggle pass"),
+                    ("Dictionary", "moon-beauty-shell --toggle dict"),
+                    ("Unicode glyphs", "moon-beauty-shell --toggle unicode"),
+                    ("Tasks & todos", "moon-beauty-shell --toggle todo"),
+                    ("Reminders & alarms", "moon-beauty-shell --toggle reminders"),
+                    ("Dice & RNG", "moon-beauty-shell --toggle rng"),
+                    ("Web search", "moon-beauty-shell --toggle web"),
+                    ("Email client", "moon-beauty-shell --toggle email"),
+                    ("Among Us tracker", "moon-beauty-shell --toggle amogus"),
+                    ("Lock screen", "moon-beauty-shell --toggle lockscreen"),
+                ],
+            ),
+            (
+                "NOTIFICATIONS",
+                &[
+                    (
+                        "Send a notification from a script or shell",
+                        "moon-beauty-shell --notify \"Title\" \"Body\"",
+                    ),
+                    (
+                        "Focus the app that sent the newest toast",
+                        "moon-beauty-shell --activate-latest-notif",
+                    ),
+                    (
+                        "Dismiss the newest toast",
+                        "moon-beauty-shell --dismiss-notif",
+                    ),
+                    (
+                        "Toggle the notification history panel",
+                        "moon-beauty-shell --notif-history",
+                    ),
+                ],
+            ),
+            (
+                "SCREENSHOTS",
+                &[
+                    (
+                        "Capture a region, save to ~/Pictures/Screenshots",
+                        "moon-beauty-shell --screenshot",
+                    ),
+                    (
+                        "Capture a region, open the annotator",
+                        "moon-beauty-shell --screenshot --annotate",
+                    ),
+                ],
+            ),
+            (
+                "SYSTEM",
+                &[
+                    (
+                        "Restart the bar (picks up new settings)",
+                        "moon-beauty-shell --restart-bar",
+                    ),
+                    (
+                        "Test IMAP/SMTP email connection",
+                        "moon-beauty-shell --test-email",
+                    ),
+                    (
+                        "Test lockscreen password authentication",
+                        "moon-beauty-shell --test-lock-auth",
+                    ),
+                ],
+            ),
+            (
+                "SWAY KEYBIND EXAMPLES",
+                &[
+                    (
+                        "Cycle music players with Super+M",
+                        "bindsym $mod+m exec moon-beauty-shell --music-cycle",
+                    ),
+                    (
+                        "Play/pause with Super+Shift+M",
+                        "bindsym $mod+Shift+m exec moon-beauty-shell --music-play-pause",
+                    ),
+                    (
+                        "Next track with Super+Shift+Right",
+                        "bindsym $mod+Shift+Right exec moon-beauty-shell --music-next",
+                    ),
+                    (
+                        "Toggle notification history with Super+N",
+                        "bindsym $mod+n exec moon-beauty-shell --toggle history",
+                    ),
+                    (
+                        "Region screenshot with Print",
+                        "bindsym Print exec moon-beauty-shell --screenshot",
+                    ),
+                ],
+            ),
         ];
 
         let mut col = column![].spacing(20).width(Length::Fill);
@@ -3625,20 +3628,13 @@ impl SettingsOverlay {
         );
 
         for (title, entries) in sections {
-            col = col.push(
-                text(*title)
-                    .size(fs_head)
-                    .bold()
-                    .color(theme.success),
-            );
+            col = col.push(text(*title).size(fs_head).bold().color(theme.success));
 
             let mut section_col = column![].spacing(6).width(Length::Fill);
             for (desc, cmd) in entries.iter() {
                 let cmd_clone = (*cmd).to_string();
 
-                let desc_el = text(*desc)
-                    .size(fs_desc)
-                    .color(theme.muted);
+                let desc_el = text(*desc).size(fs_desc).color(theme.muted);
 
                 let cmd_el = text(*cmd)
                     .size(fs_cmd)
@@ -3659,9 +3655,7 @@ impl SettingsOverlay {
                 .height(Length::Fixed(32.0))
                 .style(move |_t, status| button::Style {
                     background: Some(iced::Background::Color(match status {
-                        button::Status::Hovered | button::Status::Pressed => {
-                            theme.surface_alt
-                        }
+                        button::Status::Hovered | button::Status::Pressed => theme.surface_alt,
                         _ => theme.background,
                     })),
                     border: iced::Border {
@@ -3675,9 +3669,7 @@ impl SettingsOverlay {
 
                 let row = container(
                     row![
-                        column![desc_el, cmd_el]
-                            .spacing(2)
-                            .width(Length::Fill),
+                        column![desc_el, cmd_el].spacing(2).width(Length::Fill),
                         copy_btn,
                     ]
                     .spacing(8)
@@ -3700,20 +3692,16 @@ impl SettingsOverlay {
             col = col.push(section_col);
         }
 
-        container(
-            scrollable(col)
-                .height(Length::Fill)
-                .width(Length::Fill),
-        )
-        .padding(iced::Padding {
-            top: 0.0,
-            right: (settings.overlay_cut as f32) + 16.0,
-            bottom: (settings.overlay_cut as f32) + 16.0,
-            left: (settings.overlay_cut as f32) + 16.0,
-        })
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .clip(true)
-        .into()
+        container(scrollable(col).height(Length::Fill).width(Length::Fill))
+            .padding(iced::Padding {
+                top: 0.0,
+                right: (settings.overlay_cut as f32) + 16.0,
+                bottom: (settings.overlay_cut as f32) + 16.0,
+                left: (settings.overlay_cut as f32) + 16.0,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .clip(true)
+            .into()
     }
 }

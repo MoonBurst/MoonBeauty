@@ -1,7 +1,8 @@
 use super::*;
 
-
-pub(crate) static IPC_RX: std::sync::OnceLock<std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<IpcCommand>>>> = std::sync::OnceLock::new();
+pub(crate) static IPC_RX: std::sync::OnceLock<
+    std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<IpcCommand>>>,
+> = std::sync::OnceLock::new();
 
 fn ipc_stream() -> impl futures_util::Stream<Item = Message> {
     let rx = IPC_RX.get().expect("IPC_RX not initialized").clone();
@@ -22,8 +23,13 @@ impl MoonBeautyShellApp {
             iced::Subscription::none()
         };
         let toast_sub = if self.is_notif_surface {
-            let interval = if self.notifs.active_toasts.is_empty() { 1000 } else { 16 };
-            iced::time::every(std::time::Duration::from_millis(interval)).map(|_| Message::TickToasts)
+            let interval = if self.notifs.active_toasts.is_empty() {
+                1000
+            } else {
+                16
+            };
+            iced::time::every(std::time::Duration::from_millis(interval))
+                .map(|_| Message::TickToasts)
         } else {
             iced::Subscription::none()
         };

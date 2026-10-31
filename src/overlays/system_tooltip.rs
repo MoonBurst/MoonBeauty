@@ -266,11 +266,15 @@ impl App {
                         async move {
                             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                             match target.as_str() {
-                                "cpu" => Data::Cpu(async { SystemCollector::collect_all().await.0 }.await),
+                                "cpu" => Data::Cpu(
+                                    async { SystemCollector::collect_all().await.0 }.await,
+                                ),
                                 "gpu" => {
                                     Data::Gpu(SystemCollector::collect_gpu_by_info(&gpu_info).await)
                                 }
-                                _ => Data::Ram(async { SystemCollector::collect_all().await.1 }.await),
+                                _ => Data::Ram(
+                                    async { SystemCollector::collect_all().await.1 }.await,
+                                ),
                             }
                         },
                         Message::Loaded,
@@ -1151,8 +1155,7 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     // Dynamic alignment offset for the slanted corner + padding.
 
     // Finding 76: per-capsule bias added to global offsets.
-    let (bias_l, bias_r) =
-        crate::bar::tooltip_spawn::read_offset_extra();
+    let (bias_l, bias_r) = crate::bar::tooltip_spawn::read_offset_extra();
     let adjust_left = s.effective_tooltip_offset_left() + bias_l;
     let adjust_right = s.effective_tooltip_offset_right() + bias_r;
 

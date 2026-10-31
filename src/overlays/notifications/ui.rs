@@ -50,8 +50,10 @@ fn resolve_icon_name(name: &str) -> Option<String> {
     // Absolute path: only accept under a known icon root (finding 08).
     if name.starts_with('/') {
         let known = [
-            "/usr/share/icons/", "/usr/share/pixmaps/",
-            "/usr/local/share/icons/", "/usr/local/share/pixmaps/",
+            "/usr/share/icons/",
+            "/usr/share/pixmaps/",
+            "/usr/local/share/icons/",
+            "/usr/local/share/pixmaps/",
             "/run/current-system/sw/share/icons/",
             "/run/current-system/sw/share/pixmaps/",
             "/var/lib/flatpak/exports/share/icons/",
@@ -64,12 +66,15 @@ fn resolve_icon_name(name: &str) -> Option<String> {
                 let h = home.to_string_lossy();
                 ok = name.starts_with(&format!("{}/.local/share/icons/", h))
                     || name.starts_with(&format!("{}/.nix-profile/share/icons/", h))
-                    || name.starts_with(&format!(
-                        "{}/.local/share/flatpak/exports/share/icons/", h));
+                    || name
+                        .starts_with(&format!("{}/.local/share/flatpak/exports/share/icons/", h));
             }
         }
         if !ok {
-            crate::dbg_log!("[notif-icon] reject absolute icon path outside known roots: {:?}", name);
+            crate::dbg_log!(
+                "[notif-icon] reject absolute icon path outside known roots: {:?}",
+                name
+            );
             return None;
         }
         return if std::path::Path::new(name).exists() {
@@ -176,10 +181,7 @@ fn resolve_desktop_icon(entry: &str) -> Option<String> {
         return None;
     }
     // Reject traversal and absolute paths in desktop_entry hint (finding 08).
-    if clean.starts_with('/')
-        || clean.contains("..")
-        || clean.contains('/')
-        || clean.contains('\\')
+    if clean.starts_with('/') || clean.contains("..") || clean.contains('/') || clean.contains('\\')
     {
         crate::dbg_log!("[notif-icon] reject unsafe desktop_entry: {:?}", entry);
         return None;
@@ -543,7 +545,8 @@ impl NotificationOverlay {
             Ok(m) if m.len() > MAX_HISTORY_BYTES => {
                 eprintln!(
                     "[notif] history file {} bytes exceeds {} cap, resetting",
-                    m.len(), MAX_HISTORY_BYTES
+                    m.len(),
+                    MAX_HISTORY_BYTES
                 );
                 let _ = std::fs::remove_file(&path);
                 return Vec::new();
@@ -615,7 +618,6 @@ impl NotificationOverlay {
         Vec::new()
     }
 
-
     pub fn mark_history_dirty(&mut self) {
         self.history_dirty = true;
     }
@@ -660,8 +662,11 @@ impl NotificationOverlay {
         const MAX_ACTIONS: usize = 16;
         const MAX_ACTION_LEN: usize = 256;
         let cap = |s: &str, n: usize| -> String {
-            if s.chars().count() <= n { s.to_string() }
-            else { s.chars().take(n).collect() }
+            if s.chars().count() <= n {
+                s.to_string()
+            } else {
+                s.chars().take(n).collect()
+            }
         };
         let app_name: String = cap(app_name, MAX_APP_NAME);
         let summary: String = cap(summary, MAX_SUMMARY);
@@ -811,7 +816,7 @@ impl NotificationOverlay {
 
         let tts_pending = !is_test && matched_profile.map(|p| p.tts).unwrap_or(false);
         let mut tts_readout = matched_profile.and_then(|p| p.default_readout.clone());
-        
+
         // Apply custom content rules if they match the summary or body
         if let Some(p) = matched_profile {
             for rule in &p.content_rules {
@@ -916,16 +921,14 @@ impl NotificationOverlay {
         let a = app_name.to_string();
         let s = summary.to_string();
         let b = body.to_string();
-        let readout_template = _custom_readout
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| {
-                let lower = format!("{} {}", s, b).to_lowercase();
-                if lower.contains("logged in") || lower.contains("signed in") {
-                    "{sender} has logged in".to_string()
-                } else {
-                    "Message from {sender}".to_string()
-                }
-            });
+        let readout_template = _custom_readout.map(|s| s.to_string()).unwrap_or_else(|| {
+            let lower = format!("{} {}", s, b).to_lowercase();
+            if lower.contains("logged in") || lower.contains("signed in") {
+                "{sender} has logged in".to_string()
+            } else {
+                "Message from {sender}".to_string()
+            }
+        });
 
         std::thread::spawn(move || {
             // Smart sender extraction
@@ -951,15 +954,20 @@ impl NotificationOverlay {
 
                 if !is_generic {
                     sender = s.clone();
-                // Strip common login suffixes so "{sender} has logged in"
-                // doesn't become "Player has logged in has logged in".
-                let lower_sender = sender.to_lowercase();
-                for suffix in [" has logged in", " has signed in", " is now online", " logged in"] {
-                    if lower_sender.ends_with(suffix) {
-                        sender = sender[..sender.len() - suffix.len()].trim().to_string();
-                        break;
+                    // Strip common login suffixes so "{sender} has logged in"
+                    // doesn't become "Player has logged in has logged in".
+                    let lower_sender = sender.to_lowercase();
+                    for suffix in [
+                        " has logged in",
+                        " has signed in",
+                        " is now online",
+                        " logged in",
+                    ] {
+                        if lower_sender.ends_with(suffix) {
+                            sender = sender[..sender.len() - suffix.len()].trim().to_string();
+                            break;
+                        }
                     }
-                }
                 } else if !b.is_empty() && b.len() < 30 && !b.contains(':') {
                     let b_lower = b.to_lowercase();
                     if !b_lower.contains("voice") && !b_lower.contains("new message") {

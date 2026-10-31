@@ -38,6 +38,8 @@
           cliphist          # clipboard history
           libnotify         # notify-send
           imagemagick       # watermark / annotation compose
+          libjxl            # cjxl/djxl for JXL encode/decode
+          libjxl            # cjxl/djxl for JXL encode/decode
           tesseract         # OCR
           curl              # weather
           pipewire          # pw-play

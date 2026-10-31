@@ -27,28 +27,21 @@ pub mod view;
 // see the parent's private namespace). Plain `use` — not `pub use` —
 // because we don't need to re-export them outside `app`.
 use crate::{
-    detect_notif_surface,
-    detect_standalone_overlay,
-    focus_notification_app,
-    handle_annotator_text_input,
-    handle_email_keypress,
-    handle_lock_keypress,
-    is_app_focused,
-    notification_candidates,
-    resolve_exe,
+    detect_notif_surface, detect_standalone_overlay, focus_notification_app,
+    handle_annotator_text_input, handle_email_keypress, handle_lock_keypress, is_app_focused,
+    notification_candidates, resolve_exe,
 };
-
 
 use iced::widget::{container, Stack};
 use iced::{Element, Length, Padding, Task as Command};
-use moon_beauty_shell::overlays::screenshot::annotator::Tool;
-use moon_beauty_shell::bar::outputs::{get_screen_width_for, resolve_primary_output};
 use moon_beauty_shell::bar::geometry::{capsule_actual_width, capsule_center_x};
+use moon_beauty_shell::bar::outputs::{get_screen_width_for, resolve_primary_output};
 use moon_beauty_shell::bar::unified::UnifiedTelemetry;
 use moon_beauty_shell::bar::{CapsuleAction, TopBar, TopBarMessage};
 use moon_beauty_shell::libraries::backend::*;
 use moon_beauty_shell::libraries::config::{ShellSettings, ShellTheme};
 use moon_beauty_shell::libraries::ipc::{send_client_command, IpcCommand, OverlayTarget};
+use moon_beauty_shell::overlays::screenshot::annotator::Tool;
 use moon_beauty_shell::overlays::*;
 
 #[derive(Debug, Clone)]
@@ -217,6 +210,7 @@ pub struct MoonBeautyShellApp {
     /// most recently started (for pause priority when multiple are
     /// playing). See backend/music_cycle.rs.
     pub music_cycle_state: moon_beauty_shell::libraries::backend::MusicCycleState,
+    pub is_cycling: bool,
 
     pub last_cursor_x: f32,
     pub last_cursor_time: std::time::Instant,

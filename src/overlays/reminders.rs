@@ -79,7 +79,14 @@ impl RemindersOverlay {
     }
 
     pub fn empty() -> Self {
-        Self { task_text: String::new(), when_text: String::new(), entries: Vec::new(), scroll_y: 0.0, active_field: 0, selected_idx: None }
+        Self {
+            task_text: String::new(),
+            when_text: String::new(),
+            entries: Vec::new(),
+            scroll_y: 0.0,
+            active_field: 0,
+            selected_idx: None,
+        }
     }
 
     pub fn storage_path() -> PathBuf {

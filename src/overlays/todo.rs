@@ -101,7 +101,10 @@ impl TodoOverlay {
 
     pub fn empty() -> Self {
         Self {
-            db: TodoDb { categories: vec!["Inbox".into()], todos: Vec::new() },
+            db: TodoDb {
+                categories: vec!["Inbox".into()],
+                todos: Vec::new(),
+            },
             active_category: "Inbox".into(),
             filter: TodoFilter::All,
             new_task_text: String::new(),

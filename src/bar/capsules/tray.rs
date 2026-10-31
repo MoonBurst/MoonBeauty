@@ -2,10 +2,10 @@ use iced::widget::{button, container, text, tooltip, MouseArea, Row, Stack};
 use iced::{Alignment, Color, Element, Length};
 use std::sync::{Mutex, OnceLock};
 
+use super::{label, CapsuleAction};
 use crate::libraries::config::settings::ShellSettings;
 use crate::libraries::config::theme::ShellTheme;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
-use super::{label, CapsuleAction};
 
 pub(super) fn render<'a, Message: 'a>(
     theme: &ShellTheme,
@@ -129,7 +129,10 @@ pub(super) fn render_expanded<'a, Message: 'static + Clone>(
                     .height(Length::Fixed(icon_size))
                     .into()
             } else {
-                let initial = item.title.chars().next()
+                let initial = item
+                    .title
+                    .chars()
+                    .next()
                     .or_else(|| item.id.chars().next())
                     .or_else(|| item.tooltip.chars().next())
                     .unwrap_or('?')
@@ -138,7 +141,10 @@ pub(super) fn render_expanded<'a, Message: 'static + Clone>(
                 text(initial).size(icon_size * 0.7).color(theme.text).into()
             }
         } else {
-            let initial = item.title.chars().next()
+            let initial = item
+                .title
+                .chars()
+                .next()
                 .or_else(|| item.id.chars().next())
                 .or_else(|| item.tooltip.chars().next())
                 .unwrap_or('?')
@@ -213,7 +219,10 @@ pub(super) fn render_expanded<'a, Message: 'static + Clone>(
         );
     }
 
-    let shape_type = ShapeType::Slant { left: slant_left, right: slant_right };
+    let shape_type = ShapeType::Slant {
+        left: slant_left,
+        right: slant_right,
+    };
 
     let background_shape = ShapeBox::new()
         .shape(shape_type)

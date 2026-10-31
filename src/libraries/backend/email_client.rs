@@ -1,14 +1,14 @@
+use async_imap::types::Fetch as AsyncFetch;
+use futures_util::TryStreamExt;
 use lettre::message::Mailbox;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
-use async_imap::types::Fetch as AsyncFetch;
-use futures_util::TryStreamExt;
 use mail_parser::MimeHeaders;
-use tokio::net::TcpStream;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
+use tokio::net::TcpStream;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailConfig {
@@ -586,7 +586,8 @@ pub fn load_index(folder: &str) -> Vec<NativeEnvelope> {
             if envs.len() < before {
                 eprintln!(
                     "[email] dropped {} unsafe envelope id(s) from {}",
-                    before - envs.len(), folder
+                    before - envs.len(),
+                    folder
                 );
             }
             return envs;
@@ -662,12 +663,15 @@ pub async fn test_connection() -> Result<(bool, bool, String), String> {
 
     // SMTP: build only (no send — we don't want to spam)
     r.push_str("\nsmtp:\n");
-    let smtp_ok = match lettre::AsyncSmtpTransport::<lettre::Tokio1Executor>::relay(&cfg.smtp_host) {
+    let smtp_ok = match lettre::AsyncSmtpTransport::<lettre::Tokio1Executor>::relay(&cfg.smtp_host)
+    {
         Ok(builder) => {
             let _mailer: lettre::AsyncSmtpTransport<lettre::Tokio1Executor> = builder
                 .port(cfg.smtp_port)
                 .credentials(lettre::transport::smtp::authentication::Credentials::new(
-                    cfg.email.clone(), pass))
+                    cfg.email.clone(),
+                    pass,
+                ))
                 .build();
             r.push_str("  ✅ builder configured (not sent)\n");
             true
@@ -699,7 +703,10 @@ pub async fn fetch_from_network(folder: &str) -> Result<Vec<NativeEnvelope>, Str
         .await
         .map_err(|e| e.to_string())?;
     let fetches: Vec<AsyncFetch> = session
-        .uid_fetch("1:*", "(FLAGS BODY.PEEK[HEADER.FIELDS (SUBJECT FROM DATE)])")
+        .uid_fetch(
+            "1:*",
+            "(FLAGS BODY.PEEK[HEADER.FIELDS (SUBJECT FROM DATE)])",
+        )
         .await
         .map_err(|e| e.to_string())?
         .try_collect()
@@ -789,8 +796,7 @@ async fn fetch_raw_message(id: &str, folder: &str) -> Result<Vec<u8>, String> {
 }
 
 pub async fn sync_bodies_background(folder: String) {
-    let lock_path = crate::libraries::process::mbs_runtime_dir()
-        .join("mbs_email_sync.lock");
+    let lock_path = crate::libraries::process::mbs_runtime_dir().join("mbs_email_sync.lock");
     let _lock_file = match std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -826,13 +832,14 @@ pub async fn sync_bodies_background(folder: String) {
     }
     let cfg = load_config();
     let pass = resolve_password(&cfg);
-    let mut session = match connect_and_login(&cfg.imap_host, cfg.imap_port, &cfg.email, &pass).await {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[sync] connect failed: {e}");
-            return;
-        }
-    };
+    let mut session =
+        match connect_and_login(&cfg.imap_host, cfg.imap_port, &cfg.email, &pass).await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[sync] connect failed: {e}");
+                return;
+            }
+        };
     let imap_folder = map_gmail_folder(&folder);
     if let Err(e) = session.select(&imap_folder).await {
         eprintln!("[sync] select {} failed: {e}", imap_folder);
@@ -856,7 +863,8 @@ pub async fn sync_bodies_background(folder: String) {
                                 if body.len() > MAX_BODY {
                                     eprintln!(
                                         "[sync] skipping oversize body {} ({} bytes)",
-                                        env.id, body.len()
+                                        env.id,
+                                        body.len()
                                     );
                                     continue;
                                 }
@@ -959,8 +967,7 @@ pub async fn read_message(id: &str, folder: &str) -> ParsedEmail {
                     let stripped = if line.starts_with('<')
                         && line.ends_with('>')
                         && line.len() > 4
-                        && (line[1..].starts_with("http://")
-                            || line[1..].starts_with("https://"))
+                        && (line[1..].starts_with("http://") || line[1..].starts_with("https://"))
                     {
                         &line[1..line.len() - 1]
                     } else {
@@ -1000,7 +1007,8 @@ pub async fn read_message(id: &str, folder: &str) -> ParsedEmail {
             if data.len() > MAX_ATTACH {
                 eprintln!(
                     "[email] skipping oversize attachment: {} ({} bytes)",
-                    name, data.len()
+                    name,
+                    data.len()
                 );
                 continue;
             }
@@ -1033,7 +1041,8 @@ pub async fn read_message(id: &str, folder: &str) -> ParsedEmail {
                 if part.contents().len() > MAX_IMG {
                     eprintln!(
                         "[email] skipping oversize inline image: {} ({} bytes)",
-                        safe_name, part.contents().len()
+                        safe_name,
+                        part.contents().len()
                     );
                     continue;
                 }
@@ -1190,7 +1199,11 @@ pub async fn toggle_star(id: &str, folder: &str, star: bool) -> Result<(), Strin
         .select(map_gmail_folder(folder))
         .await
         .map_err(|e| e.to_string())?;
-    let op = if star { "+FLAGS (\\Flagged)" } else { "-FLAGS (\\Flagged)" };
+    let op = if star {
+        "+FLAGS (\\Flagged)"
+    } else {
+        "-FLAGS (\\Flagged)"
+    };
     let _: Vec<_> = session
         .uid_store(id, op)
         .await
@@ -1248,7 +1261,10 @@ pub async fn move_to_spam(id: &str, folder: &str) -> Result<(), String> {
     let mut session = connect_and_login(&cfg.imap_host, cfg.imap_port, &cfg.email, &pass).await?;
     let orig_folder = map_gmail_folder(folder);
     let spam_folder = map_gmail_folder("Spam");
-    session.select(&orig_folder).await.map_err(|e| e.to_string())?;
+    session
+        .select(&orig_folder)
+        .await
+        .map_err(|e| e.to_string())?;
     session
         .uid_copy(id, &spam_folder)
         .await
@@ -1343,7 +1359,10 @@ pub async fn fetch_folder_list() -> Result<Vec<String>, String> {
     let cfg = load_config();
     let pass = resolve_password(&cfg);
     let mut session = connect_and_login(&cfg.imap_host, cfg.imap_port, &cfg.email, &pass).await?;
-    let stream = session.list(Some(""), Some("*")).await.map_err(|e| e.to_string())?;
+    let stream = session
+        .list(Some(""), Some("*"))
+        .await
+        .map_err(|e| e.to_string())?;
     let names: Vec<_> = stream.try_collect().await.map_err(|e| e.to_string())?;
     let mut folders = Vec::new();
     for name in names {
@@ -1411,8 +1430,8 @@ pub fn load_contacts() -> Vec<String> {
                     if let Some(parent) = path.parent() {
                         let _ = std::fs::create_dir_all(parent);
                     }
-                    let _ = crate::libraries::process::private_write_file(
-                        &path, content.as_bytes());
+                    let _ =
+                        crate::libraries::process::private_write_file(&path, content.as_bytes());
                 }
             }
         }
@@ -1609,7 +1628,9 @@ mod cache_dir_tests {
             assert!(
                 p.starts_with(root),
                 "get_cache_dir_with_root({:?}) = {:?} escaped {:?}",
-                f, p, root
+                f,
+                p,
+                root
             );
         }
     }
@@ -1625,9 +1646,6 @@ mod cache_dir_tests {
             get_cache_dir_with_root(root, "Starred"),
             root.join("[Gmail]/Starred")
         );
-        assert_eq!(
-            get_cache_dir_with_root(root, "INBOX"),
-            root.join("INBOX")
-        );
+        assert_eq!(get_cache_dir_with_root(root, "INBOX"), root.join("INBOX"));
     }
 }

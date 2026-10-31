@@ -209,8 +209,13 @@ impl MoonBeautyShellApp {
                             // Finding 48: reap to prevent zombie accumulation.
                             let _ = moon_beauty_shell::libraries::process::spawn_and_reap(
                                 std::process::Command::new("notify-send").args([
-                                    "-a", "Alarm", "-u", "critical",
-                                    "--", "⏰ Timer Complete!", &text,
+                                    "-a",
+                                    "Alarm",
+                                    "-u",
+                                    "critical",
+                                    "--",
+                                    "⏰ Timer Complete!",
+                                    &text,
                                 ]),
                             );
 
@@ -318,8 +323,13 @@ impl MoonBeautyShellApp {
 
                         // Visual notification
                         let _ = moon_beauty_shell::libraries::process::spawn_and_reap(
-                            std::process::Command::new("notify-send")
-                                .args(["-a", "Email", "--", &env.sender, &env.subject]),
+                            std::process::Command::new("notify-send").args([
+                                "-a",
+                                "Email",
+                                "--",
+                                &env.sender,
+                                &env.subject,
+                            ]),
                         );
 
                         // Spoken announcement
@@ -512,13 +522,23 @@ impl MoonBeautyShellApp {
                         ),
                     ] {
                         let _ = moon_beauty_shell::libraries::process::spawn_and_reap(
-                            std::process::Command::new("notify-send")
-                                .args(["-a", "Diagnostics", "--", title, body]),
+                            std::process::Command::new("notify-send").args([
+                                "-a",
+                                "Diagnostics",
+                                "--",
+                                title,
+                                body,
+                            ]),
                         );
                     }
                 }
                 IpcCommand::IncomingNotif { .. } => {}
                 IpcCommand::MusicCycle => {
+                    if self.is_cycling {
+                        eprintln!("[music-cycle] ignored spam (already cycling)");
+                        return Command::none();
+                    }
+                    self.is_cycling = true;
                     let mut state = self.music_cycle_state.clone();
                     return Command::perform(
                         async move {
@@ -636,7 +656,7 @@ impl MoonBeautyShellApp {
                                 }
                                 self.weather_tooltip_child = None;
 
-                                                                let target_output = if self.settings.notif_screen_name != "Auto"
+                                let target_output = if self.settings.notif_screen_name != "Auto"
                                     && self.settings.notif_screen_name != "Auto (Primary)"
                                     && !self.settings.notif_screen_name.is_empty()
                                 {
@@ -657,10 +677,7 @@ impl MoonBeautyShellApp {
                                 // works because the clamp catches the (cx - half_cap) overshoot.
                                 let cx = if id == "clock" {
                                     capsule_center_x(&self.settings, sw, &id)
-                                } else if recent_click
-                                    && self.last_cursor_x > 0.0
-                                    && in_left
-                                {
+                                } else if recent_click && self.last_cursor_x > 0.0 && in_left {
                                     self.last_cursor_x as i32
                                 } else {
                                     capsule_center_x(&self.settings, sw, &id)
@@ -720,7 +737,8 @@ impl MoonBeautyShellApp {
                                 // Finding 76: per-capsule tooltip bias.
                                 let (bias_l, bias_r) =
                                     moon_beauty_shell::bar::capsules::tooltip_bias(
-                                        &id, &self.theme,
+                                        &id,
+                                        &self.theme,
                                     );
                                 let req = moon_beauty_shell::bar::tooltip_spawn::SpawnRequest {
                                     id: &id,
@@ -784,7 +802,9 @@ impl MoonBeautyShellApp {
                                     let (_, src) = poll_track().await;
                                     match src {
                                         TrackSource::Mpd => MpdBackend::toggle_play_pause().await,
-                                        TrackSource::Mpris => MprisBackend::toggle_play_pause().await,
+                                        TrackSource::Mpris => {
+                                            MprisBackend::toggle_play_pause().await
+                                        }
                                         TrackSource::None => {}
                                     }
                                 },
@@ -929,10 +949,11 @@ impl MoonBeautyShellApp {
                                         .await
                                     {
                                         let json = serde_json::to_string(&items).unwrap();
-                                        let tmp_path = moon_beauty_shell::libraries::process::mbs_unique_tmp(
-                                            "mbs-tray-menu",
-                                            "json",
-                                        );
+                                        let tmp_path =
+                                            moon_beauty_shell::libraries::process::mbs_unique_tmp(
+                                                "mbs-tray-menu",
+                                                "json",
+                                            );
                                         if let Err(e) =
                                             moon_beauty_shell::libraries::process::private_write_new(
                                                 &tmp_path,
@@ -1301,14 +1322,29 @@ impl MoonBeautyShellApp {
                     }
                     return Command::none();
                 }
-                                ClipboardMessage::RevealImage(id) => {
-                    let dir = dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("moon-beauty-shell").join("clipboard");
+                ClipboardMessage::RevealImage(id) => {
+                    let dir = dirs::data_dir()
+                        .unwrap_or_else(std::env::temp_dir)
+                        .join("moon-beauty-shell")
+                        .join("clipboard");
                     if let Some(path) = ClipboardOverlay::get_file_path(&dir, id) {
                         if let Ok(bytes) = std::fs::read(&path) {
-                            if let Ok(revealed) = moon_beauty_shell::overlays::plate_watermark::reveal(&bytes) {
-                                let out_path = dir.join(format!("revealed_{}.png", id));
-                                let _ = std::fs::write(&out_path, revealed);
-                                let _ = std::process::Command::new("xdg-open").arg(&out_path).spawn();
+                            if let Ok(revealed) =
+                                moon_beauty_shell::overlays::plate_watermark::reveal(&bytes)
+                            {
+                                let out_path = dir.join(format!("revealed_{}.jxl", id));
+                                let tmp = dir.join(format!(".revealed-{}.tmp.png", id));
+                                let ok = std::fs::write(&tmp, &revealed).is_ok()
+                                    && moon_beauty_shell::overlays::screenshot::annotator::png_to_jxl(
+                                        &tmp, &out_path,
+                                    )
+                                    .is_ok();
+                                let _ = std::fs::remove_file(&tmp);
+                                if ok {
+                                    let _ = std::process::Command::new("xdg-open")
+                                        .arg(&out_path)
+                                        .spawn();
+                                }
                             }
                         }
                     }
@@ -1375,25 +1411,27 @@ impl MoonBeautyShellApp {
                     return Command::none();
                 }
                 ClipboardMessage::CopySelected => {
+                    // Delegate to ClipboardOverlay::copy — it knows about
+                    // JXL (.preview.png) and picks the right MIME. The
+                    // previous cliphist-based path silently no-op'd on
+                    // JXL entries and served the wrong MIME for other
+                    // images.
                     if let Some(id) = self.clipboard.selected_id {
-                        if let Ok(out) = std::process::Command::new("cliphist")
-                            .args(["decode", &id.to_string()])
-                            .output()
-                        {
-                            if let Ok(mut child) = std::process::Command::new("wl-copy")
-                                .stdin(std::process::Stdio::piped())
-                                .spawn()
-                            {
-                                use std::io::Write;
-                                if let Some(mut stdin) = child.stdin.take() {
-                                    let _ = stdin.write_all(&out.stdout);
-                                }
-                            }
-                        }
                         if self.is_standalone {
+                            let rt = tokio::runtime::Runtime::new()
+                                .expect("tokio runtime for clipboard copy");
+                            rt.block_on(async move {
+                                ClipboardOverlay::copy(id).await;
+                            });
                             std::process::exit(0);
                         }
                         self.active_overlay = None;
+                        return Command::perform(
+                            async move {
+                                ClipboardOverlay::copy(id).await;
+                            },
+                            |_| Message::DismissActiveOverlay,
+                        );
                     }
                 }
                 ClipboardMessage::SelectEntry(id) => {
@@ -1759,13 +1797,34 @@ impl MoonBeautyShellApp {
                                 let _ = std::fs::create_dir_all(&save_dir);
                                 let time_str =
                                     chrono::Local::now().format("%Y-%m-%d %H-%M").to_string();
-                                let out = save_dir.join(format!("Revealed {}.png", time_str));
+                                let out = save_dir.join(format!("Revealed {}.jxl", time_str));
 
-                                match std::fs::write(&out, &bytes) {
-                                    Ok(_) => {
+                                // reveal() emits PNG bytes; encode to JXL for disk.
+                                let tmp_reveal = save_dir.join(format!(
+                                    ".mbs-reveal-{}.png",
+                                    std::process::id()
+                                ));
+                                let write_ok = std::fs::write(&tmp_reveal, &bytes).is_ok();
+                                let convert_ok = write_ok
+                                    && moon_beauty_shell::overlays::screenshot::annotator::png_to_jxl(
+                                        &tmp_reveal, &out,
+                                    )
+                                    .is_ok();
+                                let _ = std::fs::remove_file(&tmp_reveal);
+                                let jxl_bytes_opt = if convert_ok {
+                                    std::fs::read(&out).ok()
+                                } else {
+                                    None
+                                };
+
+                                match jxl_bytes_opt {
+                                    Some(jxl_bytes) => {
                                         eprintln!("[annotator] saved revealed proof -> {:?}", out);
 
-                                        // Copy the revealed image to clipboard and map its name
+                                        // Copy the revealed JXL bytes and map its name
+                                        // Same reasoning as save_annotated_image:
+                                        // pipe the reveal PNG (`bytes`), not the JXL.
+                                        // PNG is what client apps request on Ctrl+V.
                                         if let Ok(mut child) = std::process::Command::new("wl-copy")
                                             .args(["-t", "image/png"])
                                             .stdin(std::process::Stdio::piped())
@@ -1854,8 +1913,9 @@ impl MoonBeautyShellApp {
                                         }
                                         self.active_overlay = None;
                                     }
-                                    Err(e) => {
-                                        self.annotator.status = format!("Reveal save failed: {e}")
+                                    None => {
+                                        self.annotator.status =
+                                            "Reveal save failed: JXL encode".to_string()
                                     }
                                 }
                             } else {
@@ -1957,7 +2017,9 @@ impl MoonBeautyShellApp {
                                 moon_beauty_shell::libraries::backend::email_client::fetch_envelopes(&f_fetch).await
                             },
                             move |res| match res {
-                                Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(f_resp, envs)),
+                                Ok(envs) => {
+                                    Message::Email(EmailMessage::EnvelopesLoaded(f_resp, envs))
+                                }
                                 Err(e) => Message::Email(EmailMessage::Error(e)),
                             },
                         ),
@@ -1967,10 +2029,11 @@ impl MoonBeautyShellApp {
                     let folder = self.email.active_folder.clone();
                     // If we're in a local folder, the email actually lives
                     // in the Gmail folder it was assigned from (usually INBOX).
-                    let source = moon_beauty_shell::libraries::backend::local_sort::source_folder_for(
-                        &id, &folder,
-                    )
-                    .unwrap_or_else(|| folder.clone());
+                    let source =
+                        moon_beauty_shell::libraries::backend::local_sort::source_folder_for(
+                            &id, &folder,
+                        )
+                        .unwrap_or_else(|| folder.clone());
                     self.email.update(EmailMessage::SelectMail(id.clone()));
                     return Command::perform(
                         async move {
@@ -2039,7 +2102,8 @@ impl MoonBeautyShellApp {
                 }
                 EmailMessage::EnvelopesLoaded(folder, envs) => {
                     if folder == self.email.active_folder {
-                        self.email.update(EmailMessage::EnvelopesLoaded(folder.clone(), envs));
+                        self.email
+                            .update(EmailMessage::EnvelopesLoaded(folder.clone(), envs));
                     }
                     let folder_for_fetch = folder.clone();
                     let folder_for_resp = folder;
@@ -2051,7 +2115,10 @@ impl MoonBeautyShellApp {
                             .await
                         },
                         move |res| match res {
-                            Ok(envs) => Message::Email(EmailMessage::NetworkEnvelopesLoaded(folder_for_resp, envs)),
+                            Ok(envs) => Message::Email(EmailMessage::NetworkEnvelopesLoaded(
+                                folder_for_resp,
+                                envs,
+                            )),
                             Err(_) => Message::Email(EmailMessage::SyncDone),
                         },
                     );
@@ -2067,13 +2134,12 @@ impl MoonBeautyShellApp {
                     if std::env::var_os("MBS_DEBUG").is_some() {
                         eprintln!(
                             "[sync] NetworkEnvelopesLoaded folder={:?} count={} active={:?}",
-                            folder, envs.len(), self.email.active_folder
+                            folder,
+                            envs.len(),
+                            self.email.active_folder
                         );
                     }
-                    moon_beauty_shell::libraries::backend::email_client::save_index(
-                        &folder,
-                        &envs,
-                    );
+                    moon_beauty_shell::libraries::backend::email_client::save_index(&folder, &envs);
                     if folder == self.email.active_folder {
                         self.email
                             .update(EmailMessage::EnvelopesLoaded(folder.clone(), envs.clone()));
@@ -2114,9 +2180,9 @@ impl MoonBeautyShellApp {
                                         moon_beauty_shell::libraries::backend::email_client::fetch_envelopes(&f_fetch).await
                                     },
                                     move |res| match res {
-                                        Ok(envs) => {
-                                            Message::Email(EmailMessage::EnvelopesLoaded(f_resp, envs))
-                                        }
+                                        Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(
+                                            f_resp, envs,
+                                        )),
                                         Err(e) => Message::Email(EmailMessage::Error(e)),
                                     },
                                 ),
@@ -2215,7 +2281,11 @@ impl MoonBeautyShellApp {
                 }
                 EmailMessage::CopyGmailFilter => {
                     let folder = self.email.active_folder.clone();
-                    if let Some(filter_text) = moon_beauty_shell::libraries::backend::local_sort::gmail_filter_text_for(&folder) {
+                    if let Some(filter_text) =
+                        moon_beauty_shell::libraries::backend::local_sort::gmail_filter_text_for(
+                            &folder,
+                        )
+                    {
                         return Command::perform(
                             async move {
                                 if let Ok(mut child) = tokio::process::Command::new("wl-copy")
@@ -2230,9 +2300,10 @@ impl MoonBeautyShellApp {
                                 }
                                 let _ = tokio::process::Command::new("notify-send")
                                     .args([
-                                        "-a", "Email",
+                                        "-a",
+                                        "Email",
                                         "Gmail Filter Copied",
-                                        "Paste into Gmail Settings → Filters → Create new filter"
+                                        "Paste into Gmail Settings → Filters → Create new filter",
                                     ])
                                     .spawn();
                             },
@@ -2242,9 +2313,10 @@ impl MoonBeautyShellApp {
                         // Not a local folder — inform the user
                         let _ = std::process::Command::new("notify-send")
                             .args([
-                                "-a", "Email",
+                                "-a",
+                                "Email",
                                 "No filter available",
-                                "Select a locally-sorted folder (like Steam (local)) first"
+                                "Select a locally-sorted folder (like Steam (local)) first",
                             ])
                             .spawn();
                     }
@@ -2396,9 +2468,10 @@ impl MoonBeautyShellApp {
                                         moon_beauty_shell::libraries::backend::email_client::fetch_envelopes("INBOX").await
                                     },
                                     |res| match res {
-                                        Ok(envs) => {
-                                            Message::Email(EmailMessage::EnvelopesLoaded("INBOX".to_string(), envs))
-                                        }
+                                        Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(
+                                            "INBOX".to_string(),
+                                            envs,
+                                        )),
                                         Err(e) => Message::Email(EmailMessage::Error(e)),
                                     },
                                 ),
@@ -2473,10 +2546,15 @@ impl MoonBeautyShellApp {
                                 let ok = focus_notification_app(&app, entry.as_deref());
                                 moon_beauty_shell::dbg_log!(
                                     "[activate-toast] fallback app={:?} entry={:?} ok={}",
-                                    app, entry, ok
+                                    app,
+                                    entry,
+                                    ok
                                 );
                             } else {
-                                moon_beauty_shell::dbg_log!("[activate-toast] client self-focused app={:?}", app);
+                                moon_beauty_shell::dbg_log!(
+                                    "[activate-toast] client self-focused app={:?}",
+                                    app
+                                );
                             }
                         });
                     }
@@ -2793,6 +2871,7 @@ impl MoonBeautyShellApp {
                 }
             }
             Message::MusicCycleDone(new_state) => {
+                self.is_cycling = false;
                 self.music_cycle_state = new_state;
                 return Command::done(Message::TickHardware);
             }

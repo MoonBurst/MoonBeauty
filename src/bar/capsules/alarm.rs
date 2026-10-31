@@ -1,6 +1,6 @@
-use iced::{Color, Element};
-use crate::libraries::config::theme::ShellTheme;
 use super::{label, CapsuleAction};
+use crate::libraries::config::theme::ShellTheme;
+use iced::{Color, Element};
 
 pub(super) fn render<'a, Message: 'a>(
     theme: &ShellTheme,
@@ -22,5 +22,9 @@ pub(super) fn render<'a, Message: 'a>(
         ("No Alarm".to_string(), theme.text)
     };
     let elem = label::<Message>(&[(txt, col)], theme.font_size_normal);
-    (elem, CapsuleAction::OpenOverlay("alarm".into()), theme.border)
+    (
+        elem,
+        CapsuleAction::OpenOverlay("alarm".into()),
+        theme.border,
+    )
 }

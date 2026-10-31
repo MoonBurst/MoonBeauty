@@ -1,6 +1,6 @@
-use iced::{Color, Element};
-use crate::libraries::config::theme::{hex_to_color, ShellTheme};
 use super::{label, CapsuleAction};
+use crate::libraries::config::theme::{hex_to_color, ShellTheme};
+use iced::{Color, Element};
 
 pub(super) fn render<'a, Message: 'a>(
     theme: &ShellTheme,

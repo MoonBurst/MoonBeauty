@@ -68,13 +68,19 @@ impl DictionaryOverlay {
     }
 
     pub fn empty() -> Self {
-        Self { word_query: String::new(), active_definitions: Vec::new(), cache: HashMap::new() }
+        Self {
+            word_query: String::new(),
+            active_definitions: Vec::new(),
+            cache: HashMap::new(),
+        }
     }
 
     fn cache_path() -> PathBuf {
         // Finding 24: mirror finding 23 for user search history.
         dirs::cache_dir()
-            .expect("XDG_CACHE_HOME or HOME must be set; refusing to persist dictionary cache to /tmp")
+            .expect(
+                "XDG_CACHE_HOME or HOME must be set; refusing to persist dictionary cache to /tmp",
+            )
             .join("moon_dict_cache.json")
     }
 

@@ -438,7 +438,10 @@ pub struct ShellSettings {
 
     /// Emails from a single sender that trigger automatic folder creation.
     /// 0 disables auto-sort entirely.
-    #[serde(default = "default_email_auto_sort_threshold", alias = "emailAutoSortThreshold")]
+    #[serde(
+        default = "default_email_auto_sort_threshold",
+        alias = "emailAutoSortThreshold"
+    )]
     pub email_auto_sort_threshold: usize,
 }
 
@@ -741,10 +744,12 @@ impl ShellSettings {
     }
 
     pub fn effective_tooltip_offset_left(&self) -> i32 {
-        self.tooltip_offset_left.unwrap_or_else(|| self.slant_width as i32 + 20)
+        self.tooltip_offset_left
+            .unwrap_or_else(|| self.slant_width as i32 + 20)
     }
     pub fn effective_tooltip_offset_right(&self) -> i32 {
-        self.tooltip_offset_right.unwrap_or_else(|| self.slant_width as i32 + 20)
+        self.tooltip_offset_right
+            .unwrap_or_else(|| self.slant_width as i32 + 20)
     }
 
     pub fn get_window_size(&self, id: &str, _def_w: u32, _def_h: u32) -> (f32, f32) {
@@ -770,35 +775,38 @@ impl ShellSettings {
             );
         }
         // Finding 47: 2 MB cap on settings.json.
-        if let Some(mut settings) = crate::libraries::process::read_json_capped::<ShellSettings>(
-            &path,
-            2 * 1024 * 1024,
-        ) {
+        if let Some(mut settings) =
+            crate::libraries::process::read_json_capped::<ShellSettings>(&path, 2 * 1024 * 1024)
+        {
             {
-                    let mut disk_profiles = load_friend_profiles();
-                    if !disk_profiles.is_empty() {
-                        // Migrate broken templates that inject "a new" or {summary}
-                        for p in &mut disk_profiles {
-                            if let Some(ref mut readout) = p.default_readout {
-                                if readout.contains("a new")
-                                    || readout.contains("voice message")
-                                    || readout.contains("{summary}")
-                                {
-                                    *readout = "Message from {name}".to_string();
-                                }
-                            }
-                            // Inject the default "logged in" rule if it's missing
-                            if !p.content_rules.iter().any(|r| r.pattern.to_lowercase().contains("logged in")) {
-                                p.content_rules.push(ContentRule {
-                                    pattern: "logged in".into(),
-                                    readout: "{name} has logged in".into(),
-                                    sound_path: None,
-                                });
+                let mut disk_profiles = load_friend_profiles();
+                if !disk_profiles.is_empty() {
+                    // Migrate broken templates that inject "a new" or {summary}
+                    for p in &mut disk_profiles {
+                        if let Some(ref mut readout) = p.default_readout {
+                            if readout.contains("a new")
+                                || readout.contains("voice message")
+                                || readout.contains("{summary}")
+                            {
+                                *readout = "Message from {name}".to_string();
                             }
                         }
-                        settings.friend_profiles = disk_profiles;
+                        // Inject the default "logged in" rule if it's missing
+                        if !p
+                            .content_rules
+                            .iter()
+                            .any(|r| r.pattern.to_lowercase().contains("logged in"))
+                        {
+                            p.content_rules.push(ContentRule {
+                                pattern: "logged in".into(),
+                                readout: "{name} has logged in".into(),
+                                sound_path: None,
+                            });
+                        }
                     }
-                    return settings;
+                    settings.friend_profiles = disk_profiles;
+                }
+                return settings;
             }
         }
         let mut def = Self::default();

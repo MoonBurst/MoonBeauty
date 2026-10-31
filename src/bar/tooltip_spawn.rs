@@ -160,7 +160,7 @@ pub fn compute_height(id: &str, settings: &ShellSettings, telemetry: &UnifiedTel
         "gpu" => telemetry.gpu.top_procs.len().min(10) as u32 * 24 + 100,
         "ram" => telemetry.ram.top_procs.len().min(10) as u32 * 24 + 100,
         "net" => 450,
-        "music" => 400,
+        "music" => 520,
         "unified" => 400,
         "custom" => 300,
         "clock" => 320,
