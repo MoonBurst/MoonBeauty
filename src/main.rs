@@ -28,11 +28,6 @@ pub(crate) fn detect_standalone_overlay(args: &[String]) -> Option<OverlayTarget
                 return OverlayTarget::from_str(target_str);
             }
         }
-        if let Some(flag) = arg.strip_prefix("--") {
-            if let Some(target) = OverlayTarget::from_str(flag) {
-                return Some(target);
-            }
-        }
     }
     None
 }
@@ -491,6 +486,24 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             None => {
                 eprintln!("[toggle] unknown target: {}", target_str);
                 std::process::exit(2);
+            }
+        }
+    }
+
+    // Bare `--<overlay>` (e.g. `moonbeauty --history`) = implicit IPC
+    // toggle, equivalent to `--toggle <overlay>`.  Explicit standalone
+    // spawn is `--overlay <target>` — used internally by the bar to
+    // spawn overlay children; not meant for user invocation.
+    if let Some(arg) = args.get(1) {
+        if let Some(name) = arg.strip_prefix("--") {
+            if let Some(target) = OverlayTarget::from_str(name) {
+                match send_ipc_sync(&IpcCommand::Toggle(target)) {
+                    Ok(_) => std::process::exit(0),
+                    Err(e) => {
+                        eprintln!("[toggle] IPC failed: {e}");
+                        std::process::exit(1);
+                    }
+                }
             }
         }
     }

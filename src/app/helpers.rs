@@ -63,7 +63,8 @@ impl MoonBeautyShellApp {
         let stdout_file = stderr_file.as_ref().and_then(|f| f.try_clone().ok());
 
         let mut cmd = std::process::Command::new(exe);
-        cmd.arg(format!("--{}", tag));
+        cmd.arg("--overlay");
+        cmd.arg(tag);
         if let Some(sf) = stderr_file {
             cmd.stderr(sf);
         }
