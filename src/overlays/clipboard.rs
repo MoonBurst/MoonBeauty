@@ -176,7 +176,7 @@ impl ClipboardOverlay {
             format!("{:x}", sha2::Sha256::digest(&bytes))
         };
         let dir = dirs::data_dir().unwrap_or_else(std::env::temp_dir)
-            .join("moon-beauty-shell").join("clipboard");
+            .join("moonbeauty").join("clipboard");
         std::fs::create_dir_all(&dir).ok()?;
         let index_path = dir.join("index.json");
         let mut items: Vec<ClipItem> = std::fs::read_to_string(&index_path).ok()
@@ -215,7 +215,7 @@ impl ClipboardOverlay {
     /// exists, else the cache copy.
     pub fn resolve_path(id: u64) -> Option<std::path::PathBuf> {
         let dir = dirs::data_dir().unwrap_or_else(std::env::temp_dir)
-            .join("moon-beauty-shell").join("clipboard");
+            .join("moonbeauty").join("clipboard");
         let index = std::fs::read_to_string(dir.join("index.json")).ok()?;
         let items: Vec<ClipItem> = serde_json::from_str(&index).ok()?;
         let item = items.into_iter().find(|i| i.id == id)?;
@@ -246,7 +246,7 @@ impl ClipboardOverlay {
     pub async fn reload() -> Vec<ClipItem> {
         let dir = dirs::data_dir()
             .unwrap_or_else(std::env::temp_dir)
-            .join("moon-beauty-shell")
+            .join("moonbeauty")
             .join("clipboard");
         let index_path = dir.join("index.json");
 
@@ -284,7 +284,7 @@ impl ClipboardOverlay {
     pub async fn load_preview(id: u64) -> (String, Option<String>) {
         let dir = dirs::data_dir()
             .unwrap_or_else(std::env::temp_dir)
-            .join("moon-beauty-shell")
+            .join("moonbeauty")
             .join("clipboard");
         if let Some(path) = Self::get_file_path(&dir, id) {
             if let Ok(bytes) = std::fs::read(&path) {
@@ -335,7 +335,7 @@ impl ClipboardOverlay {
     pub fn delete(id: u64) {
         let dir = dirs::data_dir()
             .unwrap_or_else(std::env::temp_dir)
-            .join("moon-beauty-shell")
+            .join("moonbeauty")
             .join("clipboard");
         let index_path = dir.join("index.json");
 
@@ -356,7 +356,7 @@ impl ClipboardOverlay {
     pub async fn wipe() {
         let dir = dirs::data_dir()
             .unwrap_or_else(std::env::temp_dir)
-            .join("moon-beauty-shell")
+            .join("moonbeauty")
             .join("clipboard");
         let _ = std::fs::remove_dir_all(&dir);
     }

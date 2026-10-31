@@ -104,7 +104,7 @@ pub fn get_socket_path() -> PathBuf {
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| {
         panic!("XDG_RUNTIME_DIR is not set; refusing to place IPC socket in shared /tmp");
     });
-    PathBuf::from(runtime_dir).join("moon-beauty-shell.sock")
+    PathBuf::from(runtime_dir).join("moonbeauty.sock")
 }
 
 pub async fn send_client_command(

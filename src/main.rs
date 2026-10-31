@@ -39,7 +39,7 @@ fn send_ipc_sync(cmd: &IpcCommand) -> Result<String, Box<dyn std::error::Error +
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
     let path = std::env::var("XDG_RUNTIME_DIR")
-        .map(|d| std::path::PathBuf::from(d).join("moon-beauty-shell.sock"))
+        .map(|d| std::path::PathBuf::from(d).join("moonbeauty.sock"))
         .map_err(|e| format!("XDG_RUNTIME_DIR: {e}"))?;
     let mut stream = UnixStream::connect(&path)?;
     // Finding 36: read timeout. Without this, a hung bar (deadlock,
@@ -192,7 +192,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         if std::io::stdin().read_to_end(&mut bytes).is_ok() && !bytes.is_empty() {
             let dir = dirs::data_dir()
                 .unwrap_or_else(std::env::temp_dir)
-                .join("moon-beauty-shell")
+                .join("moonbeauty")
                 .join("clipboard");
             let _ = std::fs::create_dir_all(&dir);
             let index_path = dir.join("index.json");
@@ -391,7 +391,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     // Notification CLI actions
     if args.iter().any(|a| a == "--activate-latest-notif") {
         let cmd_path = moonbeauty::libraries::process::mbs_runtime_dir()
-            .join("moon-beauty-shell-notif-cmd");
+            .join("moonbeauty-notif-cmd");
         match moonbeauty::libraries::process::private_write_file(
             &cmd_path,
             b"activate-latest",
@@ -405,7 +405,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     }
     if args.iter().any(|a| a == "--dismiss-notif") {
         let cmd_path = moonbeauty::libraries::process::mbs_runtime_dir()
-            .join("moon-beauty-shell-notif-cmd");
+            .join("moonbeauty-notif-cmd");
         match moonbeauty::libraries::process::private_write_file(&cmd_path, b"dismiss") {
             Ok(_) => std::process::exit(0),
             Err(e) => {
@@ -446,23 +446,23 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     // Restart bar (used by Settings when changing monitor)
     if args.iter().any(|a| a == "--restart-bar") {
         // Kill orphaned clipboard watchers FIRST. Their cmdline ends with
-        // "--clipboard-ingest" (not "moon-beauty-shell$"), so the
+        // "--clipboard-ingest" (not "moonbeauty$"), so the
         // anchored shell pkill below never matches them. Without this,
         // every restart spawns a new watcher and the clipboard UI ends
         // up with N copies of each item after N restarts.
         let _ = std::process::Command::new("pkill")
-            .args(["-f", "wl-paste --watch.*moon-beauty-shell"])
+            .args(["-f", "wl-paste --watch.*moonbeauty"])
             .status();
         // Finding 22: anchored patterns — require path-prefix before the
         // binary name and end-of-argv after the flag. Prevents matching
         // scripts / editors that merely mention the strings.
         let _ = std::process::Command::new("pkill")
-            .args(["-f", "(^|/)(moon-beauty-shell|moonbeauty)$"])
+            .args(["-f", "(^|/)(moonbeauty|moonbeauty)$"])
             .status();
         let _ = std::process::Command::new("pkill")
             .args([
                 "-f",
-                "(^|/)(moon-beauty-shell|moonbeauty) (--(sys|weather|alarm|info)-tooltip|--tray-popup)$",
+                "(^|/)(moonbeauty|moonbeauty) (--(sys|weather|alarm|info)-tooltip|--tray-popup)$",
             ])
             .status();
         std::thread::sleep(std::time::Duration::from_millis(400));
@@ -471,8 +471,8 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         std::process::exit(0);
     }
 
-    // Generic IPC toggle: moon-beauty-shell --toggle <overlay>
-    // e.g. sway: bindsym $mod+Tab exec moon-beauty-shell --toggle history
+    // Generic IPC toggle: moonbeauty --toggle <overlay>
+    // e.g. sway: bindsym $mod+Tab exec moonbeauty --toggle history
     if let Some(idx) = args.iter().position(|a| a == "--toggle") {
         let target_str = args.get(idx + 1).cloned().unwrap_or_default();
         match OverlayTarget::from_str(&target_str) {
@@ -770,7 +770,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         std::process::exit(0);
     }
 
-    // CLI Notification Push: moon-beauty-shell --notify "LusterDawn" "Message"
+    // CLI Notification Push: moonbeauty --notify "LusterDawn" "Message"
     if args.len() >= 3
         && (args[1] == "--notify" || (args.len() >= 4 && args[1] == "--ipc" && args[2] == "notify"))
     {
@@ -849,7 +849,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     if !is_notif_surface && standalone_target.is_none() {
         let _ = std::process::Command::new("pkill")
-            .args(["-f", "--", "(^|/)(moon-beauty-shell|moonbeauty) --notif-surface$"])
+            .args(["-f", "--", "(^|/)(moonbeauty|moonbeauty) --notif-surface$"])
             .status();
         std::thread::sleep(std::time::Duration::from_millis(300));
         let exe = resolve_exe();
@@ -1041,7 +1041,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     let _app = iced_layershell::application(
         MoonBeautyShellApp::new_app,
-        || "moon-beauty-shell".to_string(),
+        || "moonbeauty".to_string(),
         MoonBeautyShellApp::update,
         MoonBeautyShellApp::view,
     )

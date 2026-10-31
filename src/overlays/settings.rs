@@ -659,13 +659,13 @@ impl SettingsOverlay {
                     if !path_str.is_empty() {
                         let src = std::path::Path::new(&path_str);
                         if let Some(filename) = src.file_name().and_then(|f| f.to_str()) {
-                            // Copy to XDG_DATA/moon-beauty-shell/sounds — stable
+                            // Copy to XDG_DATA/moonbeauty/sounds — stable
                             // across cwd changes. The old `resources/` copy
                             // worked only when the bar was launched from the
                             // project root; systemd / nix develop / standalone
                             // children all fail that assumption.
                             let dest_dir = dirs::data_dir()
-                                .map(|d| d.join("moon-beauty-shell").join("sounds"))
+                                .map(|d| d.join("moonbeauty").join("sounds"))
                                 .unwrap_or_else(|| {
                                     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                                         .join("resources")
@@ -3489,19 +3489,19 @@ impl SettingsOverlay {
                 &[
                     (
                         "Cycle through active players (play, pause, next player, play, ...)",
-                        "moon-beauty-shell --music-cycle",
+                        "moonbeauty --music-cycle",
                     ),
                     (
                         "Play/pause the currently active player",
-                        "moon-beauty-shell --music-play-pause",
+                        "moonbeauty --music-play-pause",
                     ),
                     (
                         "Skip to the next track on the active player",
-                        "moon-beauty-shell --music-next",
+                        "moonbeauty --music-next",
                     ),
                     (
                         "Go to the previous track on the active player",
-                        "moon-beauty-shell --music-previous",
+                        "moonbeauty --music-previous",
                     ),
                 ],
             ),
@@ -3510,22 +3510,22 @@ impl SettingsOverlay {
                 &[
                     (
                         "Application launcher",
-                        "moon-beauty-shell --launcher",
+                        "moonbeauty --launcher",
                     ),
-                    ("Clipboard manager", "moon-beauty-shell --clipboard"),
-                    ("Notification history", "moon-beauty-shell --history"),
-                    ("Settings", "moon-beauty-shell --settings"),
-                    ("Calculator & units", "moon-beauty-shell --calc"),
-                    ("Password store", "moon-beauty-shell --pass"),
-                    ("Dictionary", "moon-beauty-shell --dict"),
-                    ("Unicode glyphs", "moon-beauty-shell --unicode"),
-                    ("Tasks & todos", "moon-beauty-shell --todo"),
-                    ("Reminders & alarms", "moon-beauty-shell --reminders"),
-                    ("Dice & RNG", "moon-beauty-shell --rng"),
-                    ("Web search", "moon-beauty-shell --web"),
-                    ("Email client", "moon-beauty-shell --email"),
-                    ("Among Us tracker", "moon-beauty-shell --amogus"),
-                    ("Lock screen (must use --toggle; bare --lockscreen starts the coordinator)", "moon-beauty-shell --toggle lockscreen"),
+                    ("Clipboard manager", "moonbeauty --clipboard"),
+                    ("Notification history", "moonbeauty --history"),
+                    ("Settings", "moonbeauty --settings"),
+                    ("Calculator & units", "moonbeauty --calc"),
+                    ("Password store", "moonbeauty --pass"),
+                    ("Dictionary", "moonbeauty --dict"),
+                    ("Unicode glyphs", "moonbeauty --unicode"),
+                    ("Tasks & todos", "moonbeauty --todo"),
+                    ("Reminders & alarms", "moonbeauty --reminders"),
+                    ("Dice & RNG", "moonbeauty --rng"),
+                    ("Web search", "moonbeauty --web"),
+                    ("Email client", "moonbeauty --email"),
+                    ("Among Us tracker", "moonbeauty --amogus"),
+                    ("Lock screen (must use --toggle; bare --lockscreen starts the coordinator)", "moonbeauty --toggle lockscreen"),
                 ],
             ),
             (
@@ -3533,19 +3533,19 @@ impl SettingsOverlay {
                 &[
                     (
                         "Send a notification from a script or shell",
-                        "moon-beauty-shell --notify \"Title\" \"Body\"",
+                        "moonbeauty --notify \"Title\" \"Body\"",
                     ),
                     (
                         "Focus the app that sent the newest toast",
-                        "moon-beauty-shell --activate-latest-notif",
+                        "moonbeauty --activate-latest-notif",
                     ),
                     (
                         "Dismiss the newest toast",
-                        "moon-beauty-shell --dismiss-notif",
+                        "moonbeauty --dismiss-notif",
                     ),
                     (
                         "Toggle the notification history panel",
-                        "moon-beauty-shell --notif-history",
+                        "moonbeauty --notif-history",
                     ),
                 ],
             ),
@@ -3554,11 +3554,11 @@ impl SettingsOverlay {
                 &[
                     (
                         "Capture a region, save to ~/Pictures/Screenshots",
-                        "moon-beauty-shell --screenshot",
+                        "moonbeauty --screenshot",
                     ),
                     (
                         "Capture a region, open the annotator",
-                        "moon-beauty-shell --screenshot --annotate",
+                        "moonbeauty --screenshot --annotate",
                     ),
                 ],
             ),
@@ -3567,15 +3567,15 @@ impl SettingsOverlay {
                 &[
                     (
                         "Restart the bar (picks up new settings)",
-                        "moon-beauty-shell --restart-bar",
+                        "moonbeauty --restart-bar",
                     ),
                     (
                         "Test IMAP/SMTP email connection",
-                        "moon-beauty-shell --test-email",
+                        "moonbeauty --test-email",
                     ),
                     (
                         "Test lockscreen password authentication",
-                        "moon-beauty-shell --test-lock-auth",
+                        "moonbeauty --test-lock-auth",
                     ),
                 ],
             ),
@@ -3584,23 +3584,23 @@ impl SettingsOverlay {
                 &[
                     (
                         "Cycle music players with Super+M",
-                        "bindsym $mod+m exec moon-beauty-shell --music-cycle",
+                        "bindsym $mod+m exec moonbeauty --music-cycle",
                     ),
                     (
                         "Play/pause with Super+Shift+M",
-                        "bindsym $mod+Shift+m exec moon-beauty-shell --music-play-pause",
+                        "bindsym $mod+Shift+m exec moonbeauty --music-play-pause",
                     ),
                     (
                         "Next track with Super+Shift+Right",
-                        "bindsym $mod+Shift+Right exec moon-beauty-shell --music-next",
+                        "bindsym $mod+Shift+Right exec moonbeauty --music-next",
                     ),
                     (
                         "Toggle notification history with Super+N",
-                        "bindsym $mod+n exec moon-beauty-shell --history",
+                        "bindsym $mod+n exec moonbeauty --history",
                     ),
                     (
                         "Region screenshot with Print",
-                        "bindsym Print exec moon-beauty-shell --screenshot",
+                        "bindsym Print exec moonbeauty --screenshot",
                     ),
                 ],
             ),

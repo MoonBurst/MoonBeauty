@@ -194,7 +194,7 @@ impl MoonBeautyShellApp {
             ClipboardMessage::RevealImage(id) => {
                 let dir = dirs::data_dir()
                     .unwrap_or_else(std::env::temp_dir)
-                    .join("moon-beauty-shell")
+                    .join("moonbeauty")
                     .join("clipboard");
                 if let Some(path) = ClipboardOverlay::get_file_path(&dir, id) {
                     if let Ok(bytes) = std::fs::read(&path) {

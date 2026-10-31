@@ -253,11 +253,11 @@ pub fn mbs_subdir(name: &str) -> std::path::PathBuf {
 /// Walk `$XDG_RUNTIME_DIR` and tighten every shell-owned file and
 /// directory to 0700 (dirs) / 0600 (files).
 ///
-/// Shell-owned = name starts with `mbs-` or `moon-beauty-shell`.
+/// Shell-owned = name starts with `mbs-` or `moonbeauty`.
 /// Covers:
 ///   - mbs-tray/, mbs-clip/, mbs-email-images/, mbs-annotator/ (dirs)
 ///     and their immediate children
-///   - moon-beauty-shell-{dnd,held-notifs.json,active-count,notif-cmd}
+///   - moonbeauty-{dnd,held-notifs.json,active-count,notif-cmd}
 ///   - mbs-email-notified.txt
 ///   - moon-beauty-lock-*.sock
 ///
@@ -285,7 +285,7 @@ fn tighten_existing_runtime_state_at(xdg: &std::path::Path) {
         let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
             continue;
         };
-        if !(name.starts_with("mbs-") || name.starts_with("moon-beauty-shell")) {
+        if !(name.starts_with("mbs-") || name.starts_with("moonbeauty")) {
             continue;
         }
         if path.is_dir() {
@@ -388,7 +388,7 @@ pub fn resolve_exe() -> PathBuf {
                 p
             }
         })
-        .unwrap_or_else(|| PathBuf::from("moon-beauty-shell"))
+        .unwrap_or_else(|| PathBuf::from("moonbeauty"))
 }
 
 /// Finding 07 defense-in-depth: write a restrictive ImageMagick
@@ -639,7 +639,7 @@ mod tighten_tests {
         let f1 = sub.join("icon.png");
         std::fs::write(&f1, b"png").unwrap();
 
-        let f2 = root.join("moon-beauty-shell-active-count");
+        let f2 = root.join("moonbeauty-active-count");
         std::fs::write(&f2, b"3").unwrap();
         let f3 = root.join("mbs-email-notified.txt");
         std::fs::write(&f3, b"x").unwrap();

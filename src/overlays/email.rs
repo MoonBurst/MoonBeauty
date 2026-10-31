@@ -455,7 +455,7 @@ impl EmailOverlay {
                 if let Some(id) = &self.active_mail_id {
                     let cache_file = dirs::data_dir()
                         .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
-                        .join("moon-beauty-shell/email_cache")
+                        .join("moonbeauty/email_cache")
                         .join(&self.active_folder)
                         .join(format!("{}.eml", id));
                     if cache_file.exists() {
@@ -588,7 +588,7 @@ impl EmailOverlay {
             EmailMessage::MarkSpam | EmailMessage::MarkNotSpam => { /* handled in app/update.rs */ }
             EmailMessage::DraftSaved => {
                 self.imap_error =
-                    Some("Draft saved to ~/.local/share/moon-beauty-shell/drafts.txt".into());
+                    Some("Draft saved to ~/.local/share/moonbeauty/drafts.txt".into());
             }
         }
     }

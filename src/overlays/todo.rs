@@ -129,7 +129,7 @@ impl TodoOverlay {
 
     fn storage_path() -> PathBuf {
         let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-        let mbs = base.join("moon-beauty-shell").join("todos.json");
+        let mbs = base.join("moonbeauty").join("todos.json");
         let qs = base.join("quickshell").join("todos.json");
         // One-time migration: user's pre-migration todos lived at
         // ~/.local/share/quickshell/todos.json (Quickshell convention).

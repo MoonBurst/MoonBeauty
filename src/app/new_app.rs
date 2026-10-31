@@ -98,12 +98,12 @@ impl MoonBeautyShellApp {
 
         // Spawn exactly one wl-paste watcher. Kill any orphaned watcher
         // from previous runs first — the shell pkill pattern anchors on
-        // "moon-beauty-shell$", but the watcher cmdline ends with
+        // "moonbeauty$", but the watcher cmdline ends with
         // "--clipboard-ingest" and so escapes it, causing N-duplicate
         // clipboard entries after N bar restarts.
         if standalone_target.is_none() && !is_notif_surface {
             let _ = std::process::Command::new("pkill")
-                .args(["-f", "wl-paste --watch.*(moon-beauty-shell|moonbeauty)"])
+                .args(["-f", "wl-paste --watch.*(moonbeauty|moonbeauty)"])
                 .status();
             std::thread::sleep(std::time::Duration::from_millis(50));
             let exe = crate::resolve_exe();

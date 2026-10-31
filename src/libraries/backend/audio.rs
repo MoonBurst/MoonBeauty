@@ -179,7 +179,7 @@ impl AudioBackend {
 
 /// Resolve a user-configured alarm sound. Tries in order:
 ///   1. Absolute path as-is
-///   2. `~/.local/share/moon-beauty-shell/sounds/<basename>` (stable, where imports go now)
+///   2. `~/.local/share/moonbeauty/sounds/<basename>` (stable, where imports go now)
 ///
 /// cwd-relative and $CARGO_MANIFEST_DIR candidates were dropped
 /// (finding 19): they only worked from the source tree and could be
@@ -207,7 +207,7 @@ pub fn resolve_alarm_sound_path(sound: &str) -> Option<std::path::PathBuf> {
     // Stable per-user data dir — where ImportAlarmSound now copies files.
     if let Some(data) = dirs::data_dir() {
         candidates.push(
-            data.join("moon-beauty-shell")
+            data.join("moonbeauty")
                 .join("sounds")
                 .join(&filename),
         );

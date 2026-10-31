@@ -5,7 +5,7 @@
 //! that sender's emails to it. INBOX view in the shell filters those out;
 //! Gmail's INBOX is untouched.
 //!
-//! Storage: ~/.local/share/moon-beauty-shell/email_cache/local_sort.json
+//! Storage: ~/.local/share/moonbeauty/email_cache/local_sort.json
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -33,7 +33,7 @@ pub struct FolderInfo {
 
 pub fn path() -> PathBuf {
     let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-    base.join("moon-beauty-shell/email_cache/local_sort.json")
+    base.join("moonbeauty/email_cache/local_sort.json")
 }
 
 pub fn load() -> LocalSort {

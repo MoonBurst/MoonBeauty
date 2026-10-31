@@ -109,7 +109,7 @@ pub(crate) fn ensure_secure_cache_tree() {
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| {
         let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-        let root = base.join("moon-beauty-shell/email_cache");
+        let root = base.join("moonbeauty/email_cache");
         if !root.exists() {
             return;
         }

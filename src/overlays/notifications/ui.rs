@@ -1808,7 +1808,7 @@ fn rand_id() -> u32 {
 }
 
 pub fn dnd_flag_path() -> PathBuf {
-    crate::libraries::process::mbs_runtime_dir().join("moon-beauty-shell-dnd")
+    crate::libraries::process::mbs_runtime_dir().join("moonbeauty-dnd")
 }
 
 pub fn dnd_active() -> bool {
@@ -1830,7 +1830,7 @@ pub fn toggle_dnd() -> bool {
 }
 
 pub fn held_notifs_path() -> PathBuf {
-    crate::libraries::process::mbs_runtime_dir().join("moon-beauty-shell-held-notifs.json")
+    crate::libraries::process::mbs_runtime_dir().join("moonbeauty-held-notifs.json")
 }
 
 pub fn load_held_notifs() -> Vec<NotificationToast> {
@@ -1901,7 +1901,7 @@ pub fn take_held_notifs() -> Vec<NotificationToast> {
 // (plus a heartbeat), and the bar reads it with a short cache.
 
 pub fn active_count_path() -> PathBuf {
-    crate::libraries::process::mbs_runtime_dir().join("moon-beauty-shell-active-count")
+    crate::libraries::process::mbs_runtime_dir().join("moonbeauty-active-count")
 }
 
 /// Notif-surface calls this on any change to active+pending count.

@@ -131,7 +131,7 @@ impl NotesOverlay {
 
     fn storage_path() -> PathBuf {
         let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-        base.join("moon-beauty-shell").join("notes.json")
+        base.join("moonbeauty").join("notes.json")
     }
 
     pub fn load() -> Vec<NoteItem> {

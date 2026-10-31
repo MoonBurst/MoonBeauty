@@ -109,7 +109,7 @@ impl Default for EmailConfig {
 
 pub fn config_path() -> PathBuf {
     let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-    base.join("moon-beauty-shell").join("email.json")
+    base.join("moonbeauty").join("email.json")
 }
 
 pub fn resolve_password(cfg: &EmailConfig) -> String {
@@ -417,7 +417,7 @@ pub fn load_config() -> EmailConfig {
 
 fn get_cache_dir(folder: &str) -> PathBuf {
     let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-    let root = base.join("moon-beauty-shell/email_cache");
+    let root = base.join("moonbeauty/email_cache");
     get_cache_dir_with_root(&root, folder)
 }
 
@@ -1259,7 +1259,7 @@ pub async fn fetch_folder_list() -> Result<Vec<String>, String> {
 
 pub fn folders_cache_path() -> std::path::PathBuf {
     let base = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
-    base.join("moon-beauty-shell/email_cache/folders.json")
+    base.join("moonbeauty/email_cache/folders.json")
 }
 
 pub fn load_folders_cache() -> Vec<String> {
@@ -1283,7 +1283,7 @@ pub fn save_folders_cache(folders: &[String]) {
 pub fn contacts_path() -> PathBuf {
     dirs::data_dir()
         .expect("XDG_DATA_HOME or HOME must be set; refusing to place contacts.txt in cwd")
-        .join("moon-beauty-shell")
+        .join("moonbeauty")
         .join("contacts.txt")
 }
 
@@ -1340,7 +1340,7 @@ pub async fn save_contact(email: &str) -> Result<(), String> {
 pub async fn save_draft(to: &str, subject: &str, body: &str) -> Result<(), String> {
     let path = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
-        .join("moon-beauty-shell/drafts.txt");
+        .join("moonbeauty/drafts.txt");
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }

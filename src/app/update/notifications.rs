@@ -105,7 +105,7 @@ impl MoonBeautyShellApp {
         {
             self.notif_screen_at_startup = self.settings.notif_screen_name.clone();
             let _ = std::process::Command::new("pkill")
-                .args(["-f", "--", "(^|/)moon-beauty-shell --notif-surface$"])
+                .args(["-f", "--", "(^|/)moonbeauty --notif-surface$"])
                 .status();
             std::thread::sleep(std::time::Duration::from_millis(300));
             let exe = resolve_exe();
@@ -138,7 +138,7 @@ impl MoonBeautyShellApp {
             let runtime = std::env::var("XDG_RUNTIME_DIR")
                 .unwrap_or_else(|_| format!("/tmp/user-{}", std::process::id()));
             let cmd_path =
-                std::path::PathBuf::from(&runtime).join("moon-beauty-shell-notif-cmd");
+                std::path::PathBuf::from(&runtime).join("moonbeauty-notif-cmd");
             if let Ok(cmd) = std::fs::read_to_string(&cmd_path) {
                 let _ = std::fs::remove_file(&cmd_path);
                 match cmd.trim() {
@@ -257,7 +257,7 @@ impl MoonBeautyShellApp {
 
     pub(crate) fn dismiss_latest_notif(&self) -> Command<Message> {
         let cmd_path = moonbeauty::libraries::process::mbs_runtime_dir()
-            .join("moon-beauty-shell-notif-cmd");
+            .join("moonbeauty-notif-cmd");
         match std::fs::write(&cmd_path, b"dismiss") {
             Ok(_) => eprintln!("[ipc] DismissLatestNotif -> notif-surface"),
             Err(e) => eprintln!("[ipc] DismissLatestNotif write failed: {e}"),
@@ -306,7 +306,7 @@ impl MoonBeautyShellApp {
         eprintln!("[dnd] paused={}", paused);
 
         let running = std::process::Command::new("pgrep")
-            .args(["-f", "--", "(^|/)moon-beauty-shell --notif-surface$"])
+            .args(["-f", "--", "(^|/)moonbeauty --notif-surface$"])
             .output()
             .map(|o| !o.stdout.is_empty())
             .unwrap_or(false);

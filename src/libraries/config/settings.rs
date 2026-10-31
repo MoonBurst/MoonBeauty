@@ -157,7 +157,7 @@ pub fn find_friend_profiles_path() -> PathBuf {
     let base = dirs::data_dir().expect(
         "XDG_DATA_HOME or HOME must be set; refusing to load friend_profiles.json from cwd",
     );
-    let target = base.join("moon-beauty-shell").join("friend_profiles.json");
+    let target = base.join("moonbeauty").join("friend_profiles.json");
     // One-shot migration: only when target absent AND source parses as
     // Vec<FriendProfile>. Rejects arbitrary files.
     if !target.exists() {
