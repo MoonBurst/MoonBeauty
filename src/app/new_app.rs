@@ -271,7 +271,6 @@ impl MoonBeautyShellApp {
             } else {
                 LockscreenOverlay::empty()
             },
-            weather_tick: false,
 
             music_cycle_state: Default::default(),
             is_cycling: false,

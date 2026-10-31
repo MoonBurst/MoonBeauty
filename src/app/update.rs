@@ -253,15 +253,6 @@ impl MoonBeautyShellApp {
                     return iced::widget::operation::focus_next();
                 }
             }
-            Message::FocusComposeField => {
-                self.email.active_compose_field = (self.email.active_compose_field + 1) % 3;
-                let id = match self.email.active_compose_field {
-                    0 => moon_beauty_shell::overlays::email::COMPOSE_TO_ID,
-                    1 => moon_beauty_shell::overlays::email::COMPOSE_SUBJ_ID,
-                    _ => moon_beauty_shell::overlays::email::COMPOSE_BODY_ID,
-                };
-                return iced::widget::operation::focus(id).map(Message::Email);
-            }
             Message::TickEmailSync => {
                 // Only the primary bar and the standalone email overlay
                 // sync IMAP. The notif-surface doesn't need email data and
@@ -2663,9 +2654,6 @@ impl MoonBeautyShellApp {
                 }
                 _ => {}
             },
-            Message::CollapseTray => {
-                self.close_tray();
-            }
             Message::TrayWatchdogTick => {
                 // 1) Timeout check
                 if self.tray_expanded

@@ -55,10 +55,7 @@ pub enum Message {
     EmailSyncedWithDiff(
         Vec<moon_beauty_shell::libraries::backend::email_client::NativeEnvelope>,
         Vec<moon_beauty_shell::libraries::backend::email_client::NativeEnvelope>,
-    ),
-    #[allow(dead_code)]
-    FocusComposeField,
-    ComposeTabPressed(bool),
+    ),    ComposeTabPressed(bool),
     WeatherLoaded(Option<moon_beauty_shell::bar::weather::WeatherData>),
     TickClock,
     IdleTick,
@@ -103,10 +100,7 @@ pub enum Message {
     FetchTrayItems,
     TrayItemsLoaded(Vec<moon_beauty_shell::bar::tray::TrayItem>),
     TrayAnimTick,
-    TrayWatchdogTick,
-    #[allow(dead_code)]
-    CollapseTray,
-    /// Pre-computed toast rectangles (surface-local coords). Emitted
+    TrayWatchdogTick,    /// Pre-computed toast rectangles (surface-local coords). Emitted
     /// whenever the toast count changes; `try_into` converts it to
     /// `LayershellCustomAction::SetInputRegion` so the layer surface's
     /// click target shrinks to just the visible toasts. Everything else
@@ -203,9 +197,6 @@ pub struct MoonBeautyShellApp {
     pub notifs: NotificationOverlay,
     pub settings_ui: SettingsOverlay,
     pub lockscreen: LockscreenOverlay,
-    #[allow(dead_code)]
-    pub weather_tick: bool,
-
     /// Music cycle state — which player to target next, and which we
     /// most recently started (for pause priority when multiple are
     /// playing). See backend/music_cycle.rs.

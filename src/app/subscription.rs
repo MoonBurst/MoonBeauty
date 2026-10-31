@@ -17,11 +17,6 @@ fn ipc_stream() -> impl futures_util::Stream<Item = Message> {
 impl MoonBeautyShellApp {
     pub fn subscription(&self) -> iced::Subscription<Message> {
         let is_bar = !self.is_standalone && !self.is_notif_surface;
-        let clock_sub = if is_bar {
-            iced::Subscription::none()
-        } else {
-            iced::Subscription::none()
-        };
         let toast_sub = if self.is_notif_surface {
             let interval = if self.notifs.active_toasts.is_empty() {
                 1000
@@ -48,11 +43,6 @@ impl MoonBeautyShellApp {
             iced::Subscription::none()
         };
 
-        let hw_sub = if is_bar {
-            iced::Subscription::none()
-        } else {
-            iced::Subscription::none()
-        };
         let weather_sub = if is_bar {
             iced::time::every(std::time::Duration::from_secs(900)).map(|_| Message::TickWeather)
         } else {
@@ -473,11 +463,6 @@ impl MoonBeautyShellApp {
         // mean the *screen is locked* or *will be locked within 800ms*
         // under any crash scenario. Not bulletproof, but small enough
         // that a human attacker cannot reliably exploit the window.
-        let lockscreen_watchdog_sub = if self.is_standalone || self.is_notif_surface {
-            iced::Subscription::none()
-        } else {
-            iced::Subscription::none()
-        };
 
         let notif_sub = if self.is_notif_surface {
             iced::time::every(std::time::Duration::from_millis(50)).map(|_| Message::PollNotifs)
@@ -542,10 +527,8 @@ impl MoonBeautyShellApp {
             iced::Subscription::none()
         };
         iced::Subscription::batch(vec![
-            clock_sub,
             idle_tick_sub,
             toast_sub,
-            hw_sub,
             email_sync_sub,
             weather_sub,
             anim_sub,
@@ -568,7 +551,6 @@ impl MoonBeautyShellApp {
             lock_jump_sub,
             lock_key_sub,
             lock_ipc_sub,
-            lockscreen_watchdog_sub,
             tray_watchdog_sub,
             tray_fetch_sub,
             close_sub,

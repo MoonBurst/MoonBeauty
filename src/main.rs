@@ -1204,6 +1204,4 @@ fn handle_annotator_text_input(
     None
 }
 
-impl MoonBeautyShellApp {}
 
-impl MoonBeautyShellApp {}

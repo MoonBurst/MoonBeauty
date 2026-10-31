@@ -28,10 +28,7 @@ pub struct LockscreenOverlay {
     cached_global_padding: u16,
     ipc_tx: Option<mpsc::Sender<LockIpc>>,
     ipc_rx: Option<mpsc::Receiver<LockIpc>>,
-    pending_sends: u32,
-    #[allow(dead_code)]
-    last_tick: std::time::Instant,
-}
+    pending_sends: u32,}
 
 impl Default for LockscreenOverlay {
     fn default() -> Self {
@@ -49,7 +46,6 @@ impl LockscreenOverlay {
             ipc_tx: None,
             ipc_rx: None,
             pending_sends: 0,
-            last_tick: std::time::Instant::now(),
         }
     }
 
@@ -80,7 +76,6 @@ impl LockscreenOverlay {
             ipc_tx,
             ipc_rx,
             pending_sends: 0,
-            last_tick: std::time::Instant::now(),
         }
     }
 
