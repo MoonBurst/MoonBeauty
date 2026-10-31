@@ -30,7 +30,7 @@ impl MoonBeautyShellApp {
         };
 
         let email_sync_sub = if is_bar
-            && moon_beauty_shell::libraries::backend::email::client::config_exists()
+            && moonbeauty::libraries::backend::email::client::config_exists()
         {
             iced::time::every(std::time::Duration::from_secs(60)).map(|_| Message::TickEmailSync)
         } else {
@@ -97,7 +97,7 @@ impl MoonBeautyShellApp {
                     ..
                 }) = event
                 {
-                    moon_beauty_shell::dbg_log!("[todo-sub] key={:?} status={:?}", dbg_key, status);
+                    moonbeauty::dbg_log!("[todo-sub] key={:?} status={:?}", dbg_key, status);
                 }
                 let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event
                 else {

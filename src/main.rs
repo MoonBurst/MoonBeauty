@@ -1,11 +1,11 @@
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
-use moon_beauty_shell::libraries::config::ShellSettings;
-use moon_beauty_shell::libraries::ipc::{IpcCommand, OverlayTarget};
-use moon_beauty_shell::libraries::process::resolve_exe;
-use moon_beauty_shell::overlays::*;
+use moonbeauty::libraries::config::ShellSettings;
+use moonbeauty::libraries::ipc::{IpcCommand, OverlayTarget};
+use moonbeauty::libraries::process::resolve_exe;
+use moonbeauty::overlays::*;
 
-use moon_beauty_shell::overlays::screenshot;
+use moonbeauty::overlays::screenshot;
 
 mod app;
 
@@ -67,7 +67,7 @@ fn notification_candidates(app_name: &str, desktop_entry: Option<&str>) -> Vec<S
     }
     cand_set
         .into_iter()
-        .filter(|s| !s.is_empty() && moon_beauty_shell::libraries::process::is_safe_app_id(s))
+        .filter(|s| !s.is_empty() && moonbeauty::libraries::process::is_safe_app_id(s))
         .collect()
 }
 
@@ -94,9 +94,9 @@ fn focus_notification_app(app_name: &str, desktop_entry: Option<&str>) -> bool {
     }
     let candidates: Vec<String> = cand_set
         .into_iter()
-        .filter(|s| !s.is_empty() && moon_beauty_shell::libraries::process::is_safe_app_id(s))
+        .filter(|s| !s.is_empty() && moonbeauty::libraries::process::is_safe_app_id(s))
         .collect();
-    moon_beauty_shell::dbg_log!(
+    moonbeauty::dbg_log!(
         "[focus] app={:?} entry={:?} candidates={:?}",
         app_name,
         desktop_entry,
@@ -122,7 +122,7 @@ fn focus_notification_app(app_name: &str, desktop_entry: Option<&str>) -> bool {
 
     if let Some(de) = desktop_entry {
         let de_clean = de.trim_end_matches(".desktop");
-        if moon_beauty_shell::libraries::process::is_safe_app_id(de_clean) {
+        if moonbeauty::libraries::process::is_safe_app_id(de_clean) {
             let ok = std::process::Command::new("gtk-launch")
                 .arg(de_clean)
                 .status()
@@ -240,7 +240,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
                     let path_str = line.strip_prefix("file://").unwrap_or(line);
                     let path = std::path::PathBuf::from(path_str);
                     if !path.is_file() { continue; }
-                    if moon_beauty_shell::overlays::clipboard::ClipboardOverlay::add_entry(&path, None).is_some() {
+                    if moonbeauty::overlays::clipboard::ClipboardOverlay::add_entry(&path, None).is_some() {
                         ingested += 1;
                         eprintln!("[clipboard-ingest] URI: {}", path.display());
                     }
@@ -249,7 +249,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
                 std::process::exit(0);
             }
 
-            let mut items: Vec<moon_beauty_shell::overlays::clipboard::ClipItem> = Vec::new();
+            let mut items: Vec<moonbeauty::overlays::clipboard::ClipItem> = Vec::new();
             if let Ok(content) = std::fs::read_to_string(&index_path) {
                 if let Ok(parsed) = serde_json::from_str(&content) {
                     items = parsed;
@@ -262,7 +262,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             };
 
             if is_image {
-                let name_file = moon_beauty_shell::libraries::process::mbs_runtime_dir()
+                let name_file = moonbeauty::libraries::process::mbs_runtime_dir()
                     .join("mbs-last-clip-name.txt");
                 if let Ok(txt) = std::fs::read_to_string(&name_file) {
                     text_preview = txt.trim().to_string();
@@ -286,7 +286,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             // for rows written before this patch).
             if let Some(top) = items.first_mut() {
                 if top.content_hash.is_none() {
-                    if let Some(p) = moon_beauty_shell::overlays::clipboard::ClipboardOverlay::get_file_path(&dir, top.id) {
+                    if let Some(p) = moonbeauty::overlays::clipboard::ClipboardOverlay::get_file_path(&dir, top.id) {
                         if let Ok(b) = std::fs::read(&p) {
                             use sha2::Digest as _;
                             top.content_hash = Some(format!("{:x}", sha2::Sha256::digest(&b)));
@@ -306,7 +306,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
             items.insert(
                 0,
-                moon_beauty_shell::overlays::clipboard::ClipItem {
+                moonbeauty::overlays::clipboard::ClipItem {
                     id,
                     text: text_preview,
                     is_image,
@@ -335,20 +335,20 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     // Finding 07 defense-in-depth: restrictive ImageMagick policy that
     // every child process (annotator, watermark, reveal) inherits via
     // MAGICK_CONFIGURE_PATH.
-    if let Some(dir) = moon_beauty_shell::libraries::process::ensure_imagemagick_policy() {
+    if let Some(dir) = moonbeauty::libraries::process::ensure_imagemagick_policy() {
         std::env::set_var("MAGICK_CONFIGURE_PATH", &dir);
     }
 
     // ── Lock auth test mode ──
     if args.iter().any(|a| a == "--test-lock-auth") {
-        moon_beauty_shell::overlays::lockscreen::LockCoordinator::run_auth_test();
+        moonbeauty::overlays::lockscreen::LockCoordinator::run_auth_test();
     }
 
     // ── Email connection test (one-shot diagnostic) ──
     if args.iter().any(|a| a == "--test-email") {
         let rt = tokio::runtime::Runtime::new().expect("tokio rt");
         rt.block_on(async {
-            match moon_beauty_shell::libraries::backend::email::client::test_connection().await {
+            match moonbeauty::libraries::backend::email::client::test_connection().await {
                 Ok((imap, smtp, report)) => {
                     println!("{}", report);
                     if imap && smtp {
@@ -374,7 +374,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     if args.iter().any(|a| a == "--lockscreen")
         && !args.iter().any(|a| a == "--lockscreen-instance")
     {
-        moon_beauty_shell::overlays::lockscreen::LockCoordinator::spawn();
+        moonbeauty::overlays::lockscreen::LockCoordinator::spawn();
     }
 
     // --quickshot was replaced by --screenshot --annotate.
@@ -390,9 +390,9 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     // Notification CLI actions
     if args.iter().any(|a| a == "--activate-latest-notif") {
-        let cmd_path = moon_beauty_shell::libraries::process::mbs_runtime_dir()
+        let cmd_path = moonbeauty::libraries::process::mbs_runtime_dir()
             .join("moon-beauty-shell-notif-cmd");
-        match moon_beauty_shell::libraries::process::private_write_file(
+        match moonbeauty::libraries::process::private_write_file(
             &cmd_path,
             b"activate-latest",
         ) {
@@ -404,9 +404,9 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         }
     }
     if args.iter().any(|a| a == "--dismiss-notif") {
-        let cmd_path = moon_beauty_shell::libraries::process::mbs_runtime_dir()
+        let cmd_path = moonbeauty::libraries::process::mbs_runtime_dir()
             .join("moon-beauty-shell-notif-cmd");
-        match moon_beauty_shell::libraries::process::private_write_file(&cmd_path, b"dismiss") {
+        match moonbeauty::libraries::process::private_write_file(&cmd_path, b"dismiss") {
             Ok(_) => std::process::exit(0),
             Err(e) => {
                 eprintln!("[dismiss-notif] write {:?}: {e}", cmd_path);
@@ -516,12 +516,12 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     if args.iter().any(|a| a == "--capture-test") {
         match screenshot::capture::capture_fullscreen() {
             Ok(bytes) => {
-                let path = moon_beauty_shell::libraries::process::mbs_unique_tmp(
+                let path = moonbeauty::libraries::process::mbs_unique_tmp(
                     "mbs-capture-test",
                     "png",
                 );
                 if let Err(e) =
-                    moon_beauty_shell::libraries::process::private_write_new(&path, &bytes)
+                    moonbeauty::libraries::process::private_write_new(&path, &bytes)
                 {
                     eprintln!("[capture-test] write failed: {e}");
                 }
@@ -606,7 +606,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         let min_y = outputs.iter().map(|(_, _, y, _, _)| *y).min().unwrap_or(0);
 
         let state_file =
-            moon_beauty_shell::libraries::process::mbs_unique_tmp("mbs-freeze-state", "txt");
+            moonbeauty::libraries::process::mbs_unique_tmp("mbs-freeze-state", "txt");
         screenshot::fragment::write_state_file(&state_file, "idle", 0, 0, 0, 0);
 
         let exe = resolve_exe();
@@ -620,12 +620,12 @@ pub fn main() -> Result<(), iced_layershell::Error> {
                 continue;
             }
             let crop = image::imageops::crop_imm(&full_img, lx, ly, *w, *h).to_image();
-            let local_png = moon_beauty_shell::libraries::process::mbs_unique_tmp(
+            let local_png = moonbeauty::libraries::process::mbs_unique_tmp(
                 &format!("mbs-freeze-{}", name),
                 "png",
             );
             let write_ok =
-                match moon_beauty_shell::libraries::process::private_create_new(&local_png) {
+                match moonbeauty::libraries::process::private_create_new(&local_png) {
                     Ok(mut f) => {
                         let ok = image::DynamicImage::ImageRgba8(crop)
                             .write_to(&mut f, image::ImageFormat::Png)
@@ -717,8 +717,8 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
         let cropped = image::imageops::crop_imm(&full_img, rx, ry, rw, rh).to_image();
         let out_path =
-            moon_beauty_shell::libraries::process::mbs_unique_tmp("mbs-freeze-out", "png");
-        let save_ok = match moon_beauty_shell::libraries::process::private_create_new(&out_path) {
+            moonbeauty::libraries::process::mbs_unique_tmp("mbs-freeze-out", "png");
+        let save_ok = match moonbeauty::libraries::process::private_create_new(&out_path) {
             Ok(mut f) => {
                 let ok = image::DynamicImage::ImageRgba8(cropped)
                     .write_to(&mut f, image::ImageFormat::Png)
@@ -804,11 +804,11 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             .unwrap_or(400u32);
         if let Ok(json) = std::fs::read_to_string(&json_path) {
             if let Ok(items) =
-                serde_json::from_str::<Vec<moon_beauty_shell::bar::tray::TrayMenuItem>>(&json)
+                serde_json::from_str::<Vec<moonbeauty::bar::tray::TrayMenuItem>>(&json)
             {
                 let _ = std::fs::remove_file(&json_path);
                 std::process::exit(
-                    match moon_beauty_shell::bar::tray::context::run(items, bus, menu_path, w, h) {
+                    match moonbeauty::bar::tray::context::run(items, bus, menu_path, w, h) {
                         Ok(_) => 0,
                         Err(_) => 1,
                     },
@@ -1010,7 +1010,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     };
 
     if args.iter().any(|a| a == "--sys-tooltip") {
-        match moon_beauty_shell::overlays::system_tooltip::run() {
+        match moonbeauty::overlays::system_tooltip::run() {
             Ok(()) => std::process::exit(0),
             Err(e) => {
                 eprintln!("[sys-tooltip] {e}");
@@ -1020,7 +1020,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     }
 
     if args.iter().any(|a| a == "--weather-tooltip") {
-        match moon_beauty_shell::bar::weather::tooltip::run() {
+        match moonbeauty::bar::weather::tooltip::run() {
             Ok(()) => std::process::exit(0),
             Err(e) => {
                 eprintln!("[weather-tooltip] {e}");
@@ -1030,7 +1030,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     }
 
     if args.iter().any(|a| a == "--info-tooltip") {
-        match moon_beauty_shell::overlays::info_tooltip::run() {
+        match moonbeauty::overlays::info_tooltip::run() {
             Ok(()) => std::process::exit(0),
             Err(e) => {
                 eprintln!("[info-tooltip] {e}");
@@ -1064,7 +1064,7 @@ fn handle_lock_keypress(
         return None;
     }
     let debug = std::env::var_os("MBS_LOCK_DEBUG").is_some();
-    moon_beauty_shell::overlays::lockscreen::resolve_lock_key(event).map(|k| {
+    moonbeauty::overlays::lockscreen::resolve_lock_key(event).map(|k| {
         if debug {
             eprintln!("[lock-key] resolved: {:?}", k);
         }

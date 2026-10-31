@@ -2179,7 +2179,7 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     let _adjust: i32 = s.slant_width as i32 + 20; // slant + padding
 
     // Finding 76: per-capsule bias (batch-76 missed this file — anchor
-    // used moon_beauty_shell:: but needed crate:: prefix).
+    // used moonbeauty:: but needed crate:: prefix).
     // Finding 77: global offsets auto-scale from slant_width.
     let (bias_l, bias_r) = crate::bar::tooltip_spawn::read_offset_extra();
     let adjust_left = s.effective_tooltip_offset_left() + bias_l;

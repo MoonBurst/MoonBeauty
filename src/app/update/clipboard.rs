@@ -7,7 +7,7 @@
 
 use crate::app::{Message, MoonBeautyShellApp};
 use iced::Task as Command;
-use moon_beauty_shell::overlays::clipboard::{ClipboardMessage, ClipboardOverlay};
+use moonbeauty::overlays::clipboard::{ClipboardMessage, ClipboardOverlay};
 
 impl MoonBeautyShellApp {
     pub(crate) fn handle_clipboard(&mut self, msg: ClipboardMessage) -> Command<Message> {
@@ -199,12 +199,12 @@ impl MoonBeautyShellApp {
                 if let Some(path) = ClipboardOverlay::get_file_path(&dir, id) {
                     if let Ok(bytes) = std::fs::read(&path) {
                         if let Ok(revealed) =
-                            moon_beauty_shell::overlays::screenshot::watermark::reveal(&bytes)
+                            moonbeauty::overlays::screenshot::watermark::reveal(&bytes)
                         {
                             let out_path = dir.join(format!("revealed_{}.jxl", id));
                             let tmp = dir.join(format!(".revealed-{}.tmp.png", id));
                             let ok = std::fs::write(&tmp, &revealed).is_ok()
-                                && moon_beauty_shell::overlays::screenshot::annotator::png_to_jxl(
+                                && moonbeauty::overlays::screenshot::annotator::png_to_jxl(
                                     &tmp, &out_path,
                                 )
                                 .is_ok();
@@ -229,7 +229,7 @@ impl MoonBeautyShellApp {
                     .map(|e| e.is_image)
                     .unwrap_or(false);
                 eprintln!("[ocr] entry found, is_image={}", is_img);
-                let tmp_path = moon_beauty_shell::libraries::process::mbs_subdir("mbs-clip")
+                let tmp_path = moonbeauty::libraries::process::mbs_subdir("mbs-clip")
                     .join(format!("mbs-ocr-{}.png", id));
 
                 // Do OCR synchronously — it's fast (~1s) and we're about to close anyway

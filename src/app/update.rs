@@ -51,18 +51,18 @@ impl MoonBeautyShellApp {
                 if self.is_notif_surface {
                     return Command::none();
                 }
-                if moon_beauty_shell::libraries::backend::email::client::config_exists() {
+                if moonbeauty::libraries::backend::email::client::config_exists() {
                     eprintln!("[sync] Boot/Timer triggered email sync");
                     let folder = "INBOX".to_string();
                     return Command::perform(
                         async move {
                             let old_envs =
-                                moon_beauty_shell::libraries::backend::email::client::load_index(
+                                moonbeauty::libraries::backend::email::client::load_index(
                                     &folder,
                                 );
-                            if let Ok(new_envs) = moon_beauty_shell::libraries::backend::email::client::fetch_from_network(&folder).await {
-                                moon_beauty_shell::libraries::backend::email::client::save_index(&folder, &new_envs);
-                                moon_beauty_shell::libraries::backend::email::client::sync_bodies_background(folder).await;
+                            if let Ok(new_envs) = moonbeauty::libraries::backend::email::client::fetch_from_network(&folder).await {
+                                moonbeauty::libraries::backend::email::client::save_index(&folder, &new_envs);
+                                moonbeauty::libraries::backend::email::client::sync_bodies_background(folder).await;
                                 Ok::<_, String>((old_envs, new_envs))
                             } else {
                                 Err("fetch failed".into())
@@ -104,7 +104,7 @@ impl MoonBeautyShellApp {
                         eprintln!("[sync] New email from {}: {}", env.sender, env.subject);
 
                         // Visual notification
-                        let _ = moon_beauty_shell::libraries::process::spawn_and_reap(
+                        let _ = moonbeauty::libraries::process::spawn_and_reap(
                             std::process::Command::new("notify-send").args([
                                 "-a",
                                 "Email",
@@ -115,7 +115,7 @@ impl MoonBeautyShellApp {
                         );
 
                         // Spoken announcement
-                        moon_beauty_shell::overlays::notifications::NotificationOverlay::speak_tts(
+                        moonbeauty::overlays::notifications::NotificationOverlay::speak_tts(
                             "Email",
                             &env.sender,
                             &env.subject,
@@ -132,7 +132,7 @@ impl MoonBeautyShellApp {
                 let mut sorted: Vec<_> = notified.into_iter().collect();
                 sorted.sort();
                 sorted.truncate(200);
-                let _ = moon_beauty_shell::libraries::process::private_write_file(
+                let _ = moonbeauty::libraries::process::private_write_file(
                     &dedup_path,
                     sorted.join("\n").as_bytes(),
                 );
@@ -141,7 +141,7 @@ impl MoonBeautyShellApp {
             Message::TickWeather => {
                 return Command::perform(
                     async {
-                        moon_beauty_shell::bar::weather::WeatherBackend::fetch()
+                        moonbeauty::bar::weather::WeatherBackend::fetch()
                             .await
                             .ok()
                     },
@@ -173,7 +173,7 @@ impl MoonBeautyShellApp {
                         // dedicated music daemon over incidental browser
                         // media when both are Playing.
                         let (mpris, _source) =
-                            moon_beauty_shell::libraries::backend::poll_track().await;
+                            moonbeauty::libraries::backend::poll_track().await;
                         (cpu, ram, gpu, audio, mic, mpris)
                     },
                     |(cpu, ram, gpu, audio, mic, mpris)| {
@@ -417,17 +417,17 @@ impl MoonBeautyShellApp {
 
                                 // Finding 76: per-capsule tooltip bias.
                                 let (bias_l, bias_r) =
-                                    moon_beauty_shell::bar::capsules::tooltip_bias(
+                                    moonbeauty::bar::capsules::tooltip_bias(
                                         &id,
                                         &self.theme,
                                     );
-                                let req = moon_beauty_shell::bar::tooltip_spawn::SpawnRequest {
+                                let req = moonbeauty::bar::tooltip_spawn::SpawnRequest {
                                     id: &id,
                                     exe: resolve_exe(),
                                     output: tip_output.as_deref(),
                                     tooltip_w: tip_w,
                                     tooltip_h:
-                                        moon_beauty_shell::bar::tooltip_spawn::compute_height(
+                                        moonbeauty::bar::tooltip_spawn::compute_height(
                                             &id,
                                             &self.settings,
                                             &self.telemetry,
@@ -444,7 +444,7 @@ impl MoonBeautyShellApp {
                                     offset_right_extra: bias_r,
                                 };
 
-                                match moon_beauty_shell::bar::tooltip_spawn::spawn(&req) {
+                                match moonbeauty::bar::tooltip_spawn::spawn(&req) {
                                     Ok(c) => {
                                         eprintln!("[ipc] spawned tooltip pid={}", c.id());
                                         self.weather_tooltip_child = Some(c);
@@ -496,7 +496,7 @@ impl MoonBeautyShellApp {
                             }
                             // Right-click on alarm capsule: wipe active timers
                             if id == "alarm" {
-                                moon_beauty_shell::overlays::reminders::save_reminders(&[]);
+                                moonbeauty::overlays::reminders::save_reminders(&[]);
                                 eprintln!("[topbar] cleared active timers");
                             }
                         }
@@ -515,7 +515,7 @@ impl MoonBeautyShellApp {
                                 self.tray_expanded = true;
                                 self.tray_anim_start_width = self.tray_anim_width;
                                 self.tray_anim_started_at = std::time::Instant::now();
-                                let expanded_w = moon_beauty_shell::bar::capsules::compute_expanded_visible_width(
+                                let expanded_w = moonbeauty::bar::capsules::compute_expanded_visible_width(
                                     &self.settings, self.tray_items.len()
                                 );
                                 self.tray_target_width = expanded_w;
@@ -526,7 +526,7 @@ impl MoonBeautyShellApp {
                                 // tray_opened_at.elapsed() every 500ms while
                                 // tray_expanded is true. No per-open timer needed.
                                 return Command::perform(
-                                    moon_beauty_shell::bar::tray::watcher::fetch_tray_items(),
+                                    moonbeauty::bar::tray::watcher::fetch_tray_items(),
                                     Message::TrayItemsLoaded,
                                 );
                             } else {
@@ -539,7 +539,7 @@ impl MoonBeautyShellApp {
                             return Command::perform(
                                 async move {
                                     let _ =
-                                        moon_beauty_shell::bar::tray::watcher::activate_tray_item(
+                                        moonbeauty::bar::tray::watcher::activate_tray_item(
                                             &item.bus, &item.path,
                                         )
                                         .await;
@@ -552,7 +552,7 @@ impl MoonBeautyShellApp {
                             return Command::perform(
                                 async move {
                                     if let Some((menu_path, items)) =
-                                        moon_beauty_shell::bar::tray::watcher::get_menu_tree(
+                                        moonbeauty::bar::tray::watcher::get_menu_tree(
                                             &item_clone.bus,
                                             &item_clone.path,
                                         )
@@ -560,12 +560,12 @@ impl MoonBeautyShellApp {
                                     {
                                         let json = serde_json::to_string(&items).unwrap();
                                         let tmp_path =
-                                            moon_beauty_shell::libraries::process::mbs_unique_tmp(
+                                            moonbeauty::libraries::process::mbs_unique_tmp(
                                                 "mbs-tray-menu",
                                                 "json",
                                             );
                                         if let Err(e) =
-                                            moon_beauty_shell::libraries::process::private_write_new(
+                                            moonbeauty::libraries::process::private_write_new(
                                                 &tmp_path,
                                                 json.as_bytes(),
                                             )
@@ -781,7 +781,7 @@ impl MoonBeautyShellApp {
                                 ));
                                 let write_ok = std::fs::write(&tmp_reveal, &bytes).is_ok();
                                 let convert_ok = write_ok
-                                    && moon_beauty_shell::overlays::screenshot::annotator::png_to_jxl(
+                                    && moonbeauty::overlays::screenshot::annotator::png_to_jxl(
                                         &tmp_reveal, &out,
                                     )
                                     .is_ok();
@@ -1009,7 +1009,7 @@ impl MoonBeautyShellApp {
                 // the user ever clicks the tray capsule. Eliminates the
                 // 0-item → N-item re-animation on first open.
                 return Command::perform(
-                    moon_beauty_shell::bar::tray::watcher::fetch_tray_items(),
+                    moonbeauty::bar::tray::watcher::fetch_tray_items(),
                     Message::TrayItemsLoaded,
                 );
             }
@@ -1017,7 +1017,7 @@ impl MoonBeautyShellApp {
                 self.tray_items = items;
                 if self.tray_expanded {
                     let new_target =
-                        moon_beauty_shell::bar::capsules::compute_expanded_visible_width(
+                        moonbeauty::bar::capsules::compute_expanded_visible_width(
                             &self.settings,
                             self.tray_items.len(),
                         );
@@ -1036,7 +1036,7 @@ impl MoonBeautyShellApp {
                     && self.todo.editing_task_id.is_some()
                 {
                     self.todo
-                        .update(moon_beauty_shell::overlays::todo::TodoMessage::CancelEdit);
+                        .update(moonbeauty::overlays::todo::TodoMessage::CancelEdit);
                     return Command::none();
                 }
                 // Reminders: Escape clears the current input field, then the

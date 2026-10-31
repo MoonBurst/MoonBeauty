@@ -13,8 +13,8 @@ use crate::app::{Message, MoonBeautyShellApp};
 
 use iced::Task as Command;
 
-use moon_beauty_shell::bar::TopBarMessage;
-use moon_beauty_shell::libraries::backend::music::{
+use moonbeauty::bar::TopBarMessage;
+use moonbeauty::libraries::backend::music::{
     MusicCycleState, MpdBackend, MprisBackend, TrackSource, poll_track,
 };
 
@@ -48,7 +48,7 @@ impl MoonBeautyShellApp {
         let mut state = self.music_cycle_state.clone();
         Command::perform(
             async move {
-                moon_beauty_shell::libraries::backend::music::press(&mut state).await;
+                moonbeauty::libraries::backend::music::press(&mut state).await;
                 state
             },
             Message::MusicCycleDone,

@@ -20,7 +20,7 @@ impl MoonBeautyShellApp {
             }
             CalcMessage::Refocus => {
                 return iced::widget::operation::focus(
-                    moon_beauty_shell::overlays::calc::CALC_INPUT_ID,
+                    moonbeauty::overlays::calc::CALC_INPUT_ID,
                 )
                 .map(Message::Calc);
             }
@@ -58,7 +58,7 @@ impl MoonBeautyShellApp {
             }
             NotesMessage::Refocus => {
                 return iced::widget::operation::focus(
-                    moon_beauty_shell::overlays::notes::NOTES_INPUT_ID,
+                    moonbeauty::overlays::notes::NOTES_INPUT_ID,
                 )
                 .map(Message::Notes);
             }
@@ -78,7 +78,7 @@ impl MoonBeautyShellApp {
             }
             TodoMessage::Refocus => {
                 return iced::widget::operation::focus(
-                    moon_beauty_shell::overlays::todo::TODO_INPUT_ID,
+                    moonbeauty::overlays::todo::TODO_INPUT_ID,
                 )
                 .map(Message::Todo);
             }
@@ -87,7 +87,7 @@ impl MoonBeautyShellApp {
                 // Refocus the input so the user can type immediately
                 // after clicking ✎ or pressing F2.
                 return iced::widget::operation::focus(
-                    moon_beauty_shell::overlays::todo::TODO_INPUT_ID,
+                    moonbeauty::overlays::todo::TODO_INPUT_ID,
                 )
                 .map(Message::Todo);
             }
@@ -102,11 +102,11 @@ impl MoonBeautyShellApp {
                         .iter()
                         .filter(|t| t.category == self.todo.active_category)
                         .filter(|t| match self.todo.filter {
-                            moon_beauty_shell::overlays::todo::TodoFilter::All => true,
-                            moon_beauty_shell::overlays::todo::TodoFilter::Active => {
+                            moonbeauty::overlays::todo::TodoFilter::All => true,
+                            moonbeauty::overlays::todo::TodoFilter::Active => {
                                 !t.completed
                             }
-                            moon_beauty_shell::overlays::todo::TodoFilter::Completed => {
+                            moonbeauty::overlays::todo::TodoFilter::Completed => {
                                 t.completed
                             }
                         })
@@ -138,7 +138,7 @@ impl MoonBeautyShellApp {
             }
             DictMessage::Refocus => {
                 return iced::widget::operation::focus(
-                    moon_beauty_shell::overlays::dictionary::DICT_SEARCH_ID,
+                    moonbeauty::overlays::dictionary::DICT_SEARCH_ID,
                 )
                 .map(Message::Dict);
             }
@@ -192,7 +192,7 @@ impl MoonBeautyShellApp {
             }
             UnicodeMessage::Refocus => {
                 return iced::widget::operation::focus(
-                    moon_beauty_shell::overlays::unicode::UNICODE_INPUT_ID,
+                    moonbeauty::overlays::unicode::UNICODE_INPUT_ID,
                 )
                 .map(Message::Unicode);
             }
@@ -339,7 +339,7 @@ impl MoonBeautyShellApp {
             }
             PassMessage::Refocus => {
                 return iced::widget::operation::focus(
-                    moon_beauty_shell::overlays::pass::PASS_SEARCH_ID,
+                    moonbeauty::overlays::pass::PASS_SEARCH_ID,
                 )
                 .map(Message::Pass);
             }

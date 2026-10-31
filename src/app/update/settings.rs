@@ -25,7 +25,7 @@ impl MoonBeautyShellApp {
             if let SettingsMessage::TestProfileSound(idx) = msg {
                 if let Some(p) = self.settings.friend_profiles.get(idx) {
                     if let Some(path) = &p.sound_path {
-                        moon_beauty_shell::overlays::notifications::NotificationOverlay::play_sound(
+                        moonbeauty::overlays::notifications::NotificationOverlay::play_sound(
                             path.clone(),
                             self.settings.notif_volume,
                         );
@@ -36,7 +36,7 @@ impl MoonBeautyShellApp {
 
             if let SettingsMessage::TestProfileTts(idx) = msg {
                 if let Some(p) = self.settings.friend_profiles.get(idx) {
-                    moon_beauty_shell::overlays::notifications::NotificationOverlay::speak_tts(
+                    moonbeauty::overlays::notifications::NotificationOverlay::speak_tts(
                         "Diagnostics",
                         "Test",
                         &p.summary,

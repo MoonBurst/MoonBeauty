@@ -34,15 +34,15 @@ use crate::{
 
 use iced::widget::{container, Stack};
 use iced::{Element, Length, Padding, Task as Command};
-use moon_beauty_shell::bar::geometry::{capsule_actual_width, capsule_center_x};
-use moon_beauty_shell::bar::outputs::{get_screen_width_for, resolve_primary_output};
-use moon_beauty_shell::bar::unified::UnifiedTelemetry;
-use moon_beauty_shell::bar::{CapsuleAction, TopBar, TopBarMessage};
-use moon_beauty_shell::libraries::backend::*;
-use moon_beauty_shell::libraries::config::{ShellSettings, ShellTheme};
-use moon_beauty_shell::libraries::ipc::{send_client_command, IpcCommand, OverlayTarget};
-use moon_beauty_shell::overlays::screenshot::annotator::Tool;
-use moon_beauty_shell::overlays::*;
+use moonbeauty::bar::geometry::{capsule_actual_width, capsule_center_x};
+use moonbeauty::bar::outputs::{get_screen_width_for, resolve_primary_output};
+use moonbeauty::bar::unified::UnifiedTelemetry;
+use moonbeauty::bar::{CapsuleAction, TopBar, TopBarMessage};
+use moonbeauty::libraries::backend::*;
+use moonbeauty::libraries::config::{ShellSettings, ShellTheme};
+use moonbeauty::libraries::ipc::{send_client_command, IpcCommand, OverlayTarget};
+use moonbeauty::overlays::screenshot::annotator::Tool;
+use moonbeauty::overlays::*;
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -53,10 +53,10 @@ pub enum Message {
     TickEmailSync,
     EmailSynced,
     EmailSyncedWithDiff(
-        Vec<moon_beauty_shell::libraries::backend::email::client::NativeEnvelope>,
-        Vec<moon_beauty_shell::libraries::backend::email::client::NativeEnvelope>,
+        Vec<moonbeauty::libraries::backend::email::client::NativeEnvelope>,
+        Vec<moonbeauty::libraries::backend::email::client::NativeEnvelope>,
     ),    ComposeTabPressed(bool),
-    WeatherLoaded(Option<moon_beauty_shell::bar::weather::WeatherData>),
+    WeatherLoaded(Option<moonbeauty::bar::weather::WeatherData>),
     TickClock,
     IdleTick,
     TickToasts,
@@ -98,7 +98,7 @@ pub enum Message {
     /// every 15s. Ensures the first open has a correct
     /// item count (avoids the 206→186 re-animation flicker).
     FetchTrayItems,
-    TrayItemsLoaded(Vec<moon_beauty_shell::bar::tray::TrayItem>),
+    TrayItemsLoaded(Vec<moonbeauty::bar::tray::TrayItem>),
     TrayAnimTick,
     TrayWatchdogTick,    /// Pre-computed toast rectangles (surface-local coords). Emitted
     /// whenever the toast count changes; `try_into` converts it to
@@ -114,7 +114,7 @@ pub enum Message {
     CheckLockscreenAlive,
     /// Music cycle press completed — carries the updated state so
     /// subsequent presses continue from the right position.
-    MusicCycleDone(moon_beauty_shell::libraries::backend::MusicCycleState),
+    MusicCycleDone(moonbeauty::libraries::backend::MusicCycleState),
 }
 
 impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message {
@@ -157,7 +157,7 @@ pub struct MoonBeautyShellApp {
     pub standalone_child: Option<(OverlayTarget, std::process::Child)>,
     pub is_notif_surface: bool,
     pub notif_rx: Option<
-        std::sync::mpsc::Receiver<moon_beauty_shell::overlays::notifications::IncomingNotification>,
+        std::sync::mpsc::Receiver<moonbeauty::overlays::notifications::IncomingNotification>,
     >,
     pub settings_json_mtime: Option<std::time::SystemTime>,
     // window_w removed (problem 07): the only setter was WindowResized
@@ -165,7 +165,7 @@ pub struct MoonBeautyShellApp {
     pub notif_screen_at_startup: String,
     pub notif_surface_size: (u32, u32),
     pub tray_expanded: bool,
-    pub tray_items: Vec<moon_beauty_shell::bar::tray::TrayItem>,
+    pub tray_items: Vec<moonbeauty::bar::tray::TrayItem>,
     pub tray_anim_width: f32,
     pub tray_target_width: f32,
     pub tray_anim_start_width: f32,
@@ -177,7 +177,7 @@ pub struct MoonBeautyShellApp {
     /// expires. Independent from `tray_anim_started_at` because the
     /// latter is reset by TrayItemsLoaded when item count changes.
     pub tray_opened_at: std::time::Instant,
-    pub detected_gpus: Vec<moon_beauty_shell::libraries::backend::GpuInfo>,
+    pub detected_gpus: Vec<moonbeauty::libraries::backend::GpuInfo>,
 
     pub launcher: AppLauncher,
     pub calc: CalculatorOverlay,
@@ -200,7 +200,7 @@ pub struct MoonBeautyShellApp {
     /// Music cycle state — which player to target next, and which we
     /// most recently started (for pause priority when multiple are
     /// playing). See backend/music_cycle.rs.
-    pub music_cycle_state: moon_beauty_shell::libraries::backend::MusicCycleState,
+    pub music_cycle_state: moonbeauty::libraries::backend::MusicCycleState,
     pub is_cycling: bool,
 
     pub last_cursor_x: f32,

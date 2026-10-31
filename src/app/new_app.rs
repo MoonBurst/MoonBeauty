@@ -2,7 +2,7 @@ use super::*;
 
 impl MoonBeautyShellApp {
     pub fn new_app() -> (Self, Command<Message>) {
-        moon_beauty_shell::libraries::process::tighten_existing_runtime_state();
+        moonbeauty::libraries::process::tighten_existing_runtime_state();
         let args: Vec<String> = std::env::args().collect();
         let standalone_target = detect_standalone_overlay(&args);
         if let Some(idx) = args.iter().position(|a| a == "--tray-context-menu") {
@@ -19,11 +19,11 @@ impl MoonBeautyShellApp {
                 .unwrap_or(400u32);
             if let Ok(json) = std::fs::read_to_string(&json_path) {
                 if let Ok(items) =
-                    serde_json::from_str::<Vec<moon_beauty_shell::bar::tray::TrayMenuItem>>(&json)
+                    serde_json::from_str::<Vec<moonbeauty::bar::tray::TrayMenuItem>>(&json)
                 {
                     let _ = std::fs::remove_file(&json_path);
                     std::process::exit(
-                        match moon_beauty_shell::bar::tray::context::run(
+                        match moonbeauty::bar::tray::context::run(
                             items, bus, menu_path, w, h,
                         ) {
                             Ok(_) => 0,
@@ -52,7 +52,7 @@ impl MoonBeautyShellApp {
             std::thread::spawn(move || {
                 use std::io::Read;
                 use std::os::unix::net::UnixListener;
-                let path = moon_beauty_shell::libraries::ipc::get_socket_path();
+                let path = moonbeauty::libraries::ipc::get_socket_path();
                 let _ = std::fs::remove_file(&path);
                 let listener = match UnixListener::bind(&path) {
                     Ok(l) => {
@@ -118,8 +118,8 @@ impl MoonBeautyShellApp {
             // arbitrary rate by any same-user process; unbounded channel
             // OOMs the shell under load. 256 is 64× the visible toast cap.
             let (tx, rx) = std::sync::mpsc::sync_channel(256);
-            moon_beauty_shell::overlays::notifications::spawn(tx);
-            moon_beauty_shell::bar::tray::watcher::spawn();
+            moonbeauty::overlays::notifications::spawn(tx);
+            moonbeauty::bar::tray::watcher::spawn();
             Some(rx)
         } else {
             None
@@ -294,7 +294,7 @@ impl MoonBeautyShellApp {
             init_tasks.push(Command::done(Message::TickHardware));
             init_tasks.push(Command::perform(
                 async {
-                    moon_beauty_shell::bar::weather::WeatherBackend::fetch()
+                    moonbeauty::bar::weather::WeatherBackend::fetch()
                         .await
                         .ok()
                 },
@@ -315,7 +315,7 @@ impl MoonBeautyShellApp {
             ));
         } else if matches!(app.active_overlay, Some(OverlayTarget::Calc)) {
             init_tasks.push(
-                iced::widget::operation::focus(moon_beauty_shell::overlays::calc::CALC_INPUT_ID)
+                iced::widget::operation::focus(moonbeauty::overlays::calc::CALC_INPUT_ID)
                     .map(Message::Calc),
             );
             init_tasks.push(Command::perform(
@@ -326,7 +326,7 @@ impl MoonBeautyShellApp {
             ));
         } else if matches!(app.active_overlay, Some(OverlayTarget::Pass)) {
             init_tasks.push(
-                iced::widget::operation::focus(moon_beauty_shell::overlays::pass::PASS_SEARCH_ID)
+                iced::widget::operation::focus(moonbeauty::overlays::pass::PASS_SEARCH_ID)
                     .map(Message::Pass),
             );
             init_tasks.push(Command::perform(
@@ -338,7 +338,7 @@ impl MoonBeautyShellApp {
         } else if matches!(app.active_overlay, Some(OverlayTarget::Dictionary)) {
             init_tasks.push(
                 iced::widget::operation::focus(
-                    moon_beauty_shell::overlays::dictionary::DICT_SEARCH_ID,
+                    moonbeauty::overlays::dictionary::DICT_SEARCH_ID,
                 )
                 .map(Message::Dict),
             );
@@ -356,7 +356,7 @@ impl MoonBeautyShellApp {
             }));
         } else if matches!(app.active_overlay, Some(OverlayTarget::Notes)) {
             init_tasks.push(
-                iced::widget::operation::focus(moon_beauty_shell::overlays::notes::NOTES_INPUT_ID)
+                iced::widget::operation::focus(moonbeauty::overlays::notes::NOTES_INPUT_ID)
                     .map(Message::Notes),
             );
             init_tasks.push(Command::perform(
@@ -373,7 +373,7 @@ impl MoonBeautyShellApp {
         // need this nudge).
         if matches!(app.active_overlay, Some(OverlayTarget::Todo)) {
             init_tasks.push(
-                iced::widget::operation::focus(moon_beauty_shell::overlays::todo::TODO_INPUT_ID)
+                iced::widget::operation::focus(moonbeauty::overlays::todo::TODO_INPUT_ID)
                     .map(Message::Todo),
             );
             init_tasks.push(Command::perform(
@@ -387,7 +387,7 @@ impl MoonBeautyShellApp {
         if matches!(app.active_overlay, Some(OverlayTarget::Unicode)) {
             init_tasks.push(
                 iced::widget::operation::focus(
-                    moon_beauty_shell::overlays::unicode::UNICODE_INPUT_ID,
+                    moonbeauty::overlays::unicode::UNICODE_INPUT_ID,
                 )
                 .map(Message::Unicode),
             );
@@ -403,7 +403,7 @@ impl MoonBeautyShellApp {
             init_tasks.push(Command::done(Message::Email(EmailMessage::SetLoading)));
             init_tasks.push(Command::perform(
                 async {
-                    moon_beauty_shell::libraries::backend::email::client::fetch_folder_list().await
+                    moonbeauty::libraries::backend::email::client::fetch_folder_list().await
                 },
                 |res| match res {
                     Ok(folders) => Message::Email(EmailMessage::FoldersLoaded(folders)),
@@ -412,7 +412,7 @@ impl MoonBeautyShellApp {
             ));
             init_tasks.push(Command::perform(
                 async {
-                    moon_beauty_shell::libraries::backend::email::client::fetch_envelopes("INBOX")
+                    moonbeauty::libraries::backend::email::client::fetch_envelopes("INBOX")
                         .await
                 },
                 |res| match res {
@@ -427,7 +427,7 @@ impl MoonBeautyShellApp {
         if matches!(app.active_overlay, Some(OverlayTarget::Reminders)) {
             init_tasks.push(
                 iced::widget::operation::focus(
-                    moon_beauty_shell::overlays::reminders::REMINDER_TASK_ID,
+                    moonbeauty::overlays::reminders::REMINDER_TASK_ID,
                 )
                 .map(Message::Reminders),
             );

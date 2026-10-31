@@ -13,7 +13,7 @@
 
 use super::*;
 
-use moon_beauty_shell::overlays::lockscreen::LockMessage;
+use moonbeauty::overlays::lockscreen::LockMessage;
 
 impl MoonBeautyShellApp {
     pub(crate) fn handle_lock(&mut self, msg: LockMessage) -> Command<Message> {

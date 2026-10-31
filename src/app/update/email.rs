@@ -6,7 +6,7 @@
 
 use crate::app::{Message, MoonBeautyShellApp};
 use iced::Task as Command;
-use moon_beauty_shell::overlays::email::EmailMessage;
+use moonbeauty::overlays::email::EmailMessage;
 
 impl MoonBeautyShellApp {
     pub(crate) fn handle_email(&mut self, msg: EmailMessage) -> Command<Message> {
@@ -19,7 +19,7 @@ impl MoonBeautyShellApp {
                     self.email.update(EmailMessage::CancelCompose);
                     return Command::perform(
                         async move {
-                            moon_beauty_shell::libraries::backend::email::client::save_draft(
+                            moonbeauty::libraries::backend::email::client::save_draft(
                                 &to, &sub, &body,
                             )
                             .await
@@ -41,7 +41,7 @@ impl MoonBeautyShellApp {
                     Command::done(Message::Email(EmailMessage::SetLoading)),
                     Command::perform(
                         async move {
-                            moon_beauty_shell::libraries::backend::email::client::fetch_envelopes(&f_fetch).await
+                            moonbeauty::libraries::backend::email::client::fetch_envelopes(&f_fetch).await
                         },
                         move |res| match res {
                             Ok(envs) => {
@@ -57,14 +57,14 @@ impl MoonBeautyShellApp {
                 // If we're in a local folder, the email actually lives
                 // in the Gmail folder it was assigned from (usually INBOX).
                 let source =
-                    moon_beauty_shell::libraries::backend::email::local_sort::source_folder_for(
+                    moonbeauty::libraries::backend::email::local_sort::source_folder_for(
                         &id, &folder,
                     )
                     .unwrap_or_else(|| folder.clone());
                 self.email.update(EmailMessage::SelectMail(id.clone()));
                 return Command::perform(
                     async move {
-                        moon_beauty_shell::libraries::backend::email::client::read_message(
+                        moonbeauty::libraries::backend::email::client::read_message(
                             &id, &source,
                         )
                         .await
@@ -101,7 +101,7 @@ impl MoonBeautyShellApp {
                 self.email.update(EmailMessage::SendMail);
                 return Command::perform(
                     async move {
-                        moon_beauty_shell::libraries::backend::email::client::send_message(
+                        moonbeauty::libraries::backend::email::client::send_message(
                             &to,
                             &sub,
                             &body,
@@ -111,14 +111,14 @@ impl MoonBeautyShellApp {
                     },
                     |res| match res {
                         Ok(_) => Message::Email(EmailMessage::MessageLoaded(
-                            moon_beauty_shell::libraries::backend::email::client::ParsedEmail {
+                            moonbeauty::libraries::backend::email::client::ParsedEmail {
                                 text: "✓ Message sent.".into(),
                                 images: Vec::new(),
                                 attachments: Vec::new(),
                             },
                         )),
                         Err(e) => Message::Email(EmailMessage::MessageLoaded(
-                            moon_beauty_shell::libraries::backend::email::client::ParsedEmail {
+                            moonbeauty::libraries::backend::email::client::ParsedEmail {
                                 text: format!("✗ Send failed: {}", e),
                                 images: Vec::new(),
                                 attachments: Vec::new(),
@@ -136,7 +136,7 @@ impl MoonBeautyShellApp {
                 let folder_for_resp = folder;
                 return Command::perform(
                     async move {
-                        moon_beauty_shell::libraries::backend::email::client::fetch_from_network(
+                        moonbeauty::libraries::backend::email::client::fetch_from_network(
                             &folder_for_fetch,
                         )
                         .await
@@ -154,7 +154,7 @@ impl MoonBeautyShellApp {
                 // Local auto-sort only on INBOX (where the sort rules apply)
                 if folder == "INBOX" && self.settings.email_auto_sort_threshold > 0 {
                     let threshold = self.settings.email_auto_sort_threshold;
-                    moon_beauty_shell::libraries::backend::email::local_sort::auto_sort(
+                    moonbeauty::libraries::backend::email::local_sort::auto_sort(
                         &envs, &folder, threshold,
                     );
                 }
@@ -166,14 +166,14 @@ impl MoonBeautyShellApp {
                         self.email.active_folder
                     );
                 }
-                moon_beauty_shell::libraries::backend::email::client::save_index(&folder, &envs);
+                moonbeauty::libraries::backend::email::client::save_index(&folder, &envs);
                 if folder == self.email.active_folder {
                     self.email
                         .update(EmailMessage::EnvelopesLoaded(folder.clone(), envs.clone()));
                 }
                 return Command::perform(
                     async move {
-                        moon_beauty_shell::libraries::backend::email::client::sync_bodies_background(folder).await
+                        moonbeauty::libraries::backend::email::client::sync_bodies_background(folder).await
                     },
                     |_| Message::Email(EmailMessage::SyncDone),
                 );
@@ -204,7 +204,7 @@ impl MoonBeautyShellApp {
                             Command::done(Message::Email(EmailMessage::SetLoading)),
                             Command::perform(
                                 async move {
-                                    moon_beauty_shell::libraries::backend::email::client::fetch_envelopes(&f_fetch).await
+                                    moonbeauty::libraries::backend::email::client::fetch_envelopes(&f_fetch).await
                                 },
                                 move |res| match res {
                                     Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(
@@ -225,7 +225,7 @@ impl MoonBeautyShellApp {
                         self.email.update(EmailMessage::SelectMail(id.clone()));
                         return Command::perform(
                             async move {
-                                moon_beauty_shell::libraries::backend::email::client::read_message(&id, &folder).await
+                                moonbeauty::libraries::backend::email::client::read_message(&id, &folder).await
                             },
                             |body| Message::Email(EmailMessage::MessageLoaded(body)),
                         );
@@ -240,7 +240,7 @@ impl MoonBeautyShellApp {
                     self.email.update(EmailMessage::ToggleStar);
                     return Command::perform(
                         async move {
-                            moon_beauty_shell::libraries::backend::email::client::toggle_star(
+                            moonbeauty::libraries::backend::email::client::toggle_star(
                                 &id, &folder, star,
                             )
                             .await
@@ -271,7 +271,7 @@ impl MoonBeautyShellApp {
                         self.email.parsed_email = None;
                         self.email.active_mail_id = None;
 
-                        moon_beauty_shell::libraries::backend::email::client::save_index(
+                        moonbeauty::libraries::backend::email::client::save_index(
                             &folder,
                             &self.email.envelopes,
                         );
@@ -280,11 +280,11 @@ impl MoonBeautyShellApp {
 
                         if !is_trash {
                             let mut trash_envs =
-                                moon_beauty_shell::libraries::backend::email::client::load_index(
+                                moonbeauty::libraries::backend::email::client::load_index(
                                     "Trash",
                                 );
                             trash_envs.insert(0, mail_clone);
-                            moon_beauty_shell::libraries::backend::email::client::save_index(
+                            moonbeauty::libraries::backend::email::client::save_index(
                                 "Trash",
                                 &trash_envs,
                             );
@@ -293,9 +293,9 @@ impl MoonBeautyShellApp {
                         return Command::perform(
                             async move {
                                 if is_trash {
-                                    moon_beauty_shell::libraries::backend::email::client::delete_message(&id, &folder).await
+                                    moonbeauty::libraries::backend::email::client::delete_message(&id, &folder).await
                                 } else {
-                                    moon_beauty_shell::libraries::backend::email::client::move_to_trash(&id, &folder).await
+                                    moonbeauty::libraries::backend::email::client::move_to_trash(&id, &folder).await
                                 }
                             },
                             |res| match res {
@@ -309,7 +309,7 @@ impl MoonBeautyShellApp {
             EmailMessage::CopyGmailFilter => {
                 let folder = self.email.active_folder.clone();
                 if let Some(filter_text) =
-                    moon_beauty_shell::libraries::backend::email::local_sort::gmail_filter_text_for(
+                    moonbeauty::libraries::backend::email::local_sort::gmail_filter_text_for(
                         &folder,
                     )
                 {
@@ -360,13 +360,13 @@ impl MoonBeautyShellApp {
                     }
                     self.email.parsed_email = None;
                     self.email.active_mail_id = None;
-                    moon_beauty_shell::libraries::backend::email::client::save_index(
+                    moonbeauty::libraries::backend::email::client::save_index(
                         &folder,
                         &self.email.envelopes,
                     );
                     return Command::perform(
                         async move {
-                            moon_beauty_shell::libraries::backend::email::client::move_to_spam(
+                            moonbeauty::libraries::backend::email::client::move_to_spam(
                                 &id, &folder,
                             )
                             .await
@@ -389,13 +389,13 @@ impl MoonBeautyShellApp {
                     }
                     self.email.parsed_email = None;
                     self.email.active_mail_id = None;
-                    moon_beauty_shell::libraries::backend::email::client::save_index(
+                    moonbeauty::libraries::backend::email::client::save_index(
                         "Spam",
                         &self.email.envelopes,
                     );
                     return Command::perform(
                         async move {
-                            moon_beauty_shell::libraries::backend::email::client::mark_not_spam(
+                            moonbeauty::libraries::backend::email::client::mark_not_spam(
                                 &id,
                             )
                             .await
@@ -413,7 +413,7 @@ impl MoonBeautyShellApp {
                     if !email.is_empty() {
                         return Command::perform(
                             async move {
-                                moon_beauty_shell::libraries::backend::email::client::save_contact(&email).await
+                                moonbeauty::libraries::backend::email::client::save_contact(&email).await
                             },
                             |res| match res {
                                 Ok(_) => Message::Email(EmailMessage::DraftSaved),
@@ -462,12 +462,12 @@ impl MoonBeautyShellApp {
             EmailMessage::OpenComposer => {
                 self.email.update(msg);
                 return iced::widget::operation::focus(
-                    moon_beauty_shell::overlays::email::COMPOSE_TO_ID,
+                    moonbeauty::overlays::email::COMPOSE_TO_ID,
                 )
                 .map(Message::Email);
             }
             EmailMessage::SaveLogin => {
-                let cfg = moon_beauty_shell::libraries::backend::email::client::EmailConfig {
+                let cfg = moonbeauty::libraries::backend::email::client::EmailConfig {
                     email: self.email.login_email.clone(),
                     password: Some(self.email.login_password.clone()),
                     password_cmd: None,
@@ -482,7 +482,7 @@ impl MoonBeautyShellApp {
                     },
                 };
                 let use_sops = self.email.use_sops;
-                match moon_beauty_shell::libraries::backend::email::client::save_config(
+                match moonbeauty::libraries::backend::email::client::save_config(
                     &cfg, use_sops,
                 ) {
                     Ok(_) => {
@@ -492,7 +492,7 @@ impl MoonBeautyShellApp {
                             Command::done(Message::Email(EmailMessage::SetLoading)),
                             Command::perform(
                                 async move {
-                                    moon_beauty_shell::libraries::backend::email::client::fetch_envelopes("INBOX").await
+                                    moonbeauty::libraries::backend::email::client::fetch_envelopes("INBOX").await
                                 },
                                 |res| match res {
                                     Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(

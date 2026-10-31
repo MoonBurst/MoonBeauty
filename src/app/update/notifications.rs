@@ -63,21 +63,21 @@ impl MoonBeautyShellApp {
                     let nid = t.id;
                     self.notifs.update(NotifMessage::DismissToast(id));
                     std::thread::spawn(move || {
-                        moon_beauty_shell::overlays::notifications::emit_action_invoked(
+                        moonbeauty::overlays::notifications::emit_action_invoked(
                             nid, "default",
                         );
                         std::thread::sleep(std::time::Duration::from_millis(200));
                         let matches = notification_candidates(&app, entry.as_deref());
                         if !is_app_focused(&matches) {
                             let ok = focus_notification_app(&app, entry.as_deref());
-                            moon_beauty_shell::dbg_log!(
+                            moonbeauty::dbg_log!(
                                 "[activate-toast] fallback app={:?} entry={:?} ok={}",
                                 app,
                                 entry,
                                 ok
                             );
                         } else {
-                            moon_beauty_shell::dbg_log!(
+                            moonbeauty::dbg_log!(
                                 "[activate-toast] client self-focused app={:?}",
                                 app
                             );
@@ -117,7 +117,7 @@ impl MoonBeautyShellApp {
             } else {
                 cmd.env_remove("MBS_OUTPUT");
             }
-            let _ = moon_beauty_shell::libraries::process::spawn_and_reap(&mut cmd);
+            let _ = moonbeauty::libraries::process::spawn_and_reap(&mut cmd);
         }
         if let Some(rx) = self.notif_rx.as_ref() {
             while let Ok(n) = rx.try_recv() {
@@ -154,19 +154,19 @@ impl MoonBeautyShellApp {
                             let nid = t.id;
                             self.notifs.update(NotifMessage::DismissToast(t.id));
                             std::thread::spawn(move || {
-                                moon_beauty_shell::overlays::notifications::emit_action_invoked(
+                                moonbeauty::overlays::notifications::emit_action_invoked(
                                     nid, "default",
                                 );
                                 std::thread::sleep(std::time::Duration::from_millis(200));
                                 let matches = notification_candidates(&app, entry.as_deref());
                                 if !is_app_focused(&matches) {
                                     let ok = focus_notification_app(&app, entry.as_deref());
-                                    moon_beauty_shell::dbg_log!(
+                                    moonbeauty::dbg_log!(
                                         "[activate-latest] fallback app={:?} entry={:?} ok={}",
                                         app, entry, ok
                                     );
                                 } else {
-                                    moon_beauty_shell::dbg_log!(
+                                    moonbeauty::dbg_log!(
                                         "[activate-latest] client self-focused app={:?}",
                                         app
                                     );
@@ -180,9 +180,9 @@ impl MoonBeautyShellApp {
                 }
             }
 
-            if !moon_beauty_shell::overlays::notifications::dnd_active() {
+            if !moonbeauty::overlays::notifications::dnd_active() {
                 let held =
-                    moon_beauty_shell::overlays::notifications::take_held_notifs();
+                    moonbeauty::overlays::notifications::take_held_notifs();
                 if !held.is_empty() {
                     eprintln!(
                         "[dnd] unpaused! releasing {} held toast(s) to screen",
@@ -226,7 +226,7 @@ impl MoonBeautyShellApp {
                 }
             };
             if should_write {
-                moon_beauty_shell::overlays::notifications::write_active_count(
+                moonbeauty::overlays::notifications::write_active_count(
                     active_pending,
                 );
                 self.last_active_pending_written =
@@ -256,7 +256,7 @@ impl MoonBeautyShellApp {
     }
 
     pub(crate) fn dismiss_latest_notif(&self) -> Command<Message> {
-        let cmd_path = moon_beauty_shell::libraries::process::mbs_runtime_dir()
+        let cmd_path = moonbeauty::libraries::process::mbs_runtime_dir()
             .join("moon-beauty-shell-notif-cmd");
         match std::fs::write(&cmd_path, b"dismiss") {
             Ok(_) => eprintln!("[ipc] DismissLatestNotif -> notif-surface"),
@@ -290,7 +290,7 @@ impl MoonBeautyShellApp {
                 "Telemetry stream established.",
             ),
         ] {
-            let _ = moon_beauty_shell::libraries::process::spawn_and_reap(
+            let _ = moonbeauty::libraries::process::spawn_and_reap(
                 std::process::Command::new("notify-send").args([
                     "-a", "Diagnostics", "--", title, body,
                 ]),
@@ -300,7 +300,7 @@ impl MoonBeautyShellApp {
     }
 
     pub(crate) fn toggle_notification_dnd(&mut self) -> Command<Message> {
-        let paused = moon_beauty_shell::overlays::notifications::toggle_dnd();
+        let paused = moonbeauty::overlays::notifications::toggle_dnd();
         self.settings.notifications_enabled = !paused;
         let _ = self.settings.save();
         eprintln!("[dnd] paused={}", paused);
