@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use super::email_client::NativeEnvelope;
+use super::client::NativeEnvelope;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LocalSort {
@@ -155,7 +155,7 @@ pub fn auto_sort(
         // Create new folder. If a Gmail label shares the name, suffix it
         // to avoid a confusing duplicate in the sidebar.
         let base = folder_name_from_sender(&envs[0].sender_email, &envs[0].sender);
-        let gmail_collision = super::email_client::load_folders_cache()
+        let gmail_collision = super::client::load_folders_cache()
             .iter()
             .any(|f| f == &base);
         let base_with_suffix = if gmail_collision {

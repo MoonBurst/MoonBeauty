@@ -13,7 +13,7 @@
 use crate::bar::unified::{BorgStatus, PodmanStatus};
 use crate::bar::weather::WeatherData;
 use crate::libraries::backend::audio::AudioStatus;
-use crate::libraries::backend::mpris::MprisTrack;
+use crate::libraries::backend::music::MprisTrack;
 use crate::libraries::backend::system::{
     BatteryMetrics, CpuMetrics, GpuMetrics, NetMetrics, RamMetrics,
 };

@@ -353,7 +353,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     if args.iter().any(|a| a == "--test-email") {
         let rt = tokio::runtime::Runtime::new().expect("tokio rt");
         rt.block_on(async {
-            match moon_beauty_shell::libraries::backend::email_client::test_connection().await {
+            match moon_beauty_shell::libraries::backend::email::client::test_connection().await {
                 Ok((imap, smtp, report)) => {
                     println!("{}", report);
                     if imap && smtp {

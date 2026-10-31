@@ -17,3 +17,7 @@ pub use annotator::{
     grim_capture, save_annotated_image, slurp_region, AnnotatorMessage, AnnotatorOverlay,
 };
 pub use ipc::spawn as spawn_annotator_ipc;
+
+pub mod watermark;
+
+pub use watermark::{add_plate_watermark, reveal};

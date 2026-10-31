@@ -1,3 +1,20 @@
+//! Email client: config, IMAP/SMTP, MIME parsing, secure filesystem.
+//!
+//! Extracted submodules (structural split, no behavior change):
+//!   types.rs       — NativeEnvelope, ParsedEmail
+//!   validation.rs  — is_safe_imap_uid, is_safe_imap_folder
+//!
+//! Everything else is still in this file.  See docs/REFACTOR.md for
+//! remaining split targets.
+
+mod types;
+mod secure_fs;
+mod validation;
+
+pub use types::*;
+use secure_fs::*;
+pub use validation::*;
+
 use async_imap::types::Fetch as AsyncFetch;
 use futures_util::TryStreamExt;
 use lettre::message::Mailbox;
@@ -306,35 +323,9 @@ pub fn save_config(cfg: &EmailConfig, use_sops: bool) -> Result<(), String> {
     }
 }
 
-/// Finding 28: reject folder names that could break out of the SELECT
-/// command sent to the IMAP server. `async_imap::Session::select()` and
-/// `uid_fetch()` format the folder as a quoted string; CR/LF/control
-/// chars can terminate the command and inject arbitrary IMAP commands
-/// (e.g. a hostile LIST response like "INBOX\r\nAPPEND INBOX ...").
-///
-/// Reject: empty, over 512 bytes, any C0 control char (0x00-0x1f)
-/// including CR/LF, plus DEL (0x7f).
-/// Accept: everything else (paths, "[Gmail]/Sent Mail", unicode names).
-pub fn is_safe_imap_folder(folder: &str) -> bool {
-    if folder.is_empty() || folder.len() > 512 {
-        return false;
-    }
-    !folder.chars().any(|c| c.is_control())
-}
 
-/// Finding 29: reject any message id that isn't a plain ASCII integer.
-///
-/// `async-imap::Session::uid_fetch`, `uid_store`, and `uid_copy` embed
-/// the uid in the wire command. A crafted `id` from a poisoned
-/// `index.json` (or a future IPC caller) could inject IMAP commands:
-/// `uid_fetch("1; APPEND INBOX ...")` breaks out of the fetch. Numeric
-/// validation is the only safe contract — server-assigned uids are
-/// always u32 integers, serialized to 1-10 ASCII digits.
-///
-/// Accept: non-empty, ≤20 bytes (u64::MAX is 20 digits), all ASCII digits.
-pub fn is_safe_imap_uid(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 20 && id.chars().all(|c| c.is_ascii_digit())
-}
+
+
 
 pub fn config_exists() -> bool {
     let path = config_path();
@@ -407,22 +398,9 @@ pub fn load_config() -> EmailConfig {
     def
 }
 
-#[derive(Debug, Clone)]
-pub struct ParsedEmail {
-    pub text: String,
-    pub images: Vec<std::path::PathBuf>,
-    pub attachments: Vec<(String, Vec<u8>)>,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NativeEnvelope {
-    pub id: String,
-    pub subject: String,
-    pub sender: String,
-    pub sender_email: String,
-    pub is_starred: bool,
-    pub is_read: bool,
-}
+
+
 
 // ── Secure filesystem helpers (finding 03) ────────────────────────
 //
@@ -436,111 +414,6 @@ pub struct NativeEnvelope {
 // Note: OpenOptions.mode() only applies to NEW files. If the file
 // already exists at 0644, mode() is a no-op — so we also chmod
 // explicitly after opening. That's what chmod_private exists for.
-
-fn chmod_private(path: &std::path::Path, is_dir: bool) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt as _;
-    let mode = if is_dir { 0o700 } else { 0o600 };
-    let mut perms = std::fs::metadata(path)?.permissions();
-    perms.set_mode(mode);
-    std::fs::set_permissions(path, perms)
-}
-
-/// Overwrite `path` with `bytes` at mode 0600, creating parent dirs at
-/// 0700. Safe to call on an existing file with looser permissions: the
-/// explicit chmod after open handles that case.
-fn secure_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-        let _ = chmod_private(parent, true);
-    }
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
-    let _ = chmod_private(path, false);
-    f.write_all(bytes)
-}
-
-async fn secure_write_async(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    use tokio::io::AsyncWriteExt as _;
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-        let _ = chmod_private(parent, true);
-    }
-    let mut f = tokio::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)
-        .await?;
-    let _ = chmod_private(path, false);
-    f.write_all(bytes).await
-}
-
-/// Append-only variant for logs (`drafts.txt`). Same permission model
-/// as secure_write.
-fn secure_append(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-        let _ = chmod_private(parent, true);
-    }
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .open(path)?;
-    let _ = chmod_private(path, false);
-    f.write_all(bytes)
-}
-
-/// Recursively chmod every directory under `root` to 0700 and every
-/// file to 0600. Idempotent; called once per process by the real
-/// entry point (`ensure_secure_cache_tree`), and directly by tests.
-fn ensure_secure_cache_tree_at(root: &std::path::Path) -> std::io::Result<()> {
-    if !root.exists() {
-        return Ok(());
-    }
-    let _ = chmod_private(root, true);
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir)?.flatten() {
-            let p = entry.path();
-            let ft = match entry.file_type() {
-                Ok(t) => t,
-                Err(_) => continue,
-            };
-            if ft.is_dir() {
-                let _ = chmod_private(&p, true);
-                stack.push(p);
-            } else if ft.is_file() {
-                let _ = chmod_private(&p, false);
-            }
-        }
-    }
-    Ok(())
-}
-
-/// One-shot migration on first call per process. Fixes any pre-existing
-/// cache entries that were written at 0644 by earlier builds. Cheap
-/// (guarded by OnceLock); subsequent calls are no-ops.
-fn ensure_secure_cache_tree() {
-    use std::sync::OnceLock;
-    static ONCE: OnceLock<()> = OnceLock::new();
-    ONCE.get_or_init(|| {
-        let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-        let root = base.join("moon-beauty-shell/email_cache");
-        if !root.exists() {
-            return;
-        }
-        match ensure_secure_cache_tree_at(&root) {
-            Ok(()) => eprintln!("[email] secure-cache migration: applied to {:?}", root),
-            Err(e) => eprintln!("[email] secure-cache migration failed: {e}"),
-        }
-    });
-}
 
 fn get_cache_dir(folder: &str) -> PathBuf {
     let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
@@ -1479,84 +1352,7 @@ pub async fn save_draft(to: &str, subject: &str, body: &str) -> Result<(), Strin
     Ok(())
 }
 
-#[cfg(test)]
-mod secure_fs_tests {
-    use super::*;
-    use std::os::unix::fs::PermissionsExt as _;
 
-    fn mode_of(p: &std::path::Path) -> u32 {
-        std::fs::metadata(p).unwrap().permissions().mode() & 0o777
-    }
-
-    fn unique_dir(tag: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("mbs-sec-{}-{}", tag, std::process::id()))
-    }
-
-    #[test]
-    fn secure_write_creates_0600() {
-        let dir = unique_dir("write");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("sub").join("file.txt");
-        secure_write(&path, b"secret").unwrap();
-        assert_eq!(mode_of(&path), 0o600, "file mode");
-        assert_eq!(mode_of(&path.parent().unwrap()), 0o700, "parent mode");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn secure_write_downgrades_existing_loose_file() {
-        let dir = unique_dir("downgrade");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("file.txt");
-        std::fs::write(&path, b"x").unwrap();
-        let mut p = std::fs::metadata(&path).unwrap().permissions();
-        p.set_mode(0o644);
-        std::fs::set_permissions(&path, p).unwrap();
-        assert_eq!(mode_of(&path), 0o644, "precondition");
-        secure_write(&path, b"y").unwrap();
-        assert_eq!(mode_of(&path), 0o600, "post-fix");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn secure_append_preserves_content_and_tightens_mode() {
-        let dir = unique_dir("append");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("drafts.txt");
-        secure_append(&path, b"one\n").unwrap();
-        secure_append(&path, b"two\n").unwrap();
-        let body = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(body, "one\ntwo\n");
-        assert_eq!(mode_of(&path), 0o600);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn ensure_tree_chmods_recursively() {
-        let dir = unique_dir("tree");
-        let _ = std::fs::remove_dir_all(&dir);
-        let sub = dir.join("INBOX");
-        std::fs::create_dir_all(&sub).unwrap();
-        let f1 = dir.join("index.json");
-        let f2 = sub.join("mail.eml");
-        std::fs::write(&f1, b"[]").unwrap();
-        std::fs::write(&f2, b"body").unwrap();
-        for (p, m) in [(&dir, 0o755_u32), (&sub, 0o755), (&f1, 0o644), (&f2, 0o644)] {
-            let mut pm = std::fs::metadata(p).unwrap().permissions();
-            pm.set_mode(m);
-            std::fs::set_permissions(p, pm).unwrap();
-        }
-        ensure_secure_cache_tree_at(&dir).unwrap();
-        assert_eq!(mode_of(&dir), 0o700, "root");
-        assert_eq!(mode_of(&sub), 0o700, "subdir");
-        assert_eq!(mode_of(&f1), 0o600, "file1");
-        assert_eq!(mode_of(&f2), 0o600, "file2");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-}
 
 fn map_gmail_folder(folder: &str) -> String {
     match folder {
@@ -1571,39 +1367,7 @@ fn map_gmail_folder(folder: &str) -> String {
     .to_string()
 }
 
-#[cfg(test)]
-mod imap_uid_tests {
-    use super::is_safe_imap_uid;
 
-    #[test]
-    fn numeric_uids_accepted() {
-        assert!(is_safe_imap_uid("1"));
-        assert!(is_safe_imap_uid("12345"));
-        assert!(is_safe_imap_uid("18446744073709551615")); // u64::MAX, 20 digits
-        assert!(is_safe_imap_uid("00000000000000000001"));
-    }
-
-    #[test]
-    fn injection_attempts_rejected() {
-        assert!(!is_safe_imap_uid(""));
-        assert!(!is_safe_imap_uid("1; DELETE INBOX"));
-        assert!(!is_safe_imap_uid("1\r\nDELETE INBOX"));
-        assert!(!is_safe_imap_uid("1 2"));
-        assert!(!is_safe_imap_uid("-1"));
-        assert!(!is_safe_imap_uid("1.0"));
-        assert!(!is_safe_imap_uid("1\tAPPEND"));
-        assert!(!is_safe_imap_uid("123456789012345678901")); // 21 digits
-    }
-
-    #[test]
-    fn non_ascii_digits_rejected() {
-        // Unicode digits that is_ascii_digit rejects but are numeric —
-        // async-imap would send them verbatim, breaking the command.
-        assert!(!is_safe_imap_uid("١٢٣")); // Arabic-Indic
-        assert!(!is_safe_imap_uid("1é"));
-        assert!(!is_safe_imap_uid("１")); // fullwidth digit one
-    }
-}
 
 #[cfg(test)]
 mod cache_dir_tests {

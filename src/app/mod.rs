@@ -53,8 +53,8 @@ pub enum Message {
     TickEmailSync,
     EmailSynced,
     EmailSyncedWithDiff(
-        Vec<moon_beauty_shell::libraries::backend::email_client::NativeEnvelope>,
-        Vec<moon_beauty_shell::libraries::backend::email_client::NativeEnvelope>,
+        Vec<moon_beauty_shell::libraries::backend::email::client::NativeEnvelope>,
+        Vec<moon_beauty_shell::libraries::backend::email::client::NativeEnvelope>,
     ),    ComposeTabPressed(bool),
     WeatherLoaded(Option<moon_beauty_shell::bar::weather::WeatherData>),
     TickClock,

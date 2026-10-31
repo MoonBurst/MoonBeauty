@@ -9,7 +9,6 @@ pub mod lockscreen;
 pub mod notes;
 pub mod notifications;
 pub mod pass;
-pub mod plate_watermark;
 pub mod power;
 pub mod reminders;
 pub mod rng;
@@ -43,4 +42,4 @@ pub use todo::{TodoMessage, TodoOverlay};
 pub use unicode::{UnicodeMessage, UnicodeOverlay};
 pub use websearch::{WebSearchMessage, WebSearchOverlay};
 
-pub use plate_watermark::{add_plate_watermark, reveal};
+pub use screenshot::watermark::{add_plate_watermark, reveal};

@@ -30,7 +30,7 @@ impl MoonBeautyShellApp {
         };
 
         let email_sync_sub = if is_bar
-            && moon_beauty_shell::libraries::backend::email_client::config_exists()
+            && moon_beauty_shell::libraries::backend::email::client::config_exists()
         {
             iced::time::every(std::time::Duration::from_secs(60)).map(|_| Message::TickEmailSync)
         } else {

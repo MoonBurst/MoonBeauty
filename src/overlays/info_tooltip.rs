@@ -90,7 +90,7 @@ pub struct App {
     music_search_query: String,
     music_search_results: Vec<(String, String)>,
     music_selected_idx: usize,
-    music_sources: crate::libraries::backend::music_cycle::MusicSources,
+    music_sources: crate::libraries::backend::music::MusicSources,
 }
 
 #[allow(dead_code)]
@@ -168,7 +168,7 @@ impl App {
             music_search_query: String::new(),
             music_search_results: Vec::new(),
             music_selected_idx: 0,
-            music_sources: crate::libraries::backend::music_cycle::MusicSources::load(),
+            music_sources: crate::libraries::backend::music::MusicSources::load(),
         };
         let task = Task::perform(fetch_data(mode), Message::Loaded);
         (

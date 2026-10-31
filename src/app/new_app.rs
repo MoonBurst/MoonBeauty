@@ -403,7 +403,7 @@ impl MoonBeautyShellApp {
             init_tasks.push(Command::done(Message::Email(EmailMessage::SetLoading)));
             init_tasks.push(Command::perform(
                 async {
-                    moon_beauty_shell::libraries::backend::email_client::fetch_folder_list().await
+                    moon_beauty_shell::libraries::backend::email::client::fetch_folder_list().await
                 },
                 |res| match res {
                     Ok(folders) => Message::Email(EmailMessage::FoldersLoaded(folders)),
@@ -412,7 +412,7 @@ impl MoonBeautyShellApp {
             ));
             init_tasks.push(Command::perform(
                 async {
-                    moon_beauty_shell::libraries::backend::email_client::fetch_envelopes("INBOX")
+                    moon_beauty_shell::libraries::backend::email::client::fetch_envelopes("INBOX")
                         .await
                 },
                 |res| match res {

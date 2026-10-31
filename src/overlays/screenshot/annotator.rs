@@ -1508,7 +1508,7 @@ pub fn save_annotated_image(
 
         let out = save_dir.join(format!("{} {} {}.jxl", safe_name, date_str, time_str));
 
-        match crate::overlays::plate_watermark::add_plate_watermark(&composed_bytes, name) {
+        match crate::overlays::screenshot::watermark::add_plate_watermark(&composed_bytes, name) {
             Ok(wm_bytes) => {
                 // Watermarked bytes arrive as PNG (libjxl isn't a `image`
                 // crate feature). Encode to JXL on the way to disk.

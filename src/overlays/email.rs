@@ -33,15 +33,15 @@ pub enum EmailMessage {
     SelectMail(String),
     EnvelopesLoaded(
         String,
-        Vec<crate::libraries::backend::email_client::NativeEnvelope>,
+        Vec<crate::libraries::backend::email::client::NativeEnvelope>,
     ),
     NetworkEnvelopesLoaded(
         String,
-        Vec<crate::libraries::backend::email_client::NativeEnvelope>,
+        Vec<crate::libraries::backend::email::client::NativeEnvelope>,
     ),
     FoldersLoaded(Vec<String>),
     SyncDone,
-    MessageLoaded(crate::libraries::backend::email_client::ParsedEmail),
+    MessageLoaded(crate::libraries::backend::email::client::ParsedEmail),
     Error(String),
     SetLoading,
     OpenComposer,
@@ -98,11 +98,11 @@ pub struct EmailOverlay {
     pub folders: Vec<String>,
     pub active_folder: String,
     pub active_folder_idx: usize,
-    pub envelopes: Vec<crate::libraries::backend::email_client::NativeEnvelope>,
+    pub envelopes: Vec<crate::libraries::backend::email::client::NativeEnvelope>,
     pub active_mail_id: Option<String>,
     pub selected_index: usize,
     pub focus_pane: usize,
-    pub parsed_email: Option<crate::libraries::backend::email_client::ParsedEmail>,
+    pub parsed_email: Option<crate::libraries::backend::email::client::ParsedEmail>,
     pub is_composing: bool,
     pub compose_to: String,
     pub compose_subject: String,
@@ -138,7 +138,7 @@ impl EmailOverlay {
     /// email overlay is not the target (spawning for another overlay).
     pub fn empty() -> Self {
         let mut folders: Vec<String> = vec!["INBOX".into()];
-        for f in crate::libraries::backend::email_client::load_folders_cache() {
+        for f in crate::libraries::backend::email::client::load_folders_cache() {
             if !f.is_empty() && !folders.contains(&f) {
                 folders.push(f);
             }
@@ -178,7 +178,7 @@ impl EmailOverlay {
     }
 
     pub fn new() -> Self {
-        let is_logging_in = !crate::libraries::backend::email_client::config_exists();
+        let is_logging_in = !crate::libraries::backend::email::client::config_exists();
         let mut folders: Vec<String> = vec![
             "INBOX".into(),
             "Unread".into(),
@@ -188,7 +188,7 @@ impl EmailOverlay {
             "Trash".into(),
             "Spam".into(),
         ];
-        for f in crate::libraries::backend::email_client::load_folders_cache() {
+        for f in crate::libraries::backend::email::client::load_folders_cache() {
             if !f.is_empty() && !folders.contains(&f) {
                 folders.push(f);
             }
@@ -209,7 +209,7 @@ impl EmailOverlay {
             active_compose_field: 0,
             compose_attachments: Vec::new(),
             compose_manual_attach: String::new(),
-            contacts: crate::libraries::backend::email_client::load_contacts(),
+            contacts: crate::libraries::backend::email::client::load_contacts(),
             selected_autocomplete_idx: None,
             is_loading: false,
             imap_error: None,
@@ -285,7 +285,7 @@ impl EmailOverlay {
                     self.active_folder = "INBOX".into();
                     self.active_folder_idx = 0;
                 }
-                crate::libraries::backend::email_client::save_folders_cache(&user_folders);
+                crate::libraries::backend::email::client::save_folders_cache(&user_folders);
                 self.folders = merged;
             }
             EmailMessage::MessageLoaded(b) => {
@@ -369,7 +369,7 @@ impl EmailOverlay {
                 self.compose_attachments.clear();
             }
             EmailMessage::OpenLogin => {
-                let cfg = crate::libraries::backend::email_client::load_config();
+                let cfg = crate::libraries::backend::email::client::load_config();
                 self.login_email = cfg.email;
                 self.login_password = cfg.password.unwrap_or_default();
                 self.login_imap = cfg.imap_host;
@@ -424,7 +424,7 @@ impl EmailOverlay {
                         .filter(|f| !aliases.contains(&f.as_str()))
                         .cloned()
                         .collect();
-                    crate::libraries::backend::email_client::save_folders_cache(&user_folders);
+                    crate::libraries::backend::email::client::save_folders_cache(&user_folders);
                 }
                 self.is_adding_folder = false;
             }
