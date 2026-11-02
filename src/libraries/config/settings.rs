@@ -195,6 +195,21 @@ pub fn save_friend_profiles(profiles: &[FriendProfile]) -> Result<(), std::io::E
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScreenshotSaveFormat {
+    /// Fast: ~0.5s for 4K, ~15MB. Universally pasteable.
+    Png,
+    /// Balanced: ~2-4s for 4K, ~4MB.
+    JxlFast,
+    /// Smallest: ~15-30s for 4K, ~3MB. For archival.
+    JxlBest,
+}
+
+impl Default for ScreenshotSaveFormat {
+    fn default() -> Self { Self::Png }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpuThresholds {
     #[serde(default = "default_temp_warn", alias = "tempWarn", alias = "temp_warn")]
@@ -435,6 +450,10 @@ pub struct ShellSettings {
     pub overlay_angle: u32,
     #[serde(default)]
     pub attachment_download_dir: String,
+
+    #[serde(default, alias = "screenshotSaveFormat")]
+    pub screenshot_save_format: ScreenshotSaveFormat,
+
 
     /// Emails from a single sender that trigger automatic folder creation.
     /// 0 disables auto-sort entirely.
@@ -722,6 +741,7 @@ impl Default for ShellSettings {
             palette: Base16Palette::default(),
             tts_command: None,
             attachment_download_dir: String::new(),
+            screenshot_save_format: ScreenshotSaveFormat::default(),
             email_auto_sort_threshold: default_email_auto_sort_threshold(),
             overlay_cut: default_overlay_cut(),
             overlay_angle: default_overlay_angle(),

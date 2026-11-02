@@ -2,7 +2,7 @@ use iced::widget::{button, column, container, row, scrollable, slider, text, tex
 use iced::{Alignment, Color, Element, Length, Padding};
 
 use crate::libraries::backend::system::{GpuInfo, SystemCollector};
-use crate::libraries::config::settings::{ContentRule, FriendProfile, ShellSettings};
+use crate::libraries::config::settings::{ContentRule, FriendProfile, ScreenshotSaveFormat, ShellSettings};
 
 /// Debug log — gated on MBS_DEBUG or MBS_SETTINGS_DEBUG so release builds
 /// stay silent. Uses a persistent file handle (opened once) instead of
@@ -172,6 +172,7 @@ pub enum SettingsMessage {
     ImportAlarmSound,
 
     SelectGpuId(String),
+    ScreenshotSaveFormat(ScreenshotSaveFormat),
     Gpu1TempWarn(u32),
     Gpu1TempDanger(u32),
     Gpu1VramWarn(u32),
@@ -260,6 +261,7 @@ impl SettingsOverlay {
                 | SettingsMessage::SelectGpuId(_)
                 | SettingsMessage::TrayIconSize(_)
                 | SettingsMessage::LauncherIconSize(_)
+                | SettingsMessage::ScreenshotSaveFormat(_)
                 | SettingsMessage::SizeCommit { .. }
         );
         match message {
@@ -267,6 +269,9 @@ impl SettingsOverlay {
             SettingsMessage::LauncherIconSize(v) => settings.launcher_icon_size = v.clamp(48, 160),
             SettingsMessage::SelectGpuId(id) => {
                 settings.gpu_selected_id = id;
+            }
+            SettingsMessage::ScreenshotSaveFormat(fmt) => {
+                settings.screenshot_save_format = fmt;
             }
             SettingsMessage::Gpu1TempWarn(v) => settings.gpu1.temp_warn = v,
             SettingsMessage::Gpu1TempDanger(v) => settings.gpu1.temp_danger = v,
@@ -3440,6 +3445,66 @@ impl SettingsOverlay {
                             .size(11)
                             .color(theme.text)
                             .width(Length::Fixed(50.0)),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                ]
+                .spacing(8),
+            )
+            .padding([10, 14])
+            .style(move |_t| container::Style {
+                background: Some(iced::Background::Color(Color::from_rgb8(18, 20, 26))),
+                border: iced::Border {
+                    color: theme.border,
+                    width: 1.5,
+                    radius: 6.0.into(),
+                },
+                ..Default::default()
+            }),
+        );
+
+        // ── Screenshot Save Format ─────────────────────────────
+        let fmt_btn = |fmt: ScreenshotSaveFormat, label: &'static str| -> Element<'a, SettingsMessage> {
+            let is_sel = settings.screenshot_save_format == fmt;
+            button(
+                text(label)
+                    .size(11)
+                    .bold()
+                    .color(if is_sel { theme.background } else { theme.text }),
+            )
+            .on_press(SettingsMessage::ScreenshotSaveFormat(fmt))
+            .padding([3, 8])
+            .style(move |_t, _s| button::Style {
+                background: Some(iced::Background::Color(if is_sel {
+                    theme.text
+                } else {
+                    Color::TRANSPARENT
+                })),
+                border: iced::Border {
+                    color: if is_sel { theme.text } else { theme.border },
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+        };
+
+        col = col.push(
+            container(
+                column![
+                    text("🖼 Screenshot Save Format")
+                        .size(scale_sz(0.8) as f32)
+                        .bold()
+                        .color(theme.success),
+                    text("PNG saves in ~0.5s for 4K. JXL is 4-20x slower but 4-5x smaller.")
+                        .size(11)
+                        .color(theme.muted),
+                    row![
+                        text("Format:").size(11).bold().color(theme.text),
+                        fmt_btn(ScreenshotSaveFormat::Png, "PNG (fast, large)"),
+                        fmt_btn(ScreenshotSaveFormat::JxlFast, "JXL (balanced)"),
+                        fmt_btn(ScreenshotSaveFormat::JxlBest, "JXL (smallest)"),
                     ]
                     .spacing(8)
                     .align_y(Alignment::Center),

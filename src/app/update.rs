@@ -905,7 +905,7 @@ impl MoonBeautyShellApp {
                                 Some(self.annotator.watermark_input.clone())
                             };
                             match source {
-                                Some(p) => match save_annotated_image(p, annotations, watermark) {
+                                Some(p) => match save_annotated_image(p, annotations, watermark, self.settings.screenshot_save_format) {
                                     Ok(paths) => {
                                         eprintln!("[annotator] saved {} file(s)", paths.len());
                                         if self.is_standalone {

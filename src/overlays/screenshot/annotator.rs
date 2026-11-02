@@ -10,6 +10,7 @@ use iced::widget::canvas::{self, Canvas, Frame, Geometry};
 use iced::widget::{button, container, text, text_input, Column, Row, Stack};
 use iced::{mouse, Alignment, Color, Element, Length, Point, Rectangle, Size};
 use std::path::{Path, PathBuf};
+use crate::libraries::config::settings::ScreenshotSaveFormat;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
@@ -1153,24 +1154,25 @@ pub fn register_jxl_decoder() {
     });
 }
 
-/// Encode `input` (PNG) to `output` (JXL) via ImageMagick, with a
-/// `cjxl` fallback if the ImageMagick build lacks JXL support.
-pub fn png_to_jxl(input: &Path, output: &Path) -> Result<(), String> {
-    // LOSSLESS first. The LSB steganography watermark lives in the low
-    // bit of every RGB channel; any lossy JXL encode (magick's default
-    // quality 90) destroys it before the file ever leaves the shell.
-    // cjxl -d 0 is pixel-perfect; magick is fallback only, with explicit
-    // lossless flags so LSB stego still survives.
+/// Encode PNG to JXL with parametrized effort (cjxl `-e N`).
+///
+/// Higher effort = smaller file, slower encode:
+///   -e 3 → ~2-4s for 4K, ~4MB
+///   -e 7 → ~15-30s for 4K, ~3MB
+pub fn png_to_jxl_with_effort(
+    input: &Path,
+    output: &Path,
+    effort: u8,
+) -> Result<(), String> {
+    let effort_str = effort.to_string();
     if let Ok(status) = std::process::Command::new("cjxl")
-        .args(["-d", "0", "-e", "7"])
+        .args(["-d", "0", "-e", &effort_str])
         .arg(input)
         .arg(output)
         .status()
     {
-        if status.success() {
-            return Ok(());
-        }
-        eprintln!("[jxl] cjxl failed; trying magick (lossless)");
+        if status.success() { return Ok(()); }
+        eprintln!("[jxl] cjxl -e{} failed; trying magick (lossless)", effort);
     } else {
         eprintln!("[jxl] cjxl not installed; trying magick (lossless)");
     }
@@ -1188,11 +1190,14 @@ pub fn png_to_jxl(input: &Path, output: &Path) -> Result<(), String> {
             .arg(output)
             .status()
             .map_err(|e| format!("spawn {bin}: {e}"))?;
-        if status.success() {
-            return Ok(());
-        }
+        if status.success() { return Ok(()); }
     }
     Err("JXL encode failed (cjxl and magick both failed)".into())
+}
+
+/// Encode PNG to JXL at max effort (`-e 7`) — backwards-compat wrapper.
+pub fn png_to_jxl(input: &Path, output: &Path) -> Result<(), String> {
+    png_to_jxl_with_effort(input, output, 7)
 }
 
 pub fn magick_or_convert() -> Option<&'static str> {
@@ -1444,6 +1449,7 @@ pub fn save_annotated_image(
     source: PathBuf,
     annotations: Vec<Annotation>,
     watermark: Option<String>,
+    save_format: ScreenshotSaveFormat,
 ) -> Result<Vec<PathBuf>, String> {
     let save_dir = dirs::picture_dir()
         .or_else(|| dirs::home_dir().map(|h| h.join("Pictures")))
@@ -1506,25 +1512,41 @@ pub fn save_annotated_image(
             })
             .collect();
 
-        let out = save_dir.join(format!("{} {} {}.jxl", safe_name, date_str, time_str));
+        let (out_ext, do_jxl, effort) = match save_format {
+            ScreenshotSaveFormat::Png => ("png", false, 0u8),
+            ScreenshotSaveFormat::JxlFast => ("jxl", true, 3u8),
+            ScreenshotSaveFormat::JxlBest => ("jxl", true, 7u8),
+        };
+        let out = save_dir.join(format!("{} {} {}.{}", safe_name, date_str, time_str, out_ext));
 
         match crate::overlays::screenshot::watermark::add_plate_watermark(&composed_bytes, name) {
             Ok(wm_bytes) => {
                 // Watermarked bytes arrive as PNG (libjxl isn't a `image`
                 // crate feature). Encode to JXL on the way to disk.
-                let tmp_png = save_dir.join(format!(".mbs-jxl-{}-{}.png", stamp, i));
-                std::fs::write(&tmp_png, &wm_bytes)
-                    .map_err(|e| format!("write tmp png: {e}"))?;
-                png_to_jxl(&tmp_png, &out)?;
-                let jxl_bytes = std::fs::read(&out)
-                    .map_err(|e| format!("read jxl: {e}"))?;
-                let _ = std::fs::remove_file(&tmp_png);
-                eprintln!(
-                    "[save] plate OK: {} bytes PNG -> {} bytes JXL -> {:?}",
-                    wm_bytes.len(),
-                    jxl_bytes.len(),
-                    out
-                );
+                if do_jxl {
+                    let tmp_png = save_dir.join(format!(".mbs-jxl-{}-{}.png", stamp, i));
+                    std::fs::write(&tmp_png, &wm_bytes)
+                        .map_err(|e| format!("write tmp png: {e}"))?;
+                    png_to_jxl_with_effort(&tmp_png, &out, effort)?;
+                    let jxl_bytes = std::fs::read(&out)
+                        .map_err(|e| format!("read jxl: {e}"))?;
+                    let _ = std::fs::remove_file(&tmp_png);
+                    eprintln!(
+                        "[save] plate OK: {} bytes PNG -> {} bytes JXL (e{}) -> {:?}",
+                        wm_bytes.len(),
+                        jxl_bytes.len(),
+                        effort,
+                        out
+                    );
+                } else {
+                    std::fs::write(&out, &wm_bytes)
+                        .map_err(|e| format!("write png: {e}"))?;
+                    eprintln!(
+                        "[save] plate OK: {} bytes PNG -> {:?}",
+                        wm_bytes.len(),
+                        out
+                    );
+                }
 
                 let filename = out
                     .file_name()
