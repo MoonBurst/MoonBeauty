@@ -12,26 +12,7 @@
 //! minus green is the strongest signal).
 
 use std::path::PathBuf;
-
-fn magick_or_convert() -> Option<&'static str> {
-    if std::process::Command::new("magick")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
-        Some("magick")
-    } else if std::process::Command::new("convert")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
-        Some("convert")
-    } else {
-        None
-    }
-}
+use super::magick_or_convert;
 
 fn private_dir() -> PathBuf {
     let rt = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());

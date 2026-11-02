@@ -10,6 +10,7 @@ use iced::widget::canvas::{self, Canvas, Frame, Geometry};
 use iced::widget::{button, container, text, text_input, Column, Row, Stack};
 use iced::{mouse, Alignment, Color, Element, Length, Point, Rectangle, Size};
 use std::path::{Path, PathBuf};
+use super::magick_or_convert;
 use crate::libraries::config::settings::ScreenshotSaveFormat;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1198,26 +1199,6 @@ pub fn png_to_jxl_with_effort(
 /// Encode PNG to JXL at max effort (`-e 7`) — backwards-compat wrapper.
 pub fn png_to_jxl(input: &Path, output: &Path) -> Result<(), String> {
     png_to_jxl_with_effort(input, output, 7)
-}
-
-pub fn magick_or_convert() -> Option<&'static str> {
-    if std::process::Command::new("magick")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
-        Some("magick")
-    } else if std::process::Command::new("convert")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
-        Some("convert")
-    } else {
-        None
-    }
 }
 
 fn find_annotation_font() -> Option<String> {

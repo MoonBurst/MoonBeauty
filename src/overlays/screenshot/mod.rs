@@ -7,6 +7,27 @@
 //! - `annotator` : annotation UI (rect/ellipse/arrow/pen/text/counter/redact)
 //! - `ipc`       : Unix socket listener for --annotator-surface commands
 
+
+pub(crate) fn magick_or_convert() -> Option<&'static str> {
+    if std::process::Command::new("magick")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        Some("magick")
+    } else if std::process::Command::new("convert")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        Some("convert")
+    } else {
+        None
+    }
+}
+
 pub mod annotator;
 pub mod capture;
 pub mod fragment;
