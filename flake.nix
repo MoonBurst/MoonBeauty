@@ -35,7 +35,6 @@
           slurp             # region selection
           sway              # swaymsg for output queries
           wl-clipboard      # wl-copy / wl-paste
-          cliphist          # clipboard history
           libnotify         # notify-send
           imagemagick       # watermark / annotation compose
           libjxl            # cjxl/djxl for JXL encode/decode

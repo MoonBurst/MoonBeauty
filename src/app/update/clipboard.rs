@@ -141,20 +141,6 @@ impl MoonBeautyShellApp {
                     ClipboardOverlay::delete(id);
                     let pos = self.clipboard.entries.iter().position(|e| e.id == id);
 
-                    // Matches Lua logic: pipe ID + tab into cliphist delete
-                    if let Ok(mut child) = std::process::Command::new("cliphist")
-                        .arg("delete")
-                        .stdin(std::process::Stdio::piped())
-                        .spawn()
-                    {
-                        use std::io::Write;
-                        if let Some(mut stdin) = child.stdin.take() {
-                            let _ = writeln!(stdin, "{}\t", id);
-                        }
-                        let _ = child.wait();
-                        eprintln!("[clip] Deleted ID {}", id);
-                    }
-
                     if let Some(idx) = pos {
                         self.clipboard.entries.remove(idx);
                         if !self.clipboard.entries.is_empty() {
@@ -234,41 +220,53 @@ impl MoonBeautyShellApp {
                     .join(format!("mbs-ocr-{}.png", id));
 
                 // Do OCR synchronously — it's fast (~1s) and we're about to close anyway
-                if let Ok(out) = std::process::Command::new("cliphist")
-                    .args(["decode", &id.to_string()])
-                    .output()
-                {
-                    if !out.stdout.is_empty() && std::fs::write(&tmp_path, &out.stdout).is_ok()
-                    {
-                        // Clear LD_LIBRARY_PATH so tesseract uses its own
-                        // nix-store glibc (2.43) instead of the system glibc (2.42).
-                        // This prevents the 5.5.2-binary / 5.5.3-library mismatch.
-                        let tess_out = std::process::Command::new("tesseract")
-                            .args([tmp_path.to_str().unwrap(), "stdout"])
-                            .env_remove("LD_LIBRARY_PATH")
-                            .output();
-
-                        if let Ok(tess_out) = tess_out {
-                            let text =
-                                String::from_utf8_lossy(&tess_out.stdout).trim().to_string();
-                            if !text.is_empty() {
-                                eprintln!("[ocr] {} chars extracted", text.len());
-                                if let Ok(mut child) = std::process::Command::new("wl-copy")
-                                    .stdin(std::process::Stdio::piped())
-                                    .spawn()
-                                {
-                                    use std::io::Write;
-                                    if let Some(mut stdin) = child.stdin.take() {
-                                        let _ = stdin.write_all(text.as_bytes());
-                                    }
-                                    let _ = child.wait();
+                                // Read directly from our own clipboard store instead of cliphist.
+                let ocr_ready = if let Some(src) = ClipboardOverlay::resolve_path(id) {
+                    let ext = src
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
+                    if ext == "jxl" {
+                        std::process::Command::new("djxl")
+                            .arg(&src)
+                            .arg(&tmp_path)
+                            .status()
+                            .map(|s| s.success())
+                            .unwrap_or(false)
+                    } else {
+                        std::fs::copy(&src, &tmp_path).is_ok()
+                    }
+                } else {
+                    eprintln!("[ocr] could not resolve path for id={}", id);
+                    false
+                };
+                if ocr_ready {
+                    let tess_out = std::process::Command::new("tesseract")
+                        .args([tmp_path.to_str().unwrap(), "stdout"])
+                        .env_remove("LD_LIBRARY_PATH")
+                        .output();
+                
+                    if let Ok(tess_out) = tess_out {
+                        let text =
+                            String::from_utf8_lossy(&tess_out.stdout).trim().to_string();
+                        if !text.is_empty() {
+                            eprintln!("[ocr] {} chars extracted", text.len());
+                            if let Ok(mut child) = std::process::Command::new("wl-copy")
+                                .stdin(std::process::Stdio::piped())
+                                .spawn()
+                            {
+                                use std::io::Write;
+                                if let Some(mut stdin) = child.stdin.take() {
+                                    let _ = stdin.write_all(text.as_bytes());
                                 }
-                            } else {
-                                eprintln!(
-                                    "[ocr] no text found — stderr: {}",
-                                    String::from_utf8_lossy(&tess_out.stderr)
-                                );
+                                let _ = child.wait();
                             }
+                        } else {
+                            eprintln!(
+                                "[ocr] no text found — stderr: {}",
+                                String::from_utf8_lossy(&tess_out.stderr)
+                            );
                         }
                     }
                 }
