@@ -312,9 +312,9 @@ impl MoonBeautyShellApp {
             .unwrap_or(false);
         if !running {
             let exe = resolve_exe();
-            let _ = std::process::Command::new(exe)
-                .arg("--notif-surface")
-                .spawn();
+            let mut cmd = std::process::Command::new(exe);
+            cmd.arg("--notif-surface");
+            let _ = moonbeauty::libraries::process::spawn_and_reap(&mut cmd);
             eprintln!("[dnd] respawned notif-surface");
         }
         Command::none()

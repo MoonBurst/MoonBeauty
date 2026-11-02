@@ -467,7 +467,8 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             .status();
         std::thread::sleep(std::time::Duration::from_millis(400));
         let exe = resolve_exe();
-        let _ = std::process::Command::new(exe).spawn();
+        let mut cmd = std::process::Command::new(exe);
+        let _ = moonbeauty::libraries::process::spawn_and_reap(&mut cmd);
         std::process::exit(0);
     }
 
@@ -836,7 +837,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             cmd.env("MBS_OUTPUT", target);
         }
         // else: inherit parent MBS_OUTPUT (respects external override)
-        let _ = cmd.spawn();
+        let _ = moonbeauty::libraries::process::spawn_and_reap(&mut cmd);
     }
 
     // Fast path: bar already set MBS_OUTPUT — child inherits it.

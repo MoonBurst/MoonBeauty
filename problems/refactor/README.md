@@ -20,7 +20,6 @@ isn't done. Everything else is independent.
 
 ## Bugs / gaps
 
-- [zombie-children.md](zombie-children.md) — 15m — reap tooltip children
 - [socket-path-mismatch.md](socket-path-mismatch.md) — 10m + restart — socket still `moon-beauty-shell.sock`
 - [runtime-new-unwrap.md](runtime-new-unwrap.md) — 30-60m/site — 3 sites of `Runtime::new().unwrap()`
 - [try-into-pattern.md](try-into-pattern.md) — 2-4h — `TryInto<LayershellCustomActionWithId>` is opaque
@@ -68,3 +67,6 @@ Sizes are current line counts.
 - [../README.md](../README.md) — maintainer bug notes
 - [../../docs/REFACTOR.md](../../docs/REFACTOR.md) — prose on known
   sharp edges (still partly stale; refactor/ supersedes it)
+
+## Recently fixed
+- `zombie-children` — replaced untracked `.spawn()` calls with `spawn_and_reap()` for notif-surface, wl-paste, and restart-bar.

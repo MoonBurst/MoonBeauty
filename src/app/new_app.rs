@@ -108,9 +108,9 @@ impl MoonBeautyShellApp {
             std::thread::sleep(std::time::Duration::from_millis(50));
             let exe = crate::resolve_exe();
             let exe_str = exe.to_string_lossy().to_string();
-            let _ = std::process::Command::new("wl-paste")
-                .args(["--watch", &exe_str, "--clipboard-ingest"])
-                .spawn();
+            let mut paste_cmd = std::process::Command::new("wl-paste");
+            paste_cmd.args(["--watch", &exe_str, "--clipboard-ingest"]);
+            let _ = moonbeauty::libraries::process::spawn_and_reap(&mut paste_cmd);
         }
 
         let notif_rx = if is_notif_surface {
