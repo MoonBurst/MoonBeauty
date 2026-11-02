@@ -1183,12 +1183,12 @@ pub fn run() -> Result<(), iced_layershell::Error> {
         margin,
         ..Default::default()
     };
-    let _ns_tgt_val = std::env::var("MBS_SYS_TARGET").unwrap_or_else(|_| "cpu".into());
-    let _ns_target = format!("mbs-sys-tip-{}", _ns_tgt_val);
+    let ns_tgt_val = std::env::var("MBS_SYS_TARGET").unwrap_or_else(|_| "cpu".into());
+    let ns_target = format!("mbs-sys-tip-{}", ns_tgt_val);
 
     iced_layershell::application(
         App::new_app,
-        move || _ns_target.clone(),
+        move || ns_target.clone(),
         App::update,
         App::view,
     )

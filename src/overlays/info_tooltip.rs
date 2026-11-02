@@ -2219,12 +2219,12 @@ pub fn run() -> Result<(), iced_layershell::Error> {
         margin,
         ..Default::default()
     };
-    let _ns_mode_val = std::env::var("MBS_INFO_MODE").unwrap_or_else(|_| "custom".into());
-    let _ns_mode = format!("mbs-info-tip-{}", _ns_mode_val);
+    let ns_mode_val = std::env::var("MBS_INFO_MODE").unwrap_or_else(|_| "custom".into());
+    let ns_mode = format!("mbs-info-tip-{}", ns_mode_val);
 
     iced_layershell::application(
         App::new_app,
-        move || _ns_mode.clone(),
+        move || ns_mode.clone(),
         App::update,
         App::view,
     )

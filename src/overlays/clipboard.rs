@@ -249,7 +249,6 @@ impl ClipboardOverlay {
             .join("moonbeauty")
             .join("clipboard");
         let index_path = dir.join("index.json");
-    eprintln!("[clip-reload] reading {:?}", index_path);
 
         let mut list = Vec::new();
         if let Ok(content) = std::fs::read_to_string(&index_path) {
@@ -340,49 +339,18 @@ impl ClipboardOverlay {
         .join("clipboard");
     let index_path = dir.join("index.json");
 
-    eprintln!("[clip-delete] ENTER id={} dir={:?}", id, dir);
-
-    // Step 1: remove the file on disk
-    match Self::get_file_path(&dir, id) {
-        Some(path) => {
-            eprintln!("[clip-delete] file found: {:?}", path);
-            match std::fs::remove_file(&path) {
-                Ok(()) => eprintln!("[clip-delete] file removed OK"),
-                Err(e) => eprintln!("[clip-delete] file remove FAILED: {}", e),
-            }
-        }
-        None => eprintln!("[clip-delete] NO FILE found for id={} (searching dir)", id),
+    if let Some(path) = Self::get_file_path(&dir, id) {
+        let _ = std::fs::remove_file(&path);
     }
 
-    // Step 2: rewrite index.json without the entry
-    match std::fs::read_to_string(&index_path) {
-        Ok(content) => {
-            eprintln!("[clip-delete] index read OK ({} bytes)", content.len());
-            match serde_json::from_str::<Vec<ClipItem>>(&content) {
-                Ok(mut items) => {
-                    let before = items.len();
-                    items.retain(|i| i.id != id);
-                    let after = items.len();
-                    eprintln!("[clip-delete] index retain: {} -> {} items", before, after);
-                    if before == after {
-                        eprintln!("[clip-delete] WARNING: id={} not found in index", id);
-                    }
-                    match serde_json::to_string(&items) {
-                        Ok(new_json) => {
-                            match std::fs::write(&index_path, &new_json) {
-                                Ok(()) => eprintln!("[clip-delete] index write OK ({} bytes)", new_json.len()),
-                                Err(e) => eprintln!("[clip-delete] index write FAILED: {}", e),
-                            }
-                        }
-                        Err(e) => eprintln!("[clip-delete] index serialize FAILED: {}", e),
-                    }
-                }
-                Err(e) => eprintln!("[clip-delete] index parse FAILED: {}", e),
+    if let Ok(content) = std::fs::read_to_string(&index_path) {
+        if let Ok(mut items) = serde_json::from_str::<Vec<ClipItem>>(&content) {
+            items.retain(|i| i.id != id);
+            if let Ok(new_json) = serde_json::to_string(&items) {
+                let _ = std::fs::write(&index_path, &new_json);
             }
         }
-        Err(e) => eprintln!("[clip-delete] index read FAILED: {}", e),
     }
-    eprintln!("[clip-delete] EXIT id={}", id);
 }
 
     pub async fn wipe() {

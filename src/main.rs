@@ -513,34 +513,6 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     // MUST be above the notif-surface spawn block, or the flag falls
     // through and boots the full bar.
     // Temporary: verify freeze-frame capture works before UI build
-    if args.iter().any(|a| a == "--capture-test") {
-        match screenshot::capture::capture_fullscreen() {
-            Ok(bytes) => {
-                let path = moonbeauty::libraries::process::mbs_unique_tmp(
-                    "mbs-capture-test",
-                    "png",
-                );
-                if let Err(e) =
-                    moonbeauty::libraries::process::private_write_new(&path, &bytes)
-                {
-                    eprintln!("[capture-test] write failed: {e}");
-                }
-                match image::load_from_memory(&bytes) {
-                    Ok(img) => println!(
-                        "captured {}x{} → {} ({} bytes)",
-                        img.width(),
-                        img.height(),
-                        path.display(),
-                        bytes.len()
-                    ),
-                    Err(e) => eprintln!("decode: {e}"),
-                }
-            }
-            Err(e) => eprintln!("capture failed: {e}"),
-        }
-        std::process::exit(0);
-    }
-
     // Child: render freeze-frame selector, write crop to disk
     if args.iter().any(|a| a == "--freeze-fragment") {
         let idx = args.iter().position(|a| a == "--freeze-fragment").unwrap();
