@@ -138,6 +138,7 @@ impl MoonBeautyShellApp {
                     self.clipboard.selected_id
                 );
                 if let Some(id) = self.clipboard.selected_id {
+                    ClipboardOverlay::delete(id);
                     let pos = self.clipboard.entries.iter().position(|e| e.id == id);
 
                     // Matches Lua logic: pipe ID + tab into cliphist delete
