@@ -13,6 +13,7 @@ specs — read them for context, not for a fix plan.
   discoverable, not an actual regression — verify before "fixing")
 - [music_player](music_player) — scrollbar doesn't follow arrow keys;
   Enter-to-play doesn't play the right track
+- [music_search_queue](music_search_queue) — searching a song resets the track list instead of progressing
 - [top_bar_background](top_bar_background) — background shape looks odd,
   maybe should use a slanted box
 - [unsure_how](unsure_how) — wants clickable custom system-readout
