@@ -1211,6 +1211,7 @@ impl NotificationOverlay {
                 self.pending_toasts.clear();
                 self.selected_history_id = None;
                 self.mark_history_dirty();
+            self.save_history_immediate();
                 if let Ok(mut g) = LOGGED_ICONS.lock() {
                     if let Some(set) = g.as_mut() {
                         set.clear();
@@ -1223,6 +1224,7 @@ impl NotificationOverlay {
                     self.selected_history_id = None;
                 }
                 self.mark_history_dirty();
+            self.save_history_immediate();
             }
             NotifMessage::HistorySelectNext => {
                 if self.history.is_empty() {
@@ -1256,6 +1258,7 @@ impl NotificationOverlay {
                     let pos = self.history.iter().position(|t| t.id == id);
                     self.history.retain(|t| t.id != id);
                     self.mark_history_dirty();
+            self.save_history_immediate();
 
                     self.selected_history_id = if self.history.is_empty() {
                         None
