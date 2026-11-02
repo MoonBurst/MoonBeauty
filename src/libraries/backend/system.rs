@@ -829,6 +829,60 @@ impl SystemCollector {
     /// Enumerate all GPUs on the system (NVIDIA via nvidia-smi, others via /sys/class/drm).
     /// `card_id` for NVIDIA entries is a synthetic "nvidia0", "nvidia1", ...
 
+    fn list_gpus_via_sysfs() -> Vec<GpuInfo> {
+        let mut gpus = Vec::new();
+        let drm_dir = match std::fs::read_dir("/sys/class/drm") {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("[gpu-detect] cannot read /sys/class/drm: {}", e);
+                return gpus;
+            }
+        };
+        let mut seen_pci: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for entry in drm_dir.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.starts_with("card") || name.contains('-') {
+                continue;
+            }
+            let card_id = name.clone();
+            let uevent_path = entry.path().join("device/uevent");
+            let uevent = match std::fs::read_to_string(&uevent_path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let mut pci_id = String::new();
+            let mut pci_addr = String::new();
+            for line in uevent.lines() {
+                if let Some(v) = line.strip_prefix("PCI_ID=") {
+                    pci_id = v.trim().to_string();
+                } else if let Some(v) = line.strip_prefix("PCI_SLOT_NAME=") {
+                    pci_addr = v.trim().to_string();
+                }
+            }
+            if pci_id.is_empty() || !seen_pci.insert(pci_addr.clone()) {
+                continue;
+            }
+            let is_nvidia = pci_id.to_lowercase().starts_with("10de:");
+            let name = pci_id_to_name(&pci_id)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("GPU {}", card_id));
+            let nv_idx: u32 = gpus.iter().filter(|g| g.is_nvidia).count() as u32;
+            eprintln!(
+                "[gpu-detect] sysfs: {} pci={} pci_id={} name={}",
+                card_id, pci_addr, pci_id, name
+            );
+            gpus.push(GpuInfo {
+                card_id,
+                pci_addr,
+                name,
+                is_nvidia,
+                nv_index: if is_nvidia { nv_idx } else { 0 },
+            });
+        }
+        gpus.sort_by(|a, b| a.card_id.cmp(&b.card_id));
+        gpus
+    }
+
     pub fn list_gpus_sync() -> Vec<GpuInfo> {
         let mut gpus: Vec<GpuInfo> = Vec::new();
         let mut seen_pci = std::collections::HashSet::new();
@@ -883,6 +937,11 @@ impl SystemCollector {
                     });
                 }
             }
+        }
+
+        if gpus.is_empty() {
+            eprintln!("[gpu-detect] lspci returned no GPUs; falling back to /sys/class/drm");
+            gpus = Self::list_gpus_via_sysfs();
         }
 
         if gpus.is_empty() {
