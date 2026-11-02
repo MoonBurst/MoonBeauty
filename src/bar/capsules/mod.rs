@@ -34,7 +34,15 @@ thread_local! {
 fn est_text_width(txt: &str, size: u16) -> f32 {
     let em = size as f32;
     txt.chars()
-        .map(|c| if c.is_ascii() { em * 0.6 } else { em * 1.3 })
+        .map(|c| {
+            if c == ' ' {
+                em * 0.25
+            } else if c.is_ascii() {
+                em * 0.6
+            } else {
+                em * 1.3
+            }
+        })
         .sum()
 }
 
