@@ -15,10 +15,9 @@ impl MoonBeautyShellApp {
         match message {
             // Message::WindowResized removed (problem 07)
             Message::ResizeNotifSurface(w, h) => {
-                eprintln!(
-                    "[resize] update caught ({}, {}) — try_into NOT called",
-                    w, h
-                );
+                // Intercepted by `try_into`; never reached. Arm kept only
+                // to keep the match exhaustive.
+                let _ = (w, h);
             }
             Message::IdleTick => {
                 let c1 = self.update(Message::TickClock);

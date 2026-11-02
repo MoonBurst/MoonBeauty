@@ -268,6 +268,47 @@ pub fn mbs_subdir(name: &str) -> std::path::PathBuf {
 ///
 /// Called from `MoonBeautyShellApp::new_app` in every process the
 /// shell spawns (bar, notif-surface, each standalone overlay).
+/// Prune standalone log files from `mbs_tmp_dir()`.
+///
+/// Each `spawn_standalone` call creates `mbs-standalone-<token>.log`.
+/// Without pruning, months of use accumulate hundreds of files on tmpfs.
+/// Keep the 20 most recent, delete anything older than 1 hour.
+pub fn prune_standalone_logs() {
+    let dir = mbs_tmp_dir();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return;
+    };
+    let mut logs: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
+        .flatten()
+        .filter_map(|e| {
+            let path = e.path();
+            let name = path.file_name()?.to_str()?;
+            if name.starts_with("mbs-standalone-") && name.ends_with(".log") {
+                let mtime = e.metadata().ok()?.modified().ok()?;
+                Some((mtime, path))
+            } else {
+                None
+            }
+        })
+        .collect();
+    let cutoff = std::time::SystemTime::now()
+        - std::time::Duration::from_secs(3600);
+    logs.retain(|(mtime, path)| {
+        if *mtime < cutoff {
+            let _ = std::fs::remove_file(path);
+            false
+        } else {
+            true
+        }
+    });
+    if logs.len() > 20 {
+        logs.sort_by_key(|(mtime, _)| std::cmp::Reverse(*mtime));
+        for (_, path) in logs.into_iter().skip(20) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 pub fn tighten_existing_runtime_state() {
     let Some(xdg) = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from) else {
         return;

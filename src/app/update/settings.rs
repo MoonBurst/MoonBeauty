@@ -11,17 +11,6 @@ use super::*;
 impl MoonBeautyShellApp {
     pub(crate) fn handle_settings(&mut self, msg: SettingsMessage) -> Command<Message> {
 
-            {
-                let s = format!("{:?}", msg);
-                let _truncated = if s.len() > 120 {
-                    format!("{}…", &s[..120])
-                } else {
-                    s
-                };
-                let _ts = self.settings.tooltip_sizes.len();
-                let _bm = &self.settings.bar_monitor;
-            }
-
             if let SettingsMessage::TestProfileSound(idx) = msg {
                 if let Some(p) = self.settings.friend_profiles.get(idx) {
                     if let Some(path) = &p.sound_path {

@@ -54,7 +54,7 @@ impl App {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(200);
-        let sw: i32 = std::env::var("MBS_CAPSULE_W")
+        let sw: i32 = std::env::var("MBS_SCREEN_W")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(1920);

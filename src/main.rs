@@ -457,12 +457,12 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         // binary name and end-of-argv after the flag. Prevents matching
         // scripts / editors that merely mention the strings.
         let _ = std::process::Command::new("pkill")
-            .args(["-f", "(^|/)(moonbeauty|moonbeauty)$"])
+            .args(["-f", "(^|/)(moonbeauty|moon-beauty-shell)$"])
             .status();
         let _ = std::process::Command::new("pkill")
             .args([
                 "-f",
-                "(^|/)(moonbeauty|moonbeauty) (--(sys|weather|alarm|info)-tooltip|--tray-popup)$",
+                "(^|/)(moonbeauty|moon-beauty-shell) (--(sys|weather|alarm|info)-tooltip|--tray-popup)$",
             ])
             .status();
         std::thread::sleep(std::time::Duration::from_millis(400));
@@ -545,12 +545,6 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     if args.iter().any(|a| a == "--screenshot") {
         let quick = args.iter().any(|a| a == "--quick" || a == "--no-annotate");
         let annotate = !quick;
-        let watermark_cli = args
-            .iter()
-            .position(|a| a == "--watermark")
-            .and_then(|i| args.get(i + 1).cloned());
-        let _ = watermark_cli;
-
         // Multi-monitor: capture the entire desktop once, then spawn one fragment
         // per monitor with a local crop. Fragments coordinate drags via a shared state file.
         let outputs = screenshot::output::list_all_outputs();
@@ -822,7 +816,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     if !is_notif_surface && standalone_target.is_none() {
         let _ = std::process::Command::new("pkill")
-            .args(["-f", "--", "(^|/)(moonbeauty|moonbeauty) --notif-surface$"])
+            .args(["-f", "--", "(^|/)(moonbeauty|moon-beauty-shell) --notif-surface$"])
             .status();
         std::thread::sleep(std::time::Duration::from_millis(300));
         let exe = resolve_exe();

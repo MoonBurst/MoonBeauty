@@ -194,7 +194,7 @@ impl ShellTheme {
             caution,
             success,
             focus,
-            font_family: "Fira Sans Condensed".to_string(),
+            font_family: crate::libraries::style::SHELL_FAMILY.to_string(),
             font_size_normal: settings.global_font_size,
             font_size_overlay: settings.overlay_font_size,
             border_width: settings.global_border_width,

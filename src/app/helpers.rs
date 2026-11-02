@@ -44,7 +44,7 @@ impl MoonBeautyShellApp {
                         "-KILL",
                         "-f",
                         "--",
-                        "(^|/)(moonbeauty|moonbeauty) --lockscreen-instance( .*)?$",
+                        "(^|/)(moonbeauty|moon-beauty-shell) --lockscreen-instance( .*)?$",
                     ])
                     .status();
             }
@@ -55,6 +55,7 @@ impl MoonBeautyShellApp {
 
     pub fn spawn_standalone(&mut self, target: OverlayTarget) {
         self.kill_standalone();
+        moonbeauty::libraries::process::prune_standalone_logs();
         let exe = resolve_exe();
         let tag = target.as_arg();
         let log_path =

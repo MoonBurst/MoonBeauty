@@ -466,8 +466,6 @@ impl MoonBeautyShellApp {
 
         let notif_sub = if self.is_notif_surface {
             iced::time::every(std::time::Duration::from_millis(50)).map(|_| Message::PollNotifs)
-        } else if !self.is_standalone {
-            iced::Subscription::none()
         } else {
             iced::Subscription::none()
         };

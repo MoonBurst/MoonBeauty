@@ -28,7 +28,8 @@ pub struct LockscreenOverlay {
     cached_global_padding: u16,
     ipc_tx: Option<mpsc::Sender<LockIpc>>,
     ipc_rx: Option<mpsc::Receiver<LockIpc>>,
-    pending_sends: u32,}
+    pending_sends: u32,
+}
 
 impl Default for LockscreenOverlay {
     fn default() -> Self {

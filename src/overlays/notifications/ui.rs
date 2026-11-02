@@ -634,7 +634,10 @@ impl NotificationOverlay {
         let path = Self::history_path();
         if let Ok(data) = serde_json::to_string_pretty(&self.history) {
             let tmp = path.with_extension("tmp");
-            if fs::write(&tmp, data).is_ok() {
+            // Finding 23 regression: history contains OTPs and private
+            // URLs. `fs::write` inherits umask (022 → 0644). Route through
+            // the same 0600 helper the rest of the file already uses.
+            if crate::libraries::process::private_write_file(&tmp, data.as_bytes()).is_ok() {
                 let _ = fs::rename(tmp, path);
             }
         }
@@ -1803,11 +1806,17 @@ fn rand_id() -> u32 {
     let mut b = [0u8; 4];
     if let Ok(mut f) = fs::File::open("/dev/urandom") {
         use std::io::Read;
-        let _ = f.read_exact(&mut b);
-        u32::from_ne_bytes(b)
-    } else {
-        1000
+        if f.read_exact(&mut b).is_ok() {
+            return u32::from_ne_bytes(b);
+        }
     }
+    // Fallback: time+pid mix. Not cryptographic, but avoids the
+    // guaranteed-collision constant `1000` on the next launch.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    (nanos.rotate_left(24) ^ std::process::id() as u64) as u32
 }
 
 pub fn dnd_flag_path() -> PathBuf {

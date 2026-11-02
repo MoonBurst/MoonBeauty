@@ -3,6 +3,7 @@ use super::*;
 impl MoonBeautyShellApp {
     pub fn new_app() -> (Self, Command<Message>) {
         moonbeauty::libraries::process::tighten_existing_runtime_state();
+        moonbeauty::libraries::process::prune_standalone_logs();
         let args: Vec<String> = std::env::args().collect();
         let standalone_target = detect_standalone_overlay(&args);
         if let Some(idx) = args.iter().position(|a| a == "--tray-context-menu") {
@@ -103,7 +104,7 @@ impl MoonBeautyShellApp {
         // clipboard entries after N bar restarts.
         if standalone_target.is_none() && !is_notif_surface {
             let _ = std::process::Command::new("pkill")
-                .args(["-f", "wl-paste --watch.*(moonbeauty|moonbeauty)"])
+                .args(["-f", "wl-paste --watch.*(moonbeauty|moon-beauty-shell)"])
                 .status();
             std::thread::sleep(std::time::Duration::from_millis(50));
             let exe = crate::resolve_exe();

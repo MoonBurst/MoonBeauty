@@ -176,7 +176,6 @@ impl AnnotatorOverlay {
             return;
         }
         register_jxl_decoder();
-        register_jxl_decoder();
         let dims = ::image::ImageReader::new(std::io::Cursor::new(&bytes))
             .with_guessed_format()
             .ok()

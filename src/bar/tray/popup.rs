@@ -61,10 +61,6 @@ impl App {
         let grow_right = std::env::var("MBS_GROW_RIGHT")
             .map(|v| v == "1")
             .unwrap_or_else(|_| cx < sw / 2);
-        let _h: u32 = std::env::var("MBS_TOOLTIP_H")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(300);
         let w: u32 = std::env::var("MBS_TOOLTIP_W")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -218,8 +214,6 @@ impl App {
                 self.expand_ms,
             )
         };
-        let _slant = (theme.slant_width * (anim.h / settings.bar_height as f32)).max(0.0);
-
         let slant_h = theme.slant_width * (anim.h / settings.bar_height as f32);
         let bg = crate::overlays::tooltip_engine::ParallelogramBg {
             w: anim.w,

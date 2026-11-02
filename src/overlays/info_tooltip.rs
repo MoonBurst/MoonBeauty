@@ -490,7 +490,6 @@ Message::MusicTrashConfirm => {
         };
 
         // Clock gets an octagon; every other info tooltip gets the parallelogram.
-        let is_clock = self.mode == "clock";
         let bg_view: Element<'_, Message> = if is_clock {
             let oct = crate::overlays::tooltip_engine::OctagonBg {
                 w: anim.w,
