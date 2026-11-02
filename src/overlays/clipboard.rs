@@ -101,7 +101,7 @@ fn decode_jxl_rgba(path: &std::path::Path) -> Option<(u32, u32, Vec<u8>)> {
     Some((thumb.width(), thumb.height(), thumb.into_raw()))
 }
 
-pub fn handle_for_path(path: &std::path::Path) -> Option<iced::widget::image::Handle> {
+pub fn handle_for_list(path: &std::path::Path) -> Option<iced::widget::image::Handle> {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
     static CACHE: OnceLock<Mutex<HashMap<std::path::PathBuf, iced::widget::image::Handle>>> = OnceLock::new();
@@ -117,6 +117,71 @@ pub fn handle_for_path(path: &std::path::Path) -> Option<iced::widget::image::Ha
     cache.lock().unwrap().insert(path.to_path_buf(), handle.clone());
     Some(handle)
 }
+
+pub fn handle_for_preview(path: &std::path::Path) -> Option<iced::widget::image::Handle> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<std::path::PathBuf, iced::widget::image::Handle>>> =
+        OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(h) = cache.lock().unwrap().get(path) {
+        return Some(h.clone());
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let handle = if ext == "jxl" {
+        let companion = ensure_jxl_preview_png(path)?;
+        iced::widget::image::Handle::from_path(&companion)
+    } else {
+        iced::widget::image::Handle::from_path(path)
+    };
+    cache.lock().unwrap().insert(path.to_path_buf(), handle.clone());
+    Some(handle)
+}
+
+/// Ensure a persistent PNG companion exists for a JXL file.  Generated
+/// once via djxl, resized to max 1600px wide (screenshot-sized, keeps
+/// file small), reused forever.  Companion lives next to the .jxl as
+/// `{stem}.preview.png`.
+fn ensure_jxl_preview_png(jxl_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let png_path = jxl_path.with_extension("preview.png");
+    if png_path.exists() {
+        return Some(png_path);
+    }
+    let tmp = crate::libraries::process::mbs_unique_tmp("mbs-preview", "png");
+    let ok = std::process::Command::new("djxl")
+        .arg(jxl_path)
+        .arg(&tmp)
+        .status()
+        .ok()?
+        .success();
+    if !ok {
+        let _ = std::fs::remove_file(&tmp);
+        return None;
+    }
+    const MAX_W: u32 = 1600;
+    match image::open(&tmp) {
+        Ok(img) if img.width() > MAX_W => {
+            let h = (MAX_W as f32 * img.height() as f32 / img.width() as f32) as u32;
+            let resized = image::imageops::resize(
+                &img.to_rgba8(),
+                MAX_W,
+                h,
+                image::imageops::FilterType::Triangle,
+            );
+            let _ = std::fs::remove_file(&tmp);
+            resized.save(&png_path).ok()?;
+        }
+        _ => {
+            std::fs::rename(&tmp, &png_path).ok()?;
+        }
+    }
+    Some(png_path)
+}
+
 
 pub struct ClipboardOverlay {
     pub search_query: String,
@@ -342,6 +407,7 @@ impl ClipboardOverlay {
     if let Some(path) = Self::get_file_path(&dir, id) {
         let _ = std::fs::remove_file(&path);
     }
+    let _ = std::fs::remove_file(dir.join(format!("{}.preview.png", id)));
 
     if let Ok(content) = std::fs::read_to_string(&index_path) {
         if let Ok(mut items) = serde_json::from_str::<Vec<ClipItem>>(&content) {
@@ -652,7 +718,7 @@ impl ClipboardOverlay {
             if let Some(thumb) = &item.thumb_path {
                 item_row = item_row.push(
                     {
-                        let __el: Element<'_, ClipboardMessage> = match handle_for_path(std::path::Path::new(&thumb)) {
+                        let __el: Element<'_, ClipboardMessage> = match handle_for_list(std::path::Path::new(&thumb)) {
                             Some(h) => iced::widget::image(h)
                                 .width(Length::Fixed(40.0))
                                 .height(Length::Fixed(40.0))
@@ -737,7 +803,7 @@ impl ClipboardOverlay {
             container(
                 container(
                     {
-                        let __el: Element<'_, ClipboardMessage> = match handle_for_path(std::path::Path::new(img_path)) {
+                        let __el: Element<'_, ClipboardMessage> = match handle_for_preview(std::path::Path::new(img_path)) {
                             Some(h) => iced::widget::image(h)
                                 .width(Length::Fill)
                                 .content_fit(iced::ContentFit::Contain)
