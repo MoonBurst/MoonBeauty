@@ -223,7 +223,7 @@ impl TopBar {
             iced::widget::space::horizontal(),
             right_row,
         ]
-        .padding([4, 16])
+        .padding([4, 24])
         .align_y(Alignment::Center)
         .width(Length::Fill)
         .height(Length::Fixed(settings.bar_height as f32));
