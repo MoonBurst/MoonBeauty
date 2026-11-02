@@ -81,7 +81,7 @@ impl DictionaryOverlay {
             .expect(
                 "XDG_CACHE_HOME or HOME must be set; refusing to persist dictionary cache to /tmp",
             )
-            .join("moon_dict_cache.json")
+            .join("moonbeauty_dict_cache.json")
     }
 
     pub fn load_cache() -> HashMap<String, Vec<MeaningEntry>> {

@@ -487,7 +487,7 @@ impl NotificationOverlay {
         // Finding 23: OTP codes / private URLs must not land in world-readable /tmp.
         dirs::cache_dir()
             .expect("XDG_CACHE_HOME or HOME must be set; refusing to persist notification history to /tmp")
-            .join("moon_notification_history.json")
+            .join("moonbeauty_notification_history.json")
     }
 
     /// Compute the pixel offset needed to scroll the given history
