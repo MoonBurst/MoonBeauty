@@ -116,20 +116,13 @@ impl Default for SystemCollector {
 }
 
 fn short_gpu_name(full: &str) -> String {
-    let mut s = full.to_string();
-    for p in ["Radeon ", "GeForce ", "AMD ", "NVIDIA "] {
-        if s.starts_with(p) {
-            s = s[p.len()..].to_string();
+    let s = full.trim();
+    for p in ["Radeon ", "GeForce ", "NVIDIA ", "AMD ", "Intel "] {
+        if let Some(rest) = s.strip_prefix(p) {
+            return rest.to_string();
         }
     }
-    for suf in [
-        " XTX", " XT", " GRE", " Ti", " SUPER", " Super", " Laptop", " Mobile", " M",
-    ] {
-        if s.ends_with(suf) {
-            s = s[..s.len() - suf.len()].to_string();
-        }
-    }
-    s.replace(" ", "")
+    s.to_string()
 }
 
 impl SystemCollector {
@@ -864,7 +857,7 @@ impl SystemCollector {
             }
             let is_nvidia = pci_id.to_lowercase().starts_with("10de:");
             let name = pci_id_to_name(&pci_id)
-                .map(|s| s.to_string())
+                .map(short_gpu_name)
                 .unwrap_or_else(|| format!("GPU {}", card_id));
             let nv_idx: u32 = gpus.iter().filter(|g| g.is_nvidia).count() as u32;
             eprintln!(
