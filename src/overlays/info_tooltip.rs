@@ -375,7 +375,7 @@ impl App {
                         iced::widget::Id::new("music_scroll"),
                         iced::widget::scrollable::AbsoluteOffset {
                             x: 0.0,
-                            y: (self.music_selected_idx as f32 * 24.0 - 40.0).max(0.0),
+                            y: (self.music_selected_idx as f32 * 32.0 - 60.0).max(0.0),
                         },
                     )
                     .map(|_: ()| Message::Tick);

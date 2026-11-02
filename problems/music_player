@@ -1,2 +1,2 @@
-The music search scrollbar acts dumb when scrolling with arrow keys
-enter doesn't play music pieces correctly.
+The music search Enter key doesn't play music pieces correctly.
+(Scrollbar arrow-key navigation was fixed).
