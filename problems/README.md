@@ -54,3 +54,4 @@ Notes here that are now resolved. See `git log` for the commits.
   now detected. Display names strip only the vendor prefix
   ("RX 7900 XTX", "RX 6400").
 - `music_search_queue` — playing a search result no longer clears the query and list; you can arrow down and press Enter to play the next one.
+- `music_search_queue` — searching now replaces the MPD queue with the search results rather than appending to the user's playlist. Playing a song and letting it end now advances to the next search result instead of looping back to the top of the playlist.

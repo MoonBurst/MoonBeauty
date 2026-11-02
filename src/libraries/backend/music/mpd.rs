@@ -252,38 +252,32 @@ impl MpdBackend {
         }
     }
 
-    pub async fn play_url(url: &str) {
+    pub async fn play_queue(urls: &[String], start_index: usize) {
+        if urls.is_empty() { return; }
         let Some(client) = Self::connect().await else {
-            eprintln!("[mpd] play_url: connection failed");
+            eprintln!("[mpd] play_queue: connection failed");
             return;
         };
-        eprintln!("[mpd] play_url: {}", url);
+        eprintln!("[mpd] play_queue: replacing queue with {} tracks, starting at {}", urls.len(), start_index);
 
-        let current_len = match client.command(mpd_client::commands::Queue).await {
-            Ok(q) => q.len(),
-            Err(e) => {
-                eprintln!("[mpd] queue failed: {:?}", e);
-                0
-            }
-        };
-
-        match client.command(mpd_client::commands::Add::uri(url)).await {
-            Ok(_) => eprintln!("[mpd] added to queue"),
-            Err(e) => eprintln!("[mpd] add failed: {:?}", e),
+        if let Err(e) = client.command(mpd_client::commands::Clear).await {
+            eprintln!("[mpd] clear failed: {:?}", e);
         }
-
-        match client
+        for url in urls {
+            if let Err(e) = client.command(mpd_client::commands::Add::uri(url)).await {
+                eprintln!("[mpd] add failed for {}: {:?}", url, e);
+            }
+        }
+        let _ = client
             .command(mpd_client::commands::Play::song(
-                mpd_client::commands::SongPosition(current_len),
+                mpd_client::commands::SongPosition(start_index as u32),
             ))
-            .await
-        {
-            Ok(_) => eprintln!("[mpd] played song at index {}", current_len),
-            Err(e) => {
-                eprintln!("[mpd] play index failed: {:?}, trying Play::current()", e);
-                let _ = client.command(mpd_client::commands::Play::current()).await;
-            }
-        }
+            .await;
+    }
+
+    pub async fn play_url(url: &str) {
+        let urls = vec![url.to_string()];
+        Self::play_queue(&urls, 0).await;
     }
 
     pub async fn next() {

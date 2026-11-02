@@ -395,23 +395,27 @@ impl App {
                 }
             }
             Message::MusicPlaySelected => {
-                if let Some((_, url)) = self.music_search_results.get(self.music_selected_idx) {
-                    let url_clone = url.clone();
+                if self.music_search_results.get(self.music_selected_idx).is_some() {
+                    let urls: Vec<String> = self.music_search_results.iter().map(|(_, u)| u.clone()).collect();
+                    let idx = self.music_selected_idx;
                     return Task::perform(
                         async move {
-                            crate::libraries::backend::MpdBackend::play_url(&url_clone).await;
+                            crate::libraries::backend::MpdBackend::play_queue(&urls, idx).await;
                         },
                         |_| Message::Tick,
                     );
                 }
             }
             Message::MusicPlaySong(url) => {
-                return Task::perform(
-                    async move {
-                        crate::libraries::backend::MpdBackend::play_url(&url).await;
-                    },
-                    |_| Message::Tick,
-                );
+                if let Some(idx) = self.music_search_results.iter().position(|(_, u)| u == &url) {
+                    let urls: Vec<String> = self.music_search_results.iter().map(|(_, u)| u.clone()).collect();
+                    return Task::perform(
+                        async move {
+                            crate::libraries::backend::MpdBackend::play_queue(&urls, idx).await;
+                        },
+                        |_| Message::Tick,
+                    );
+                }
             }
             Message::MusicTrashConfirm => {
                 self.trash_confirm = true;
