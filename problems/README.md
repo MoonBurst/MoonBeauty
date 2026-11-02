@@ -13,7 +13,6 @@ specs — read them for context, not for a fix plan.
   discoverable, not an actual regression — verify before "fixing")
 - [music_player](music_player) — scrollbar doesn't follow arrow keys;
   Enter-to-play doesn't play the right track
-- [music_search_queue](music_search_queue) — searching a song resets the track list instead of progressing
 - [top_bar_background](top_bar_background) — background shape looks odd,
   maybe should use a slanted box
 - [unsure_how](unsure_how) — wants clickable custom system-readout
@@ -54,3 +53,4 @@ Notes here that are now resolved. See `git log` for the commits.
   `lspci` is absent from PATH. Both AMD GPUs (1002:744C, 1002:743F) are
   now detected. Display names strip only the vendor prefix
   ("RX 7900 XTX", "RX 6400").
+- `music_search_queue` — playing a search result no longer clears the query and list; you can arrow down and press Enter to play the next one.

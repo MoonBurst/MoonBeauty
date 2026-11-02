@@ -397,8 +397,6 @@ impl App {
             Message::MusicPlaySelected => {
                 if let Some((_, url)) = self.music_search_results.get(self.music_selected_idx) {
                     let url_clone = url.clone();
-                    self.music_search_query.clear();
-                    self.music_search_results.clear();
                     return Task::perform(
                         async move {
                             crate::libraries::backend::MpdBackend::play_url(&url_clone).await;
@@ -408,8 +406,6 @@ impl App {
                 }
             }
             Message::MusicPlaySong(url) => {
-                self.music_search_query.clear();
-                self.music_search_results.clear();
                 return Task::perform(
                     async move {
                         crate::libraries::backend::MpdBackend::play_url(&url).await;
