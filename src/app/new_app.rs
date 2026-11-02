@@ -39,7 +39,7 @@ impl MoonBeautyShellApp {
         let is_notif_surface = detect_notif_surface(&args);
         let is_standalone = standalone_target.is_some();
         let settings = ShellSettings::load();
-        let _tray_width_px = settings.tray_width as f32;
+        let tray_width_px = settings.tray_width as f32;
         eprintln!(
             "[startup] tray_width={} tray_timeout={}s",
             settings.tray_width, settings.tray_timeout_sec
@@ -167,9 +167,9 @@ impl MoonBeautyShellApp {
             notif_surface_size: if is_notif_surface { (1, 1) } else { (0, 0) },
             tray_expanded: false,
             tray_items: Vec::new(),
-            tray_anim_width: _tray_width_px,
-            tray_target_width: _tray_width_px,
-            tray_anim_start_width: _tray_width_px,
+            tray_anim_width: tray_width_px,
+            tray_target_width: tray_width_px,
+            tray_anim_start_width: tray_width_px,
             tray_anim_started_at: std::time::Instant::now(),
             tray_anim_duration_ms: 220,
             tray_timeout_gen: 0,

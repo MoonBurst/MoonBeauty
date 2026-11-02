@@ -449,9 +449,6 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
     let half_cap = (cap_w / 2.0) as i32;
 
-    // Symmetric alignment: +32 on the left, -32 on the right.
-    let _adjust: i32 = s.slant_width as i32 + 20; // slant + padding
-
     // Finding 76: per-capsule bias added to global offsets.
     let (bias_l, bias_r) = crate::bar::tooltip_spawn::read_offset_extra();
     let adjust_left = s.effective_tooltip_offset_left() + bias_l;

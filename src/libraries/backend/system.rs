@@ -819,9 +819,7 @@ impl SystemCollector {
 }
 
 impl SystemCollector {
-    /// Enumerate all GPUs on the system (NVIDIA via nvidia-smi, others via /sys/class/drm).
-    /// `card_id` for NVIDIA entries is a synthetic "nvidia0", "nvidia1", ...
-
+    /// Enumerate GPUs via /sys/class/drm (fallback when lspci is unavailable).
     fn list_gpus_via_sysfs() -> Vec<GpuInfo> {
         let mut gpus = Vec::new();
         let drm_dir = match std::fs::read_dir("/sys/class/drm") {

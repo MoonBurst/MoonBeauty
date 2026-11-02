@@ -300,18 +300,6 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         let settings = &self.settings;
         let theme = &self.theme;
-        let _content_h = match &self.data {
-            Some(Data::Cpu(c)) => {
-                (c.top_procs.len().min(10) as f32 * 24.0) + 100.0 + settings.bar_height as f32
-            }
-            Some(Data::Gpu(g)) => {
-                (g.top_procs.len().min(10) as f32 * 24.0) + 100.0 + settings.bar_height as f32
-            }
-            Some(Data::Ram(r)) => {
-                (r.top_procs.len().min(10) as f32 * 24.0) + 100.0 + settings.bar_height as f32
-            }
-            None => self.h as f32,
-        };
         let effective_h = self.h as f32;
 
         let anim = if let Some(t) = self.closing_at {

@@ -280,7 +280,7 @@ impl MoonBeautyShellApp {
                 IpcCommand::Ping => {}
             },
             Message::TopBar(msg) => {
-                eprintln!("[topbar-msg] {:?}", msg);
+                moonbeauty::dbg_log!("[topbar-msg] {:?}", msg);
                 if let TopBarMessage::Action(act) = msg {
                     match act {
                         CapsuleAction::OpenOverlay(id) => {
@@ -977,7 +977,7 @@ impl MoonBeautyShellApp {
                     if elapsed_ms >= dur || t >= 1.0 {
                         self.tray_anim_width = self.tray_target_width;
                     }
-                    eprintln!(
+                    moonbeauty::dbg_log!(
                         "[tray-anim] elapsed={}ms t={:.2} width={:.1} target={:.1}",
                         elapsed_ms, t, self.tray_anim_width, self.tray_target_width
                     );

@@ -1517,9 +1517,6 @@ impl NotificationOverlay {
         let fs_sm = fs * 0.85;
         let gap = 10.0;
         let row_w = win_w - body_inset * 2.0;
-        // Minimum row height so short notifications don't collapse too
-        // small. Rows *grow* past this if the body text needs more space.
-        let _row_min_h = 72.0;
 
         let mut list_col = column![].spacing(gap);
 

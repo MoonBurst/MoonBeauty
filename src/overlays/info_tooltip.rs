@@ -591,7 +591,6 @@ impl App {
         let muted = a(t.muted);
         let danger = a(t.danger);
         let warning = a(t.warning);
-        let _success = a(t.success);
         let half_tt = settings.control_border_width * 0.5;
         let success = a(t.success);
 
@@ -763,7 +762,7 @@ impl App {
                     // Extra horizontal padding so widgets don't clip against the diagonal edges
                     let safe = safe + 20.0;
 
-                    let (title, artist, _album, playing, pos, len, _url, vol) = match track_opt {
+                    let (title, artist, _album, playing, pos, len, url, vol) = match track_opt {
                         Some(tr) => (
                             tr.title.clone(),
                             tr.artist.clone(),
@@ -1038,7 +1037,7 @@ impl App {
                     let act_h = 28.0;
                     let folder_btn = make_slanted_button(
                         "Folder".into(),
-                        Message::MusicOpenFolder(_url.clone()),
+                        Message::MusicOpenFolder(url.clone()),
                         bg_col_l,
                         text_col_l,
                         text_col_l,
@@ -1048,7 +1047,7 @@ impl App {
                     let trash_btn = if self.trash_confirm {
                         make_slanted_button(
                             "Confirm?".into(),
-                            Message::MusicTrashExecute(_url.clone()),
+                            Message::MusicTrashExecute(url.clone()),
                             bg_col_l,
                             danger,
                             danger,
@@ -2177,9 +2176,6 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     let bar_h = s.bar_height as i32;
     let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
     let half_cap = (cap_w / 2.0) as i32;
-
-    // Alignment offset for the slanted corner + padding.
-    let _adjust: i32 = s.slant_width as i32 + 20; // slant + padding
 
     // Finding 76: per-capsule bias (batch-76 missed this file — anchor
     // used moonbeauty:: but needed crate:: prefix).

@@ -554,7 +554,7 @@ fn default_clipboard_thumbnail_size() -> u32 {
     64
 }
 fn default_poll_interval() -> u64 {
-    30000
+    2000
 }
 fn default_true() -> bool {
     true
