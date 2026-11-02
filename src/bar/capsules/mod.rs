@@ -160,7 +160,7 @@ impl CapsuleRenderer {
         let bounding_w = if id == "tray" {
             settings.tray_width as f32 + theme.slant_width * 2.0
         } else {
-            text_w + theme.slant_width * 2.0 + 24.0
+            text_w + theme.slant_width * 2.0 + settings.capsule_internal_padding as f32
         };
         record_width(id, bounding_w);
 

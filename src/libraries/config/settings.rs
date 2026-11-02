@@ -308,6 +308,8 @@ pub struct ShellSettings {
     pub global_padding: u16,
     #[serde(default = "default_capsule_spacing", alias = "capsuleSpacing")]
     pub capsule_spacing: i32,
+    #[serde(default = "default_capsule_internal_padding", alias = "capsuleInternalPadding")]
+    pub capsule_internal_padding: u32,
     #[serde(default = "default_cpu_temp_warn", alias = "cpuTempWarn")]
     pub cpu_temp_warn: u32,
     #[serde(default = "default_cpu_temp_danger", alias = "cpuTempDanger")]
@@ -511,6 +513,9 @@ fn default_control_border_width() -> f32 {
 fn default_global_padding() -> u16 {
     12
 }
+fn default_capsule_internal_padding() -> u32 {
+    20
+}
 fn default_capsule_spacing() -> i32 {
     2
 }
@@ -692,6 +697,7 @@ impl Default for ShellSettings {
             control_border_width: default_control_border_width(),
             global_padding: default_global_padding(),
             capsule_spacing: default_capsule_spacing(),
+            capsule_internal_padding: default_capsule_internal_padding(),
             cpu_temp_warn: default_cpu_temp_warn(),
             cpu_temp_danger: default_cpu_temp_danger(),
             cpu_usage_warn: default_cpu_usage_warn(),

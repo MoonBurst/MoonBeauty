@@ -78,6 +78,7 @@ pub enum SettingsMessage {
     BorderWidth(u32),
     ControlBorderWidth(u32),
     CapsuleSpacing(i32),
+    CapsuleInternalPadding(u32),
     TrayWidth(u32),
     TrayIconSize(u32),
     LauncherIconSize(u32),
@@ -342,6 +343,7 @@ impl SettingsOverlay {
                 settings.control_border_width = (v as f32).clamp(1.0, 8.0)
             }
             SettingsMessage::CapsuleSpacing(v) => settings.capsule_spacing = v.clamp(-50, 40),
+            SettingsMessage::CapsuleInternalPadding(v) => settings.capsule_internal_padding = v.clamp(0, 60),
             SettingsMessage::TrayWidth(v) => settings.tray_width = v.clamp(50, 400),
             SettingsMessage::TrayTimeout(v) => settings.tray_timeout_sec = v.clamp(0, 30),
             SettingsMessage::HardwarePollInterval(v) => {
@@ -2623,6 +2625,27 @@ impl SettingsOverlay {
                         0..=40,
                         settings.slant_width as u32,
                         SettingsMessage::SlantWidth
+                    )
+                    .width(Length::Fill),
+                ]
+                .spacing(3)
+                .width(Length::FillPortion(1)),
+                column![
+                    row![
+                        text("Capsule Internal Padding")
+                            .size((scale_sz(0.8)) as f32)
+                            .bold()
+                            .color(theme.text),
+                        row![].width(Length::Fill),
+                        text(format!("{}px", settings.capsule_internal_padding))
+                            .size((scale_sz(0.8)) as f32)
+                            .bold()
+                            .color(theme.text)
+                    ],
+                    slider(
+                        0..=60,
+                        settings.capsule_internal_padding,
+                        SettingsMessage::CapsuleInternalPadding
                     )
                     .width(Length::Fill),
                 ]
