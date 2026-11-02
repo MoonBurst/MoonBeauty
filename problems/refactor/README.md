@@ -20,7 +20,6 @@ isn't done. Everything else is independent.
 
 ## Bugs / gaps
 
-- [socket-path-mismatch.md](socket-path-mismatch.md) — 10m + restart — socket still `moon-beauty-shell.sock`
 - [runtime-new-unwrap.md](runtime-new-unwrap.md) — 30-60m/site — 3 sites of `Runtime::new().unwrap()`
 - [try-into-pattern.md](try-into-pattern.md) — 2-4h — `TryInto<LayershellCustomActionWithId>` is opaque
 - [lockscreen-integration-tests.md](lockscreen-integration-tests.md) — 3-4h — no automated auth coverage
@@ -70,3 +69,4 @@ Sizes are current line counts.
 
 ## Recently fixed
 - `zombie-children` — replaced untracked `.spawn()` calls with `spawn_and_reap()` for notif-surface, wl-paste, and restart-bar.
+- `socket-path-mismatch` — IPC socket renamed from `moon-beauty-shell.sock` to `moonbeauty.sock`.
