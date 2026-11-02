@@ -9,7 +9,6 @@ specs — read them for context, not for a fix plan.
 
 - [email](email) — compose window: pressing Enter should open a larger
   reader/responder; currently stays in the 3-pane view
-- [gpu_regression](gpu_regression) — GPU readout shows only one GPU
   instead of all (may be a right-click-to-cycle affordance that isn't
   discoverable, not an actual regression — verify before "fixing")
 - [music_player](music_player) — scrollbar doesn't follow arrow keys;
@@ -45,3 +44,12 @@ See [refactor/README.md](refactor/README.md) for the full index.
 - Manual test of the affected feature after
   `systemctl --user restart moonbeauty`
   (the running process is NOT updated by `cargo build`)
+
+## Recently fixed
+
+Notes here that are now resolved. See `git log` for the commits.
+
+- `gpu_regression` — GPU detection reads `/sys/class/drm` directly when
+  `lspci` is absent from PATH. Both AMD GPUs (1002:744C, 1002:743F) are
+  now detected. Display names strip only the vendor prefix
+  ("RX 7900 XTX", "RX 6400").
