@@ -328,6 +328,8 @@ pub struct ShellSettings {
     pub tray_icon_size: u32,
     #[serde(default = "default_launcher_icon_size", alias = "launcherIconSize")]
     pub launcher_icon_size: u32,
+    #[serde(default = "default_clipboard_thumbnail_size", alias = "clipboardThumbnailSize")]
+    pub clipboard_thumbnail_size: u32,
     #[serde(
         default = "default_poll_interval",
         alias = "hardwarePollInterval",
@@ -542,6 +544,10 @@ fn default_tray_icon_size() -> u32 {
 fn default_launcher_icon_size() -> u32 {
     100
 }
+
+fn default_clipboard_thumbnail_size() -> u32 {
+    64
+}
 fn default_poll_interval() -> u64 {
     30000
 }
@@ -696,6 +702,7 @@ impl Default for ShellSettings {
             tray_timeout_sec: default_tray_timeout(),
             tray_icon_size: default_tray_icon_size(),
             launcher_icon_size: default_launcher_icon_size(),
+            clipboard_thumbnail_size: default_clipboard_thumbnail_size(),
             hardware_poll_interval_ms: default_poll_interval(),
             notifications_enabled: true,
             notif_hold_duration_sec: default_notif_hold(),

@@ -81,6 +81,7 @@ pub enum SettingsMessage {
     TrayWidth(u32),
     TrayIconSize(u32),
     LauncherIconSize(u32),
+    ClipboardThumbnailSize(u32),
     TrayTimeout(u32),
     HardwarePollInterval(u64),
 
@@ -261,12 +262,14 @@ impl SettingsOverlay {
                 | SettingsMessage::SelectGpuId(_)
                 | SettingsMessage::TrayIconSize(_)
                 | SettingsMessage::LauncherIconSize(_)
+                | SettingsMessage::ClipboardThumbnailSize(_)
                 | SettingsMessage::ScreenshotSaveFormat(_)
                 | SettingsMessage::SizeCommit { .. }
         );
         match message {
             SettingsMessage::TrayIconSize(v) => settings.tray_icon_size = v.clamp(12, 48),
             SettingsMessage::LauncherIconSize(v) => settings.launcher_icon_size = v.clamp(48, 160),
+            SettingsMessage::ClipboardThumbnailSize(v) => settings.clipboard_thumbnail_size = v.clamp(32, 160),
             SettingsMessage::SelectGpuId(id) => {
                 settings.gpu_selected_id = id;
             }
@@ -3442,6 +3445,21 @@ impl SettingsOverlay {
                         )
                         .width(Length::Fixed(240.0)),
                         text(format!("{}px", settings.launcher_icon_size))
+                            .size(11)
+                            .color(theme.text)
+                            .width(Length::Fixed(50.0)),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                    row![
+                        text("Clipboard Thumb:").size(11).bold().color(theme.text),
+                        slider(
+                            32..=160,
+                            settings.clipboard_thumbnail_size,
+                            SettingsMessage::ClipboardThumbnailSize
+                        )
+                        .width(Length::Fixed(240.0)),
+                        text(format!("{}px", settings.clipboard_thumbnail_size))
                             .size(11)
                             .color(theme.text)
                             .width(Length::Fixed(50.0)),
