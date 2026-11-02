@@ -227,58 +227,29 @@ impl MpdBackend {
         let Some(client) = Self::connect().await else {
             return Vec::new();
         };
-        let filter = mpd_client::filter::Filter::new(
-            Tag::Title,
-            mpd_client::filter::Operator::Contain,
-            query.to_string(),
-        );
-        match client
-            .command(mpd_client::commands::Find::new(filter))
-            .await
-        {
-            Ok(songs) => {
-                eprintln!("[mpd-search] found {} songs for '{}'", songs.len(), query);
-                songs
-                    .into_iter()
-                    .map(|s| (Self::first_tag(&s, Tag::Title), s.url))
-                    .filter(|(t, _)| !t.is_empty())
-                    .take(10)
-                    .collect()
-            }
+        let q = query.to_lowercase();
+        let all_songs = match client.command(mpd_client::commands::ListAllIn::root()).await {
+            Ok(s) => s,
             Err(e) => {
-                eprintln!("[mpd-search] error: {:?}", e);
-                Vec::new()
+                eprintln!("[mpd] listallinfo failed: {:?}", e);
+                return Vec::new();
             }
-        }
-    }
-
-    pub async fn play_queue(urls: &[String], start_index: usize) {
-        if urls.is_empty() { return; }
-        let Some(client) = Self::connect().await else {
-            eprintln!("[mpd] play_queue: connection failed");
-            return;
         };
-        eprintln!("[mpd] play_queue: replacing queue with {} tracks, starting at {}", urls.len(), start_index);
-
-        if let Err(e) = client.command(mpd_client::commands::Clear).await {
-            eprintln!("[mpd] clear failed: {:?}", e);
-        }
-        for url in urls {
-            if let Err(e) = client.command(mpd_client::commands::Add::uri(url)).await {
-                eprintln!("[mpd] add failed for {}: {:?}", url, e);
-            }
-        }
-        let _ = client
-            .command(mpd_client::commands::Play::song(
-                mpd_client::commands::SongPosition(start_index as u32),
-            ))
-            .await;
+        all_songs
+            .into_iter()
+            .filter(|s| {
+                let title = Self::first_tag(s, Tag::Title);
+                title.to_lowercase().contains(&q) || s.url.to_lowercase().contains(&q)
+            })
+            .take(10)
+            .map(|s| {
+                let title = Self::first_tag(&s, Tag::Title);
+                (title, s.url)
+            })
+            .collect()
     }
 
-    pub async fn play_url(url: &str) {
-        let urls = vec![url.to_string()];
-        Self::play_queue(&urls, 0).await;
-    }
+
 
     pub async fn next() {
         if let Some(client) = Self::connect().await {
@@ -331,6 +302,39 @@ impl MpdBackend {
             PlayState::Paused => client.command(SetPause(false)).await,
             PlayState::Stopped => client.command(Play::current()).await,
         };
+    }
+
+    pub async fn play_queue(urls: &[String], start_index: usize) {
+        if urls.is_empty() { return; }
+        let Some(client) = Self::connect().await else {
+            eprintln!("[mpd] play_queue: connection failed");
+            return;
+        };
+        eprintln!("[mpd] play_queue: appending {} tracks, starting at {}", urls.len(), start_index);
+
+        let current_len = match client.command(mpd_client::commands::Queue).await {
+            Ok(q) => q.len(),
+            Err(e) => {
+                eprintln!("[mpd] queue failed: {:?}", e);
+                0
+            }
+        };
+
+        for url in urls {
+            if let Err(e) = client.command(mpd_client::commands::Add::uri(url.as_str())).await {
+                eprintln!("[mpd] add failed for {}: {:?}", url, e);
+            }
+        }
+        let _ = client
+            .command(mpd_client::commands::Play::song(
+                mpd_client::commands::SongPosition(current_len + start_index),
+            ))
+            .await;
+    }
+
+    pub async fn play_url(url: &str) {
+        let urls = vec![url.to_string()];
+        Self::play_queue(&urls, 0).await;
     }
 }
 

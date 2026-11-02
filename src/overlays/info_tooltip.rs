@@ -401,23 +401,27 @@ impl App {
                     return Task::perform(
                         async move {
                             crate::libraries::backend::MpdBackend::play_queue(&urls, idx).await;
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            fetch_data("music".to_string()).await
                         },
-                        |_| Message::Tick,
+                        |info| Message::Loaded(info),
                     );
                 }
             }
-            Message::MusicPlaySong(url) => {
+Message::MusicPlaySong(url) => {
                 if let Some(idx) = self.music_search_results.iter().position(|(_, u)| u == &url) {
                     let urls: Vec<String> = self.music_search_results.iter().map(|(_, u)| u.clone()).collect();
                     return Task::perform(
                         async move {
                             crate::libraries::backend::MpdBackend::play_queue(&urls, idx).await;
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            fetch_data("music".to_string()).await
                         },
-                        |_| Message::Tick,
+                        |info| Message::Loaded(info),
                     );
                 }
             }
-            Message::MusicTrashConfirm => {
+Message::MusicTrashConfirm => {
                 self.trash_confirm = true;
             }
             Message::MusicTrashExecute(url) => {

@@ -1,2 +1,6 @@
-The music search Enter key doesn't play music pieces correctly.
-(Scrollbar arrow-key navigation was fixed).
+- The music search Enter key doesn't play music pieces correctly.
+  (Fixed: Search now appends to the queue and plays the next result rather than wiping the queue).
+- Scrollbar arrow-key navigation was fixed (math updated to 32px rows).
+- Search is now case-insensitive.
+  (Implemented via ListAllIn + local Rust filtering because mpd_client 1.4.1 lacks Search).
+  TODO: Once `mpd_client` v1.5+ is released, we should upgrade and use the native `Search` command to avoid downloading the entire library to the client.
