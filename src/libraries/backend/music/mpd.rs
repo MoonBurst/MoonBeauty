@@ -331,11 +331,6 @@ impl MpdBackend {
             ))
             .await;
     }
-
-    pub async fn play_url(url: &str) {
-        let urls = vec![url.to_string()];
-        Self::play_queue(&urls, 0).await;
-    }
 }
 
 #[cfg(test)]
