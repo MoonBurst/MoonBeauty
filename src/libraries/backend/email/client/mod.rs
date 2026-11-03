@@ -177,20 +177,16 @@ pub fn save_config(cfg: &EmailConfig, use_sops: bool) -> Result<(), String> {
     let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
 
     if use_sops {
-        let dir = path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("/tmp"));
-        let tmp = dir.join("mbs-email-tmp.json");
-
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)
+        // Finding 03 hardening: plaintext config no longer lands as a
+        // predictable filename in ~/.config. mbs_unique_tmp gives tmpfs
+        // storage (RAM, wiped on reboot) with an unpredictable name,
+        // shrinking the crash window between write and sops invocation.
+        let tmp = crate::libraries::process::mbs_unique_tmp(
+            "mbs-email-plain",
+            "json",
+        );
+        crate::libraries::process::private_write_new(&tmp, json.as_bytes())
             .map_err(|e| e.to_string())?;
-        f.write_all(json.as_bytes()).map_err(|e| e.to_string())?;
-        f.sync_all().ok();
 
         let mut cmd = std::process::Command::new(find_sops());
         cmd.arg("--encrypt");
@@ -286,6 +282,8 @@ pub fn save_config(cfg: &EmailConfig, use_sops: bool) -> Result<(), String> {
                 .mode(0o600)
                 .open(&enc_path)
                 .map_err(|e| e.to_string())?;
+            // Finding 03: force 0600 on the final encrypted file too.
+            let _ = chmod_private(&enc_path);
             f.write_all(&out.stdout).map_err(|e| e.to_string())?;
             let _ = std::fs::remove_file(&path);
             let _ = std::fs::remove_file(&tmp);
@@ -318,6 +316,10 @@ pub fn save_config(cfg: &EmailConfig, use_sops: bool) -> Result<(), String> {
             .mode(0o600)
             .open(&path)
             .map_err(|e| e.to_string())?;
+        // Finding 03: OpenOptions::mode() is a no-op on existing files.
+        // Pre-fix builds may have left email.json at 0644 (plaintext
+        // app-password inside), so force 0600 explicitly.
+        let _ = chmod_private(&path);
         f.write_all(json.as_bytes()).map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -392,6 +394,8 @@ pub fn load_config() -> EmailConfig {
             .mode(0o600)
             .open(&path)
         {
+            // Finding 03: same upgrade-path fix as save_config.
+            let _ = chmod_private(&path);
             let _ = f.write_all(json.as_bytes());
         }
     }
@@ -670,17 +674,21 @@ async fn fetch_raw_message(id: &str, folder: &str) -> Result<Vec<u8>, String> {
 
 pub async fn sync_bodies_background(folder: String) {
     let lock_path = crate::libraries::process::mbs_runtime_dir().join("mbs_email_sync.lock");
-    let _lock_file = match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock_path)
-    {
-        Ok(f) => f,
-        Err(_) => {
-            if std::env::var_os("MBS_DEBUG").is_some() {
-                eprintln!("[sync] another process is already syncing, skipping duplicate spawn.");
+    let _lock_file = {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&lock_path)
+        {
+            Ok(f) => f,
+            Err(_) => {
+                if std::env::var_os("MBS_DEBUG").is_some() {
+                    eprintln!("[sync] another process is already syncing, skipping duplicate spawn.");
+                }
+                return;
             }
-            return;
         }
     };
 
@@ -714,6 +722,12 @@ pub async fn sync_bodies_background(folder: String) {
             }
         };
     let imap_folder = map_gmail_folder(&folder);
+    // Finding 28 defense-in-depth: fetch_from_network validates at the
+    // sink, but sync_bodies_background may be called from other paths.
+    if !is_safe_imap_folder(&imap_folder) {
+        eprintln!("[sync] refusing unsafe folder: {:?}", imap_folder);
+        return;
+    }
     if let Err(e) = session.select(&imap_folder).await {
         eprintln!("[sync] select {} failed: {e}", imap_folder);
         return;
@@ -725,6 +739,12 @@ pub async fn sync_bodies_background(folder: String) {
         let cache_file = get_cache_dir(&folder).join(format!("{}.eml", env.id));
         if !cache_file.exists() {
             tokio::time::sleep(std::time::Duration::from_secs(12)).await;
+            // Finding 29 defense-in-depth: load_index filters by
+            // is_safe_imap_uid, but this is a network sink.
+            if !is_safe_imap_uid(&env.id) {
+                eprintln!("[sync] refusing unsafe uid: {:?}", env.id);
+                continue;
+            }
             match session.uid_fetch(&env.id, "(BODY.PEEK[])").await {
                 Ok(stream) => match stream.try_collect::<Vec<_>>().await {
                     Ok(fetches) => {
@@ -1028,9 +1048,16 @@ pub async fn send_message(
                 content_type_count,
                 raw.len()
             );
-            // Log first 1500 bytes for inspection
-            eprintln!("[send] ─── MIME START ───");
+            // Print header section only — the body starts after the
+            // first blank line. Previously logged up to 40 lines, which
+            // for a simple text email leaked 20+ lines of body into
+            // mbs-standalone-*.log (world-readable before finding 11).
+            eprintln!("[send] ─── MIME HEADERS ───");
             for line in raw.lines().take(40) {
+                if line.is_empty() {
+                    eprintln!("[send] ... (body omitted)");
+                    break;
+                }
                 eprintln!("[send] {}", line);
             }
             eprintln!("[send] ─── MIME END ───");
