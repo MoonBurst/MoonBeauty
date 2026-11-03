@@ -204,16 +204,34 @@ impl MoonBeautyShellApp {
                 } else if !self.email.is_composing && !self.email.is_logging_in {
                     self.email.update(msg);
                     // Arrow navigation is PREVIEW-ONLY. It must never
-                    // enter fullview — that is Enter's job. The prior
-                    // code called OpenSelected here, which has an
-                    // "already loaded -> fullview" branch. Result:
-                    // holding an arrow at the top/bottom of the list
-                    // (or a mouse wheel mapped to arrows) fires
-                    // OpenSelected on every key-repeat, and once the
-                    // selected mail has been loaded, it enters fullview.
+                    // enter fullview — that is Enter's job.
                     if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
                         let id = mail.id.clone();
-                        return self.update(Message::Email(EmailMessage::SelectMail(id)));
+                        // Move the visible list so the selected row stays
+                        // on screen. iced has no auto-scroll-to-selection
+                        // for scrollables, so we emit scroll_to with an
+                        // AbsoluteOffset computed from the row index.
+                        //
+                        // Row height ≈ fs_main*1.2 + fs_sub*1.2 + 24 px
+                        // padding/border. The 200px anchor keeps the
+                        // selected row below mid-viewport so context is
+                        // visible above.
+                        let fs_main = self.theme.font_size_overlay as f32;
+                        let fs_sub = (fs_main - 2.0).max(8.0);
+                        let row_h = fs_main * 1.2 + fs_sub * 1.2 + 24.0;
+                        let idx = self.email.selected_index as f32;
+                        let scroll_y = (idx * row_h - 200.0).max(0.0);
+                        let scroll_cmd: Command<Message> =
+                            iced::widget::operation::scroll_to(
+                                iced::widget::Id::new("email_mail_list"),
+                                iced::widget::scrollable::AbsoluteOffset {
+                                    x: 0.0,
+                                    y: scroll_y,
+                                },
+                            );
+                        let fetch_cmd =
+                            self.update(Message::Email(EmailMessage::SelectMail(id)));
+                        return Command::batch(vec![fetch_cmd, scroll_cmd]);
                     }
                 }
             }

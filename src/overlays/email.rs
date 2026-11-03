@@ -1015,7 +1015,7 @@ impl EmailOverlay {
 
         let mail_pane = Stack::new().push(mail_bg.view()).push(
             container(
-                scrollable(mail_col)
+                scrollable(mail_col).id(iced::widget::Id::new("email_mail_list"))
                     .width(Length::Fill)
                     .height(Length::Fill),
             )
