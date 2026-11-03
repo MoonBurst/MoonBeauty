@@ -283,7 +283,7 @@ pub fn save_config(cfg: &EmailConfig, use_sops: bool) -> Result<(), String> {
                 .open(&enc_path)
                 .map_err(|e| e.to_string())?;
             // Finding 03: force 0600 on the final encrypted file too.
-            let _ = chmod_private(&enc_path);
+            let _ = chmod_private(&enc_path, false);
             f.write_all(&out.stdout).map_err(|e| e.to_string())?;
             let _ = std::fs::remove_file(&path);
             let _ = std::fs::remove_file(&tmp);
@@ -319,7 +319,7 @@ pub fn save_config(cfg: &EmailConfig, use_sops: bool) -> Result<(), String> {
         // Finding 03: OpenOptions::mode() is a no-op on existing files.
         // Pre-fix builds may have left email.json at 0644 (plaintext
         // app-password inside), so force 0600 explicitly.
-        let _ = chmod_private(&path);
+        let _ = chmod_private(&path, false);
         f.write_all(json.as_bytes()).map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -395,7 +395,7 @@ pub fn load_config() -> EmailConfig {
             .open(&path)
         {
             // Finding 03: same upgrade-path fix as save_config.
-            let _ = chmod_private(&path);
+            let _ = chmod_private(&path, false);
             let _ = f.write_all(json.as_bytes());
         }
     }

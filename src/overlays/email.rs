@@ -1,5 +1,6 @@
 use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input, Stack};
 use iced::{Element, Length};
+use std::collections::HashMap;
 
 use crate::libraries::config::settings::ShellSettings;
 use crate::libraries::config::theme::ShellTheme;
@@ -92,6 +93,11 @@ pub enum EmailMessage {
     CopyGmailFilter,
     MarkSpam,
     MarkNotSpam,
+    /// Enter on a loaded email, or the ⛶ button, enters fullscreen
+    /// read. Enter again or Escape exits.
+    ToggleFullscreen,
+    /// Back button in fullscreen header. Same effect as Escape.
+    ExitFullscreen,
 }
 
 pub struct EmailOverlay {
@@ -125,6 +131,16 @@ pub struct EmailOverlay {
     pub login_error: Option<String>,
     pub is_adding_folder: bool,
     pub new_folder_name: String,
+    /// When true and a message is loaded, render it fullscreen with a
+    /// back button instead of the 3-pane layout. Enter toggles.
+    pub fullscreen_read: bool,
+    /// When true, compose was entered from fullview's Enter-reply
+    /// action. Cancel restores fullview; send stays 3-pane.
+    pub reply_from_fullview: bool,
+    /// In-memory parsed-email cache keyed by message id. Populated on
+    /// every successful load; cleared on folder switch. Eliminates the
+    /// Some->None->Some flicker when re-viewing an already-seen email.
+    pub parsed_cache: HashMap<String, crate::libraries::backend::email::client::ParsedEmail>,
 }
 
 impl Default for EmailOverlay {
@@ -174,6 +190,9 @@ impl EmailOverlay {
             login_error: None,
             is_adding_folder: false,
             new_folder_name: String::new(),
+            fullscreen_read: false,
+            reply_from_fullview: false,
+            parsed_cache: HashMap::new(),
         }
     }
 
@@ -224,6 +243,9 @@ impl EmailOverlay {
             login_error: None,
             is_adding_folder: false,
             new_folder_name: String::new(),
+            fullscreen_read: false,
+            reply_from_fullview: false,
+            parsed_cache: HashMap::new(),
         }
     }
 
@@ -250,10 +272,23 @@ impl EmailOverlay {
                 self.selected_index = 0;
                 self.active_mail_id = None;
                 self.parsed_email = None;
+                self.parsed_cache.clear();
             }
             EmailMessage::SelectMail(id) => {
-                self.active_mail_id = Some(id);
-                self.parsed_email = None; // Show loading state
+                // Switching mails exits fullscreen.
+                self.fullscreen_read = false;
+                let same_and_loaded = self.active_mail_id.as_deref() == Some(id.as_str())
+                    && self.parsed_email.is_some();
+                if !same_and_loaded {
+                    self.active_mail_id = Some(id.clone());
+                    // Cache hit: instant display, no Loading frame.
+                    // Cache miss: fall back to the async fetch path.
+                    if let Some(cached) = self.parsed_cache.get(&id).cloned() {
+                        self.parsed_email = Some(cached);
+                    } else {
+                        self.parsed_email = None;
+                    }
+                }
             }
             EmailMessage::EnvelopesLoaded(_, envs)
             | EmailMessage::NetworkEnvelopesLoaded(_, envs) => {
@@ -289,6 +324,17 @@ impl EmailOverlay {
                 self.folders = merged;
             }
             EmailMessage::MessageLoaded(b) => {
+                // Skip caching synthetic responses from SendMail.
+                // Real bodies start with whatever the sender wrote;
+                // SendMail confirmations start with ✓ or ✗.
+                let trimmed = b.text.trim_start();
+                let is_synthetic = trimmed.starts_with('✓')
+                    || trimmed.starts_with('✗');
+                if !is_synthetic {
+                    if let Some(id) = self.active_mail_id.clone() {
+                        self.parsed_cache.insert(id, b.clone());
+                    }
+                }
                 self.parsed_email = Some(b);
             }
             EmailMessage::Error(e) => {
@@ -360,13 +406,31 @@ impl EmailOverlay {
             EmailMessage::RemoveAttachment(i) => {
                 self.compose_attachments.remove(i);
             }
-            EmailMessage::SendMail | EmailMessage::CancelCompose => {
+            EmailMessage::SendMail => {
                 self.is_composing = false;
                 self.compose_body = iced::widget::text_editor::Content::new();
                 self.active_compose_field = 0;
                 self.compose_to.clear();
                 self.compose_subject.clear();
                 self.compose_attachments.clear();
+                // Send path: stay 3-pane. The ✓ Message sent confirmation
+                // (delivered as MessageLoaded after the async send) renders
+                // there. Clear reply flag so a later Enter isn't misread.
+                self.reply_from_fullview = false;
+            }
+            EmailMessage::CancelCompose => {
+                let was_reply = self.reply_from_fullview;
+                self.is_composing = false;
+                self.compose_body = iced::widget::text_editor::Content::new();
+                self.active_compose_field = 0;
+                self.compose_to.clear();
+                self.compose_subject.clear();
+                self.compose_attachments.clear();
+                self.reply_from_fullview = false;
+                // Cancel path: restore fullview if we were replying from it.
+                if was_reply && self.parsed_email.is_some() {
+                    self.fullscreen_read = true;
+                }
             }
             EmailMessage::OpenLogin => {
                 let cfg = crate::libraries::backend::email::client::load_config();
@@ -401,6 +465,14 @@ impl EmailOverlay {
             EmailMessage::SaveLogin => {}
             EmailMessage::Dismiss => {
                 self.is_composing = false;
+            }
+            EmailMessage::ToggleFullscreen => {
+                if self.parsed_email.is_some() {
+                    self.fullscreen_read = !self.fullscreen_read;
+                }
+            }
+            EmailMessage::ExitFullscreen => {
+                self.fullscreen_read = false;
             }
             EmailMessage::GetAppPassword => {}
             EmailMessage::ToggleAdvancedServers => {
@@ -1057,8 +1129,13 @@ impl EmailOverlay {
             .spacing(4)
             .width(Length::Fill);
 
+            let compose_heading = if self.reply_from_fullview {
+                "↩ REPLY"
+            } else {
+                "✉ NEW MESSAGE"
+            };
             let mut compose_col = column![
-                text("✉ NEW MESSAGE").size(fs_main).color(theme.success),
+                text(compose_heading).size(fs_main).color(theme.success),
                 to_input,
             ]
             .spacing(10);
@@ -1243,9 +1320,82 @@ impl EmailOverlay {
                 .padding(20),
         );
 
-        let main_row = row![folder_pane, mail_pane, preview_pane]
-            .spacing(16)
-            .height(Length::Fill);
+        // Fullscreen: single-column preview with a back button.
+        // 3-pane: folders | list | preview (existing layout).
+        let main_row: Element<'a, EmailMessage> = if self.fullscreen_read
+            && self.parsed_email.is_some()
+            && !self.is_composing
+            && !self.is_logging_in
+        {
+            let (cur_subject, cur_sender) = self
+                .envelopes
+                .iter()
+                .find(|e| Some(&e.id) == self.active_mail_id.as_ref())
+                .map(|e| (e.subject.clone(), e.sender.clone()))
+                .unwrap_or_default();
+            let back_btn = button(
+                text("\u{2190} Back (Esc)").size(fs_sub).color(theme.text),
+            )
+            .on_press(EmailMessage::ExitFullscreen)
+            .padding([6, 12])
+            .style(move |_t, _s| button::Style {
+                background: Some(iced::Background::Color(theme.surface_alt)),
+                border: iced::Border {
+                    color: theme.border,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            });
+            let fullscreen_header = container(
+                row![
+                    back_btn,
+                    iced::widget::space::horizontal(),
+                    text(cur_subject)
+                        .size(fs_head)
+                        .bold()
+                        .color(theme.text),
+                    iced::widget::space::horizontal(),
+                    text(cur_sender).size(fs_sub).color(theme.muted),
+                    text("· Enter to reply ·")
+                        .size(fs_sub)
+                        .color(theme.muted),
+                    button(
+                        text("↩ Reply").size(fs_sub).color(theme.text),
+                    )
+                    .on_press(EmailMessage::OpenSelected)
+                    .padding([4, 8])
+                    .style(move |_t, _s| button::Style {
+                        background: Some(iced::Background::Color(theme.surface_alt)),
+                        border: iced::Border {
+                            color: theme.border,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
+                    }),
+                ]
+                .spacing(16)
+                .align_y(iced::alignment::Vertical::Center)
+                .width(Length::Fill),
+            )
+            .width(Length::Fill)
+            .padding(iced::Padding {
+                top: 0.0,
+                right: body_inset,
+                bottom: 0.0,
+                left: body_inset,
+            });
+            column![fullscreen_header, preview_pane]
+                .spacing(12)
+                .height(Length::Fill)
+                .into()
+        } else {
+            let layout = row![folder_pane, mail_pane, preview_pane]
+                .spacing(16)
+                .height(Length::Fill);
+            layout.into()
+        };
 
         let contact_btn = if !self.is_composing && self.active_mail_id.is_some() {
             button(text("Save Contact").size(fs_sub).color(theme.text))
@@ -1311,6 +1461,32 @@ impl EmailOverlay {
                     },
                     ..Default::default()
                 }),
+            if self.parsed_email.is_some()
+                && !self.is_composing
+                && !self.fullscreen_read
+            {
+                button(
+                    text("⛶ Full View (Enter)")
+                        .size(fs_sub)
+                        .color(theme.text),
+                )
+                .on_press(EmailMessage::ToggleFullscreen)
+                .padding([4, 8])
+                .style(move |_t, _s| button::Style {
+                    background: Some(iced::Background::Color(theme.surface_alt)),
+                    border: iced::Border {
+                        color: theme.border,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                })
+            } else {
+                button(text("")).padding(0).style(|_t, _s| button::Style {
+                    background: None,
+                    ..Default::default()
+                })
+            },
             button(text("✏ Compose").size(fs_main).bold().color(theme.success))
                 .on_press(EmailMessage::OpenComposer)
                 .padding([6, 12])

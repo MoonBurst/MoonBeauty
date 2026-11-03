@@ -12,6 +12,10 @@ impl MoonBeautyShellApp {
     pub(crate) fn handle_email(&mut self, msg: EmailMessage) -> Command<Message> {
         match msg {
             EmailMessage::Dismiss => {
+                if self.email.fullscreen_read {
+                    self.email.fullscreen_read = false;
+                    return Command::none();
+                }
                 if self.email.is_composing {
                     let to = self.email.compose_to.clone();
                     let sub = self.email.compose_subject.clone();
@@ -62,6 +66,13 @@ impl MoonBeautyShellApp {
                     )
                     .unwrap_or_else(|| folder.clone());
                 self.email.update(EmailMessage::SelectMail(id.clone()));
+                // Cache hit in email.rs::update -> parsed_email is Some,
+                // no need to spawn an async re-fetch.
+                if self.email.active_mail_id.as_deref() == Some(&id)
+                    && self.email.parsed_email.is_some()
+                {
+                    return Command::none();
+                }
                 return Command::perform(
                     async move {
                         moonbeauty::libraries::backend::email::client::read_message(
@@ -180,6 +191,9 @@ impl MoonBeautyShellApp {
             }
             EmailMessage::SyncDone => {}
             EmailMessage::SelectMailNext | EmailMessage::SelectMailPrev => {
+                if self.email.fullscreen_read {
+                    return Command::none();
+                }
                 if self.email.is_composing && !self.email.get_autocomplete_matches().is_empty()
                 {
                     let target = match msg {
@@ -189,7 +203,18 @@ impl MoonBeautyShellApp {
                     self.email.update(target);
                 } else if !self.email.is_composing && !self.email.is_logging_in {
                     self.email.update(msg);
-                    return self.update(Message::Email(EmailMessage::OpenSelected));
+                    // Arrow navigation is PREVIEW-ONLY. It must never
+                    // enter fullview — that is Enter's job. The prior
+                    // code called OpenSelected here, which has an
+                    // "already loaded -> fullview" branch. Result:
+                    // holding an arrow at the top/bottom of the list
+                    // (or a mouse wheel mapped to arrows) fires
+                    // OpenSelected on every key-repeat, and once the
+                    // selected mail has been loaded, it enters fullview.
+                    if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
+                        let id = mail.id.clone();
+                        return self.update(Message::Email(EmailMessage::SelectMail(id)));
+                    }
                 }
             }
             EmailMessage::SelectFolderNext | EmailMessage::SelectFolderPrev => {
@@ -218,9 +243,116 @@ impl MoonBeautyShellApp {
                 }
             }
             EmailMessage::OpenSelected => {
-                if !self.email.is_composing {
+                if std::env::var_os("MBS_DEBUG").is_some() {
+                    eprintln!(
+                        "[email-opensel] fullscreen={} composing={} logging_in={} active_id={:?} envelopes={} parsed={}",
+                        self.email.fullscreen_read,
+                        self.email.is_composing,
+                        self.email.is_logging_in,
+                        self.email.active_mail_id,
+                        self.email.envelopes.len(),
+                        self.email.parsed_email.is_some(),
+                    );
+                }
+                // Enter in fullview -> reply compose (To/Subject prefilled).
+                // Enter in 3-pane on already-loaded mail -> enter fullview.
+                // Enter in 3-pane on unloaded mail -> load + preview.
+                if self.email.fullscreen_read {
+                    let reply_env = self
+                        .email
+                        .active_mail_id
+                        .as_ref()
+                        .and_then(|id| self.email.envelopes.iter().find(|e| &e.id == id))
+                        .cloned();
+                    if let Some(env) = reply_env {
+                        // Prefer sender_email; fall back to display name if
+                        // the header couldn't be parsed into a bare address.
+                        let to_addr = if !env.sender_email.trim().is_empty() {
+                            env.sender_email.clone()
+                        } else if !env.sender.trim().is_empty()
+                            && env.sender.trim() != "Unknown"
+                        {
+                            env.sender.clone()
+                        } else {
+                            String::new()
+                        };
+                        let subj = env.subject.trim();
+                        let reply_subject = if subj.is_empty() {
+                            "Re:".to_string()
+                        } else if subj.to_lowercase().starts_with("re:") {
+                            subj.to_string()
+                        } else {
+                            format!("Re: {}", subj)
+                        };
+                        // Quote the original so the user has context. The
+                        // quoted block sits below the cursor, standard mail
+                        // client convention.
+                        let orig_text = self
+                            .email
+                            .parsed_email
+                            .as_ref()
+                            .map(|p| p.text.clone())
+                            .unwrap_or_default();
+                        let mut reply_body = String::new();
+                        reply_body.push_str("\n\n--- Original message ---\n");
+                        if !env.sender_email.trim().is_empty()
+                            && env.sender_email != env.sender
+                        {
+                            reply_body.push_str(&format!(
+                                "From: {} <{}>\n",
+                                env.sender, env.sender_email
+                            ));
+                        } else {
+                            reply_body.push_str(&format!("From: {}\n", env.sender));
+                        }
+                        reply_body.push_str(&format!("Subject: {}\n\n", env.subject));
+                        if orig_text.is_empty() {
+                            reply_body.push_str("(Original body unavailable)\n");
+                        } else {
+                            for line in orig_text.lines() {
+                                reply_body.push('>');
+                                reply_body.push(' ');
+                                reply_body.push_str(line);
+                                reply_body.push('\n');
+                            }
+                        }
+                        if std::env::var_os("MBS_DEBUG").is_some() {
+                            eprintln!(
+                                "[email-reply] to={:?} subject={:?} body_chars={}",
+                                to_addr,
+                                reply_subject,
+                                reply_body.chars().count()
+                            );
+                        }
+                        self.email.is_composing = true;
+                        self.email.compose_to = to_addr;
+                        self.email.compose_subject = reply_subject;
+                        self.email.compose_body =
+                            iced::widget::text_editor::Content::with_text(&reply_body);
+                        self.email.active_compose_field = 2;
+                        self.email.compose_attachments.clear();
+                        self.email.fullscreen_read = false;
+                        self.email.reply_from_fullview = true;
+                        return iced::widget::operation::focus(
+                            iced::widget::Id::new(
+                                moonbeauty::overlays::email::COMPOSE_BODY_ID,
+                            ),
+                        )
+                        .map(Message::Email);
+                    }
+                    // No loaded envelope to reply to; just exit.
+                    self.email.fullscreen_read = false;
+                    return Command::none();
+                }
+                if !self.email.is_composing && !self.email.is_logging_in {
                     if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
                         let id = mail.id.clone();
+                        if self.email.active_mail_id.as_deref() == Some(&id)
+                            && self.email.parsed_email.is_some()
+                        {
+                            self.email.fullscreen_read = true;
+                            return Command::none();
+                        }
                         let folder = self.email.active_folder.clone();
                         self.email.update(EmailMessage::SelectMail(id.clone()));
                         return Command::perform(
@@ -460,6 +592,8 @@ impl MoonBeautyShellApp {
                 );
             }
             EmailMessage::OpenComposer => {
+                self.email.fullscreen_read = false;
+                self.email.reply_from_fullview = false;
                 self.email.update(msg);
                 return iced::widget::operation::focus(
                     moonbeauty::overlays::email::COMPOSE_TO_ID,
