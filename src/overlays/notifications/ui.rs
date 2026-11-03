@@ -952,8 +952,10 @@ impl NotificationOverlay {
                 let lower = s.to_lowercase();
                 let is_generic = lower.contains("new message")
                     || lower.contains("new voice")
+                    || lower.contains("voice activity")
                     || lower.contains("notification")
-                    || lower == "test";
+                    || lower == "test"
+                    || looks_like_action(&s);
 
                 if !is_generic {
                     sender = s.clone();
@@ -971,16 +973,102 @@ impl NotificationOverlay {
                             break;
                         }
                     }
-                } else if !b.is_empty() && b.len() < 30 && !b.contains(':') {
-                    let b_lower = b.to_lowercase();
-                    if !b_lower.contains("voice") && !b_lower.contains("new message") {
+                } else {
+                    // Summary is generic. Try to find the real sender:
+                    //   "New Voice from Alice" -> "Alice"
+                    //   "Alice spoke in room"  -> "Alice"
+                    //   "Alice" (short body)   -> "Alice"
+                    //   else                   -> app name
+                    if let Some(name) = extract_from_phrase(&s) {
+                        sender = name;
+                    } else if let Some(name) = extract_leading_name(&b) {
+                        let remaining = b[name.len()..].trim().to_string();
+                        sender = name;
+                        if !remaining.is_empty() {
+                            msg = remaining;
+                        }
+                    } else if !b.is_empty()
+                        && b.len() < 30
+                        && !b.contains(':')
+                        && !looks_like_action(&b)
+                    {
                         sender = b.clone();
                         msg = "".to_string();
                     } else {
                         sender = a.clone();
                     }
-                } else {
-                    sender = a.clone(); // Fallback to app name
+                }
+            }
+
+            // Belt-and-suspenders: reject any sender that still looks
+            // like an action phrase, using the app name instead.
+            if !sender.is_empty() && looks_like_action(&sender) {
+                crate::dbg_log!(
+                    "[tts-sanitize] rejecting action-phrase sender={:?}, using app={:?}",
+                    sender, a
+                );
+                sender = a.clone();
+            }
+
+            // Post-process: try to rescue a bad sender by looking in
+            // the summary. Runs after the primary extraction so we can
+            // also improve cases where the original path fell back to
+            // the app name or used an action phrase as the "name".
+            let needs_better_sender = sender.is_empty()
+                || sender == a
+                || looks_like_action(&sender);
+            if needs_better_sender {
+                if let Some(name) = extract_name_from_summary(&s) {
+                    crate::dbg_log!(
+                        "[tts-rescue] summary-extract name={:?} from summary={:?}",
+                        name, s
+                    );
+                    sender = name;
+                } else if let Some(name) = extract_from_phrase(&s) {
+                    crate::dbg_log!(
+                        "[tts-rescue] from-phrase name={:?} from summary={:?}",
+                        name, s
+                    );
+                    sender = name;
+                } else if sender.is_empty() || looks_like_action(&sender) {
+                    sender = a.clone();
+                }
+            }
+
+            // Rescue: if primary extraction produced the app name,
+            // an empty sender, or an action phrase, try to pull a
+            // clean person name out of the summary. Horizon puts
+            // the sender name directly in summary with no separator.
+            let needs_tts_rescue = sender.is_empty()
+                || sender == a
+                || looks_like_action(&sender);
+            if needs_tts_rescue {
+                let sender_before = sender.clone();
+                let mut rescued: Option<String> = None;
+                if let Some(n) = extract_name_from_summary(&s) {
+                    rescued = Some(n);
+                } else if let Some(n) = extract_from_phrase(&s) {
+                    rescued = Some(n);
+                } else if looks_like_clean_name(&s) {
+                    rescued = Some(s.trim().to_string());
+                }
+                match rescued {
+                    Some(n) => {
+                        crate::dbg_log!(
+                            "[tts-rescue2] summary={:?} sender {:?} -> {:?}",
+                            s, sender_before, n
+                        );
+                        sender = n;
+                    }
+                    None => {
+                        if looks_like_action(&sender) || sender == a {
+                            crate::dbg_log!(
+                                "[tts-rescue2] no name in summary={:?}, using app={:?}",
+                                s, a
+                            );
+                            sender = a.clone();
+                        }
+                    }
                 }
             }
 
@@ -1796,6 +1884,168 @@ impl NotificationOverlay {
             .center_y(Length::Fill)
             .style(|_t| iced::widget::container::Style::default())
             .into()
+    }
+}
+
+
+/// Heuristic: does this text describe an *action* (spoke, sent, started,
+/// joined, …) rather than a person? Used to prevent phrases like
+/// "spoke in room" from being misidentified as a sender name.
+/// True when `text` looks like a clean person-name summary:
+/// short, no separators, no action verbs, all words capitalised,
+/// and no generic notification vocabulary. Handles Horizon's shape
+/// (summary = "Genesis Frost" with no separator at all).
+fn looks_like_clean_name(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > 40 {
+        return false;
+    }
+    if trimmed.contains(':')
+        || trimmed.contains(" - ")
+        || trimmed.contains('/')
+        || trimmed.contains('(')
+        || trimmed.contains(')')
+    {
+        return false;
+    }
+    if looks_like_action(trimmed) {
+        return false;
+    }
+    let words: Vec<&str> = trimmed.split_whitespace().collect();
+    if words.is_empty() || words.len() > 4 {
+        return false;
+    }
+    const GENERIC: &[&str] = &[
+        "new", "message", "messages", "voice", "activity", "notification",
+        "notifications", "alert", "alerts", "system", "test", "app",
+        "you", "have", "a", "an", "the", "this", "that", "incoming",
+        "audio", "video", "call", "missed", "recent", "update", "updates",
+        "reminder", "warning", "info", "success", "error", "received",
+        "unread", "from", "to", "in", "on", "at", "by", "here", "there",
+    ];
+    words.iter().all(|w| {
+        let starts_upper = w.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+        let is_generic = GENERIC.iter().any(|g| g.eq_ignore_ascii_case(w));
+        starts_upper && !is_generic
+    })
+}
+
+fn looks_like_action(text: &str) -> bool {
+    const VERBS: &[&str] = &[
+        "spoke", "speaks", "said", "says", "sent", "sends",
+        "started", "starts", "called", "calls", "joined", "joins",
+        "left", "leaves", "replied", "replies", "mentioned", "mentions",
+        "pinged", "pings", "posted", "posts", "reacted", "reacts",
+        "uploaded", "uploads", "shared", "shares",
+        "playing", "paused", "changed", "updated",
+    ];
+    VERBS.iter().any(|v| {
+        text.split_whitespace()
+            .any(|w| w.eq_ignore_ascii_case(v))
+    })
+}
+
+/// Extract a leading name from "Alice spoke in room" -> "Alice".
+/// Rejects generic sentence prefixes ("New", "Voice", "Audio", …) so
+/// summaries like "Voice Activity" do not produce "Message from Voice
+/// Activity".
+fn extract_leading_name(text: &str) -> Option<String> {
+    const GENERIC_PREFIX: &[&str] = &[
+        "new", "a", "an", "the", "this", "that",
+        "voice", "audio", "video", "incoming", "notification",
+        "system", "app", "activity", "alert",
+    ];
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.is_empty() {
+        return None;
+    }
+    if GENERIC_PREFIX
+        .iter()
+        .any(|p| words[0].eq_ignore_ascii_case(p))
+    {
+        return None;
+    }
+    let is_name_word = |w: &str| -> bool {
+        !w.is_empty()
+            && w.chars().all(|c| c.is_alphabetic() || c == '-' || c == '_' || c == '.')
+            && w.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+    };
+    let mut name_parts = Vec::new();
+    for w in words.iter().take(3) {
+        if is_name_word(w) {
+            name_parts.push(*w);
+        } else {
+            break;
+        }
+    }
+    if name_parts.is_empty() {
+        None
+    } else {
+        Some(name_parts.join(" "))
+    }
+}
+
+/// Extract "Alice" from "New Message from Alice" / "Call from Alice".
+/// Returns None when there is no " from " separator.
+
+/// Try to find a person name inside a summary that is NOT of the
+/// form "… from Name". Handles common Electron/Horizon shapes:
+///   "Genesis Frost: New Message"  -> "Genesis Frost"
+///   "Genesis Frost - New Message" -> "Genesis Frost"
+///   "Genesis Frost spoke in…"     -> "Genesis Frost"
+/// Returns None if the summary does not start with a name-like phrase.
+fn extract_name_from_summary(text: &str) -> Option<String> {
+    const MAX_NAME_CHARS: usize = 40;
+    // 1) "Name: rest" — split on the first colon
+    if let Some(idx) = text.find(':') {
+        let candidate = text[..idx].trim();
+        if !candidate.is_empty()
+            && candidate.chars().count() <= MAX_NAME_CHARS
+            && candidate.chars().any(|c| c.is_alphabetic())
+        {
+            return Some(candidate.to_string());
+        }
+    }
+    // 2) "Name - rest" — split on " - "
+    if let Some(idx) = text.find(" - ") {
+        let candidate = text[..idx].trim();
+        if !candidate.is_empty() && candidate.chars().count() <= MAX_NAME_CHARS {
+            return Some(candidate.to_string());
+        }
+    }
+    // 3) "Name <verb> rest" — leading words before the first action verb
+    let words: Vec<&str> = text.split_whitespace().collect();
+    for (i, w) in words.iter().enumerate() {
+        if looks_like_action(w) && i > 0 {
+            let candidate = words[..i].join(" ");
+            if candidate.chars().count() <= MAX_NAME_CHARS {
+                return Some(candidate);
+            }
+            break;
+        }
+    }
+    None
+}
+
+fn extract_from_phrase(text: &str) -> Option<String> {
+    let lower = text.to_lowercase();
+    let idx = lower.find(" from ")?;
+    let after = text[idx + 6..].trim();
+    if after.is_empty() {
+        return None;
+    }
+    let name: String = after
+        .split_whitespace()
+        .take(3)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let trimmed = name.trim_end_matches(|c: char| {
+        !c.is_alphanumeric() && c != '.' && c != '-'
+    });
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
     }
 }
 
