@@ -20,6 +20,13 @@ pub struct ClipItem {
     /// origin for external URI ingests). Re-paste prefers this.
     #[serde(default)]
     pub source_path: Option<std::path::PathBuf>,
+    /// File extension (without dot) for the clipboard-dir copy.
+    /// Set on new entries; absent on pre-patch entries. When present,
+    /// `get_file_path_with_ext` uses it for a single stat instead of
+    /// the 7-stat fallback loop — relevant at 1000+ entries where the
+    /// list view would otherwise storm the filesystem.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ext: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +73,11 @@ impl Payload {
             "jxl" | "webp" | "gif" | "bmp" => Self::UriList,
             "png" => Self::Bytes("image/png"),
             "jpg" | "jpeg" => Self::Bytes("image/jpeg"),
+        // Text content: serve actual bytes as text/plain so
+        // pasting a text entry yields the text, not a file://
+        // URI. The UriList path exists only because Firefox/
+        // Chrome silently ignore non-PNG image payloads.
+        "txt" => Self::Bytes("text/plain;charset=utf-8"),
             _ => Self::UriList,
         }
     }
@@ -234,6 +246,20 @@ impl ClipboardOverlay {
     /// save and URI-list ingest. Sync — no tokio runtime needed.
     pub fn add_entry(source: &std::path::Path, display_name: Option<String>) -> Option<u64> {
         if !source.is_file() { return None; }
+        // 100 MB cap. Annotation saves and URI-list ingests otherwise
+        // load an arbitrarily large file into memory. Skip (do not
+        // truncate) to preserve file integrity.
+        const MAX_SOURCE_BYTES: u64 = 100 * 1024 * 1024;
+        let file_size = source.metadata().map(|m| m.len()).unwrap_or(0);
+        if file_size > MAX_SOURCE_BYTES {
+            eprintln!(
+                "[clipboard-add] skipping {} ({} MB exceeds {} MB cap)",
+                source.display(),
+                file_size / (1024 * 1024),
+                MAX_SOURCE_BYTES / (1024 * 1024),
+            );
+            return None;
+        }
         let bytes = std::fs::read(source).ok()?;
         if bytes.is_empty() { return None; }
         let hash = {
@@ -263,16 +289,21 @@ impl ClipboardOverlay {
         } else {
             String::from_utf8_lossy(&bytes[..bytes.len().min(100)]).to_string()
         };
+        let ext_owned = ext.to_string();
         items.insert(0, ClipItem {
             id, text, is_image,
             thumb_path: Some(source.to_string_lossy().into_owned()),
             content_hash: Some(hash),
             source_path: Some(source.to_path_buf()),
+            ext: Some(ext_owned),
         });
-        items.truncate(100);
+        items.truncate(2000);
         let tmp = dir.join("index.json.tmp");
         std::fs::write(&tmp, serde_json::to_string(&items).ok()?).ok()?;
         std::fs::rename(&tmp, &index_path).ok()?;
+        // Purge AFTER successful write: if the write fails, the old
+        // index still references files we would have deleted.
+        Self::purge_orphans(&dir, &items);
         Some(id)
     }
 
@@ -287,7 +318,7 @@ impl ClipboardOverlay {
         if let Some(sp) = item.source_path {
             if sp.is_file() { return Some(sp); }
         }
-        Self::get_file_path(&dir, id)
+        Self::get_file_path_with_ext(&dir, id, item.ext.as_deref())
     }
 
     pub fn get_file_path(dir: &std::path::Path, id: u64) -> Option<std::path::PathBuf> {
@@ -308,6 +339,48 @@ impl ClipboardOverlay {
     /// always renders.
     
 
+    /// Like `get_file_path` but uses a known extension for a single
+    /// stat instead of walking the ext list. Falls back to the stat
+    /// loop when `ext` is None (pre-patch entries) or the ext-named
+    /// file is missing (deleted, moved, or old id-collision).
+    pub fn get_file_path_with_ext(
+        dir: &std::path::Path,
+        id: u64,
+        ext: Option<&str>,
+    ) -> Option<std::path::PathBuf> {
+        if let Some(e) = ext {
+            let p = dir.join(format!("{}.{}", id, e));
+            if p.exists() {
+                return Some(p);
+            }
+        }
+        Self::get_file_path(dir, id)
+    }
+
+    /// Delete files whose numeric id is not referenced by any item in
+    /// `items`. Called after successful index write. Skips non-numeric
+    /// filenames (index.json, index.json.tmp, etc.).
+    pub fn purge_orphans(dir: &std::path::Path, items: &[ClipItem]) {
+        let live: std::collections::HashSet<u64> =
+            items.iter().map(|i| i.id).collect();
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        let mut purged = 0u32;
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name_str) = name.to_str() else { continue; };
+            let Some(dot) = name_str.find(".") else { continue; };
+            let Ok(id) = name_str[..dot].parse::<u64>() else { continue; };
+            if !live.contains(&id) && std::fs::remove_file(entry.path()).is_ok() {
+                purged += 1;
+            }
+        }
+        if purged > 0 {
+            crate::dbg_log!("[clipboard] purged {} orphan file(s)", purged);
+        }
+    }
+
     pub async fn reload() -> Vec<ClipItem> {
         let dir = dirs::data_dir()
             .unwrap_or_else(std::env::temp_dir)
@@ -320,7 +393,7 @@ impl ClipboardOverlay {
             if let Ok(items) = serde_json::from_str::<Vec<ClipItem>>(&content) {
                 for mut item in items {
                     if item.is_image {
-                        if let Some(path) = Self::get_file_path(&dir, item.id) {
+                        if let Some(path) = Self::get_file_path_with_ext(&dir, item.id, item.ext.as_deref()) {
                             if item.text.is_empty()
                                 || item.text == "📸 Image"
                                 || item.text.starts_with("📸 Image 1")
@@ -332,7 +405,7 @@ impl ClipboardOverlay {
                                     item.text = format!("📸 Image {}", item.id);
                                 }
                             }
-                            item.thumb_path = Self::get_file_path(&dir, item.id).map(|p| p.to_string_lossy().into_owned());
+                            item.thumb_path = Self::get_file_path_with_ext(&dir, item.id, item.ext.as_deref()).map(|p| p.to_string_lossy().into_owned());
                         } else {
                             if item.text.is_empty() {
                                 item.text = format!("📸 Image {}", item.id);
@@ -347,28 +420,27 @@ impl ClipboardOverlay {
     }
 
     pub async fn load_preview(id: u64) -> (String, Option<String>) {
-        let dir = dirs::data_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("moonbeauty")
-            .join("clipboard");
-        if let Some(path) = Self::get_file_path(&dir, id) {
+        // Single resolve_path call handles both text and image entries
+        // and already prefers source_path. Previous version called
+        // get_file_path three times before falling back — that was three
+        // stat-storms per preview request at 1000 entries.
+        let Some(path) = Self::resolve_path(id) else {
+            return (String::new(), None);
+        };
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if ext == "txt" || ext == "bin" {
             if let Ok(bytes) = std::fs::read(&path) {
-                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                if ext == "txt" || ext == "bin" {
-                    if let Ok(text) = String::from_utf8(bytes) {
-                        return (text, None);
-                    }
+                if let Ok(text) = String::from_utf8(bytes) {
+                    return (text, None);
                 }
             }
+            // Fall through to image preview path if text decode failed
         }
-        // For image entries (including JXL) hand iced the PNG preview
-        // path. iced's image widget can't decode JXL directly, so
-        // display_path generates a {id}.preview.png companion on first
-        // view and returns that.
-        if let Some(raw) = Self::resolve_path(id).or_else(|| Self::get_file_path(&dir, id)) {
-            return (String::new(), Some(raw.to_string_lossy().into_owned()));
-        }
-        (String::new(), None)
+        (String::new(), Some(path.to_string_lossy().into_owned()))
     }
 
     pub async fn copy(id: u64) {
@@ -715,7 +787,15 @@ impl ClipboardOverlay {
             };
 
             let mut item_row = row![].spacing(12).align_y(Alignment::Center);
-            if let Some(thumb) = &item.thumb_path {
+            if item.is_image {
+                item_row = item_row.push(
+                    container(text("📸").size(16).color(theme.muted))
+                        .width(Length::Fixed(40.0))
+                        .height(Length::Fixed(40.0))
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill),
+                );
+            } else if let Some(thumb) = &item.thumb_path {
                 item_row = item_row.push(
                     {
                         let __el: Element<'_, ClipboardMessage> = match handle_for_list(std::path::Path::new(&thumb)) {

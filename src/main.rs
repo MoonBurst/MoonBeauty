@@ -188,8 +188,21 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     if args.iter().any(|a| a == "--clipboard-ingest") {
         use std::io::Read;
+        // 100 MB cap. stdin is untrusted (any same-user process can
+        // pipe to wl-copy). Without this, `yes | wl-copy` buffers GB
+        // into memory before we can react. Truncate silently — the
+        // head of the paste is what the user wants.
+        const MAX_INGEST: u64 = 100 * 1024 * 1024;
         let mut bytes = Vec::new();
-        if std::io::stdin().read_to_end(&mut bytes).is_ok() && !bytes.is_empty() {
+        let mut limited = std::io::Read::take(std::io::stdin(), MAX_INGEST + 1);
+        if limited.read_to_end(&mut bytes).is_ok() && !bytes.is_empty() {
+            if bytes.len() as u64 > MAX_INGEST {
+                bytes.truncate(MAX_INGEST as usize);
+                eprintln!(
+                    "[clipboard-ingest] truncated to {} MB",
+                    MAX_INGEST / (1024 * 1024)
+                );
+            }
             let dir = dirs::data_dir()
                 .unwrap_or_else(std::env::temp_dir)
                 .join("moonbeauty")
@@ -313,14 +326,22 @@ pub fn main() -> Result<(), iced_layershell::Error> {
                     thumb_path: None,
                     content_hash: Some(incoming_hash),
                     source_path: None,
+                    ext: Some(ext.to_string()),
                 },
             );
-            items.truncate(100); // Keep last 100
+            items.truncate(2000);
 
             if let Ok(json) = serde_json::to_string(&items) {
                 let tmp = dir.join("index.json.tmp");
                 if std::fs::write(&tmp, &json).is_ok() {
                     let _ = std::fs::rename(&tmp, &index_path);
+                    // Purge AFTER successful write: if the write fails,
+                    // the old index still references files we would
+                    // have deleted.
+                    moonbeauty::overlays::clipboard::ClipboardOverlay::purge_orphans(
+                        &dir,
+                        &items,
+                    );
                     eprintln!(
                         "[clipboard-ingest] Saved {} items, is_image={}",
                         items.len(),
