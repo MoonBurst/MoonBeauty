@@ -330,6 +330,41 @@ fn history_icon_hex_size(icon_size: f32) -> f32 {
     icon_size * 1.40
 }
 
+/// Compute the (shape, outer box size) for the toast icon wrapper.
+/// `notif_shape` is the same field used for the notification card, so
+/// the icon visually follows the card it lives in. `icon_size` is the
+/// user-configured inner icon size (settings.notif_icon_size).
+///
+/// Hex uses the same 1.40× rule as history avatars so the octagon
+/// cut corners do not clip the icon.
+fn notif_icon_box_shape(notif_shape: &str, icon_size: f32) -> (ShapeType, f32) {
+    let s = icon_size.clamp(16.0, 128.0);
+    match notif_shape.to_lowercase().as_str() {
+        "hex" | "hexagon" => {
+            // 1.25 is the exact minimum to keep the square icon's
+            // corners from being clipped by the hexagon's cut corners
+            // (interior = box - 2*cut = 0.80 * box; 0.80 * 1.25 = 1.0).
+            // 1.28 adds a hair of margin for the border and antialiasing.
+            // Previously 1.40 left a visible gap between icon and frame.
+            let hex_size = s * 1.28;
+            let cut = ((hex_size * 0.10) as u16).max(6);
+            (ShapeType::Hexagon { cut }, hex_size)
+        }
+        "slant" => (
+            ShapeType::Slant {
+                left: SlantSide::Right,
+                right: SlantSide::Right,
+            },
+            s + 12.0,
+        ),
+        "flat" => (ShapeType::Flat, s + 4.0),
+        _ => {
+            let radius = ((s * 0.15) as u16).max(4);
+            (ShapeType::Rounded(radius), s + 8.0)
+        }
+    }
+}
+
 fn history_row_height(
     toast: &NotificationToast,
     row_w: f32,
@@ -359,6 +394,78 @@ use std::sync::Mutex;
 /// IDs we've already logged icon decisions for. Prevents per-frame
 /// log spam (view_history is called on every Tick message, ~1/sec).
 static LOGGED_ICONS: Mutex<Option<HashSet<u32>>> = Mutex::new(None);
+
+
+/// $XDG_DATA_HOME/moonbeauty/avatars (created if missing).
+/// The pre-fix code resolved `resources/{name}/{name}.png` relative to
+/// process cwd, which is `/` or `~` under systemd — never the repo.
+/// Migrate to XDG, matching finding 20's handling of
+/// friend_profiles.json and contacts.txt.
+fn avatars_dir() -> std::path::PathBuf {
+    let base = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join("moonbeauty")
+        .join("avatars");
+    let _ = std::fs::create_dir_all(&base);
+    base
+}
+
+/// One-shot migration: copy resources/{name}/{name}.png into the XDG
+/// avatars dir on first run. Tries cwd-relative first, then
+/// $CARGO_MANIFEST_DIR/resources (dev builds). Non-destructive —
+/// skips when XDG target already exists.
+fn migrate_resources_to_xdg(name: &str) {
+    let xdg = avatars_dir().join(name).join(format!("{}.png", name));
+    if xdg.exists() { return; }
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    candidates.push(
+        std::path::Path::new("resources").join(name).join(format!("{}.png", name))
+    );
+    if let Some(m) = option_env!("CARGO_MANIFEST_DIR") {
+        candidates.push(
+            std::path::Path::new(m).join("resources").join(name).join(format!("{}.png", name))
+        );
+    }
+    for legacy in candidates {
+        if !legacy.exists() { continue; }
+        if let Some(parent) = xdg.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match std::fs::copy(&legacy, &xdg) {
+            Ok(n) => eprintln!("[avatar-migrate] {:?} -> {:?} ({} bytes)", legacy, xdg, n),
+            Err(e) => eprintln!("[avatar-migrate] {} failed: {}", name, e),
+        }
+        return;
+    }
+}
+
+/// Resolve the friend avatar. Priority:
+///   1. $XDG_DATA_HOME/moonbeauty/avatars/{name}/{name}.png
+///   2. $XDG_DATA_HOME/moonbeauty/avatars/fallback.png
+///   3. legacy resources/{name}/{name}.png
+///   4. legacy resources/fallback.png
+fn avatar_path_for(name: &str) -> Option<String> {
+    migrate_resources_to_xdg(name);
+    let xdg = avatars_dir();
+    let specific = xdg.join(name).join(format!("{}.png", name));
+    if specific.exists() {
+        return Some(specific.to_string_lossy().into_owned());
+    }
+    let fallback = xdg.join("fallback.png");
+    if fallback.exists() {
+        return Some(fallback.to_string_lossy().into_owned());
+    }
+    let legacy_specific = std::path::Path::new("resources")
+        .join(name).join(format!("{}.png", name));
+    if legacy_specific.exists() {
+        return Some(legacy_specific.to_string_lossy().into_owned());
+    }
+    let legacy_fallback = std::path::Path::new("resources").join("fallback.png");
+    if legacy_fallback.exists() {
+        return Some(legacy_fallback.to_string_lossy().into_owned());
+    }
+    None
+}
 
 fn should_log_icon(id: u32) -> bool {
     let mut guard = match LOGGED_ICONS.lock() {
@@ -717,78 +824,24 @@ impl NotificationOverlay {
         //   4. App-name based icon lookup
         // Logs every decision so we can debug missing icons.
         let avatar_path: Option<String> = match matched_profile {
-            Some(p) => {
-                let specific = format!("resources/{0}/{0}.png", p.name);
-                if std::path::Path::new(&specific).exists() {
-                    crate::dbg_log!("[notif-icon] {} → friend avatar: {}", app_name, specific);
-                    Some(specific)
-                } else if std::path::Path::new("resources/fallback.png").exists() {
-                    crate::dbg_log!(
-                        "[notif-icon] {} → friend fallback (missing {})",
-                        app_name,
-                        specific
-                    );
-                    Some("resources/fallback.png".to_string())
-                } else if let Some(p) = desktop_entry.and_then(resolve_desktop_icon) {
-                    crate::dbg_log!("[notif-icon] {} → desktop icon fallback: {}", app_name, p);
-                    Some(p)
-                } else {
-                    let p = resolve_icon_name(&app_name.to_lowercase().replace(' ', "-"));
-                    if let Some(p) = p {
-                        crate::dbg_log!("[notif-icon] {} → app-name icon: {}", app_name, p);
-                        Some(p)
-                    } else {
-                        crate::dbg_log!("[notif-icon] {} → NONE", app_name);
-                        None
-                    }
-                }
-            }
+            Some(p) => avatar_path_for(&p.name)
+                .or_else(|| desktop_entry.and_then(resolve_desktop_icon))
+                .or_else(|| {
+                    resolve_icon_name(&app_name.to_lowercase().replace(' ', "-"))
+                }),
             None => {
                 if let Some(p) = desktop_entry.and_then(resolve_desktop_icon) {
-                    crate::dbg_log!("[notif-icon] {} → desktop icon: {}", app_name, p);
                     Some(p)
                 } else {
-                    // Try multiple name variants for the app_name fallback.
-                    // Notifications commonly send "Mozilla Firefox", "Brave
-                    // Browser", "System Monitor" — the icon filename is
-                    // usually the de-hyphenated lowercase form, but sometimes
-                    // it's just the first word or a reverse-DNS variant.
                     let lower = app_name.to_lowercase();
-                    let hyphenated = lower.replace(' ', "-");
-                    let underscored = lower.replace(' ', "_");
-                    let first_word = lower.split_whitespace().next().unwrap_or("").to_string();
                     let variants = [
                         lower.clone(),
-                        hyphenated.clone(),
-                        underscored.clone(),
-                        first_word,
+                        lower.replace(' ', "-"),
+                        lower.replace(' ', "_"),
+                        lower.split_whitespace().next().unwrap_or("").to_string(),
                     ];
-
-                    let mut found: Option<String> = None;
-                    for v in &variants {
-                        if v.is_empty() {
-                            continue;
-                        }
-                        if let Some(p) = resolve_icon_name(v) {
-                            crate::dbg_log!(
-                                "[notif-icon] {} → app-name variant '{}': {}",
-                                app_name,
-                                v,
-                                p
-                            );
-                            found = Some(p);
-                            break;
-                        }
-                    }
-                    if found.is_none() {
-                        crate::dbg_log!(
-                            "[notif-icon] {} → NONE (desktop_entry={:?}, tried={:?})",
-                            app_name,
-                            desktop_entry,
-                            variants
-                        );
-                    }
-                    found
+                    variants.iter().filter(|v| !v.is_empty())
+                        .find_map(|v| resolve_icon_name(v))
                 }
             }
         };
@@ -1466,32 +1519,41 @@ impl NotificationOverlay {
                 .border(border_c, theme.border_width)
                 .size(Length::Fixed(card_w), Length::Fixed(card_h));
 
-            let badge_bg = if toast.is_urgent {
-                theme.danger
-            } else {
-                border_c
-            };
-            let icon_badge = container(
-                text(if toast.is_urgent { "!" } else { "i" })
-                    .size(13)
-                    .bold()
-                    .color(Color::BLACK),
-            )
-            .padding([3, 7])
-            .style(move |_t| container::Style {
-                background: Some(iced::Background::Color(badge_bg)),
-                border: iced::Border {
-                    radius: 10.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            });
-
             let toast_text_color = hex_to_color(&toast.text_color);
             let avatar: Element<'_, NotifMessage> = if let Some(ref path) = toast.avatar_path {
-                iced::widget::image(iced::widget::image::Handle::from_path(path.clone()))
-                    .width(Length::Fixed(48.0))
-                    .height(Length::Fixed(48.0))
+                let icon_size = (settings.notif_icon_size as f32).clamp(16.0, 128.0);
+                let (box_shape, box_size) =
+                    notif_icon_box_shape(&settings.notif_shape, icon_size);
+                let icon_element: Element<'_, NotifMessage> = if path.ends_with(".svg") {
+                    iced::widget::svg(iced::widget::svg::Handle::from_path(path.clone()))
+                        .width(Length::Fixed(icon_size))
+                        .height(Length::Fixed(icon_size))
+                        .into()
+                } else {
+                    iced::widget::image(iced::widget::image::Handle::from_path(path.clone()))
+                        .width(Length::Fixed(icon_size))
+                        .height(Length::Fixed(icon_size))
+                        .content_fit(iced::ContentFit::Cover)
+                        .into()
+                };
+                let mut shape_box = ShapeBox::new()
+                    .shape(box_shape)
+                    .background(theme.background)
+                    .border(theme.border, theme.control_border_width)
+                    .size(Length::Fixed(box_size), Length::Fixed(box_size));
+                if matches!(box_shape, ShapeType::Slant { .. }) {
+                    shape_box = shape_box.slant_width(icon_size * 0.15);
+                }
+                Stack::new()
+                    .push(shape_box.view())
+                    .push(
+                        container(icon_element)
+                            .width(Length::Fixed(box_size))
+                            .height(Length::Fixed(box_size))
+                            .center_x(Length::Fill)
+                            .center_y(Length::Fill)
+                            .clip(true),
+                    )
                     .into()
             } else {
                 container(text("")).width(Length::Fixed(0.0)).into()
@@ -1504,7 +1566,6 @@ impl NotificationOverlay {
             let toast_body = MouseArea::new(
                 container(
                     row![
-                        icon_badge,
                         avatar,
                         column![
                             text(&toast.summary)

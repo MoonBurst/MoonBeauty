@@ -373,6 +373,8 @@ pub struct ShellSettings {
     pub notif_summary_size: u16,
     #[serde(default = "default_body_size", alias = "textBodySize")]
     pub notif_body_size: u16,
+    #[serde(default = "default_notif_icon_size", alias = "notifIconSize")]
+    pub notif_icon_size: u32,
     #[serde(default = "default_excluded", alias = "notifExcludedStr")]
     pub notif_excluded: String,
     #[serde(default, alias = "alarmSound")]
@@ -608,6 +610,9 @@ fn default_summary_size() -> u16 {
 fn default_body_size() -> u16 {
     22
 }
+fn default_notif_icon_size() -> u32 {
+    48
+}
 fn default_excluded() -> String {
     "greenclip, copyq".to_string()
 }
@@ -727,6 +732,7 @@ impl Default for ShellSettings {
             notif_drop_distance_px: default_drop_distance(),
             notif_summary_size: default_summary_size(),
             notif_body_size: default_body_size(),
+            notif_icon_size: default_notif_icon_size(),
             notif_excluded: default_excluded(),
             alarm_sound: None,
             alarm_sound_duration_sec: default_alarm_sound_duration(),

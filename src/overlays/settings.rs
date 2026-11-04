@@ -108,6 +108,7 @@ pub enum SettingsMessage {
     NotifDropDistance(u32),
     NotifSummarySize(u16),
     NotifBodySize(u16),
+    NotifIconSize(u32),
     NotifExcludedChanged(String),
     CpuTempWarn(u32),
     CpuTempDanger(u32),
@@ -381,6 +382,7 @@ impl SettingsOverlay {
             }
             SettingsMessage::NotifSummarySize(v) => settings.notif_summary_size = v.clamp(10, 36),
             SettingsMessage::NotifBodySize(v) => settings.notif_body_size = v.clamp(8, 32),
+            SettingsMessage::NotifIconSize(v) => settings.notif_icon_size = v.clamp(24, 96),
             SettingsMessage::NotifExcludedChanged(v) => settings.notif_excluded = v,
             SettingsMessage::CpuTempWarn(v) => settings.cpu_temp_warn = v,
             SettingsMessage::CpuTempDanger(v) => settings.cpu_temp_danger = v,
@@ -1540,6 +1542,22 @@ impl SettingsOverlay {
                     SettingsMessage::NotifBodySize(v as u16)
                 })
                 .width(Length::Fill),
+            ]
+            .spacing(2),
+            column![
+                row![
+                    text("Notification Icon Size")
+                        .size((scale_sz(0.7)) as f32)
+                        .bold()
+                        .color(theme.text),
+                    row![].width(Length::Fill),
+                    text(format!("{}px", settings.notif_icon_size))
+                        .size((scale_sz(0.7)) as f32)
+                        .bold()
+                        .color(theme.text)
+                ],
+                slider(24..=96, settings.notif_icon_size, SettingsMessage::NotifIconSize)
+                    .width(Length::Fill),
             ]
             .spacing(2),
         ]
