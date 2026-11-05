@@ -51,7 +51,7 @@ impl MoonBeautyShellApp {
                 self.clipboard.filter = f;
                 self.clipboard.selected_id = None;
                 self.clipboard.preview_text.clear();
-                self.clipboard.preview_image_path = None;
+                self.clipboard.preview_image_data = None;
                 return Command::none();
             }
             ClipboardMessage::SearchChanged(q) => {
@@ -80,10 +80,11 @@ impl MoonBeautyShellApp {
                 return Command::batch([
                     Command::perform(
                         ClipboardOverlay::load_preview(next_id),
-                        |(text, image_path)| {
+                        move |(text, image_data)| {
                             Message::Clipboard(ClipboardMessage::PreviewLoaded {
+                                id: next_id,
                                 text,
-                                image_path,
+                                image_data,
                             })
                         },
                     ),
@@ -116,10 +117,11 @@ impl MoonBeautyShellApp {
                 return Command::batch([
                     Command::perform(
                         ClipboardOverlay::load_preview(prev_id),
-                        |(text, image_path)| {
+                        move |(text, image_data)| {
                             Message::Clipboard(ClipboardMessage::PreviewLoaded {
+                                id: prev_id,
                                 text,
-                                image_path,
+                                image_data,
                             })
                         },
                     ),
@@ -154,10 +156,11 @@ impl MoonBeautyShellApp {
                             return Command::batch([
                                 Command::perform(
                                     ClipboardOverlay::load_preview(next_id),
-                                    |(text, image_path)| {
+                                    move |(text, image_data)| {
                                         Message::Clipboard(ClipboardMessage::PreviewLoaded {
+                                            id: next_id,
                                             text,
-                                            image_path,
+                                            image_data,
                                         })
                                     },
                                 ),
@@ -172,7 +175,7 @@ impl MoonBeautyShellApp {
                         } else {
                             self.clipboard.selected_id = None;
                             self.clipboard.preview_text.clear();
-                            self.clipboard.preview_image_path = None;
+                            self.clipboard.preview_image_data = None;
                         }
                     }
                 }
@@ -303,17 +306,26 @@ impl MoonBeautyShellApp {
                 }
             }
             ClipboardMessage::SelectEntry(id) => {
+                // Only reset the preview if we're actually switching to a different item.
+                // This prevents the UI from flashing "Loading..." when clicking the same image.
+                if self.clipboard.selected_id != Some(id) {
+                    self.clipboard.preview_text = "Loading...".to_string();
+                    self.clipboard.preview_image_data = None;
+                }
                 self.clipboard.selected_id = Some(id);
                 return Command::perform(
                     ClipboardOverlay::load_preview(id),
-                    |(text, image_path)| {
-                        Message::Clipboard(ClipboardMessage::PreviewLoaded { text, image_path })
+                    move |(text, image_data)| {
+                        Message::Clipboard(ClipboardMessage::PreviewLoaded { id, text, image_data })
                     },
                 );
             }
-            ClipboardMessage::PreviewLoaded { text, image_path } => {
-                self.clipboard.preview_text = text;
-                self.clipboard.preview_image_path = image_path;
+            ClipboardMessage::PreviewLoaded { id, text, image_data } => {
+                // Ignore stale async results from older clicks
+                if Some(id) == self.clipboard.selected_id {
+                    self.clipboard.preview_text = text;
+                    self.clipboard.preview_image_data = image_data;
+                }
             }
         
         }

@@ -44,8 +44,9 @@ pub enum ClipboardMessage {
     RevealImage(u64),
     Reloaded(Vec<ClipItem>),
     PreviewLoaded {
+        id: u64,
         text: String,
-        image_path: Option<String>,
+        image_data: Option<(u32, u32, Vec<u8>)>,
     },
     Dismiss,
 }
@@ -97,52 +98,78 @@ pub fn serve_uri_list(paths: &[std::path::PathBuf]) {
         let _ = child.wait();
     }
 }
-pub fn handle_for_preview(path: &std::path::Path) -> Option<iced::widget::image::Handle> {
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-    if ext == "txt" || ext == "bin" {
-        return None;
-    }
-    // load_preview() has already generated the .preview.png for us
-    Some(iced::widget::image::Handle::from_path(path))
-}
 
 /// Ensure a persistent PNG companion exists for a JXL file.  Generated
 /// once via djxl, resized to max 1600px wide (screenshot-sized, keeps
 /// file small), reused forever.  Companion lives next to the .jxl as
 /// `{stem}.preview.png`.
-fn ensure_image_preview(path: &std::path::Path) -> Option<std::path::PathBuf> {
+pub fn ensure_image_preview(path: &std::path::Path) -> Option<std::path::PathBuf> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
     let png_path = path.with_extension("preview.png");
     if png_path.exists() {
         return Some(png_path);
     }
     
-    // 512x512 is plenty for the preview pane and caps RAM at ~1MB per cached image
     const MAX_DIM: u32 = 512;
-    
+
+    let magick = if std::process::Command::new("magick").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+        Some("magick")
+    } else if std::process::Command::new("convert").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+        Some("convert")
+    } else {
+        None
+    };
+
+    if let Some(bin) = magick {
+        // Write to a unique temp file IN THE SAME DIRECTORY as the final
+        // output. Renaming across different filesystems (like /tmp to ~)
+        // fails with EXDEV on Linux.
+        let token = crate::libraries::process::random_token();
+        let tmp_path = png_path.with_file_name(format!(".preview-{}.tmp.png", token));
+        
+        let status = std::process::Command::new(bin)
+            .arg(path)
+            .args(["-resize", "512x512>"])
+            .arg(&tmp_path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+            
+        if status.map(|s| s.success()).unwrap_or(false) {
+            if std::fs::rename(&tmp_path, &png_path).is_ok() {
+                return Some(png_path);
+            }
+        }
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+
     if ext == "jxl" {
+        let token = crate::libraries::process::random_token();
+        let tmp = png_path.with_file_name(format!(".preview-{}.tmp.png", token));
+        let djxl_paths = ["djxl", "/run/current-system/sw/bin/djxl", "/usr/bin/djxl"];
+        for djxl in djxl_paths {
+            if std::process::Command::new(djxl)
+                .arg(path)
+                .arg(&tmp)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+            {
+                if let Ok(img) = image::open(&tmp) {
+                    let final_img = img.thumbnail(MAX_DIM, MAX_DIM);
+                    let _ = final_img.save(&png_path);
+                    let _ = std::fs::remove_file(&tmp);
+                    return Some(png_path);
+                }
+            }
+        }
         crate::overlays::screenshot::annotator::register_jxl_decoder();
     }
     
     let img = image::open(path).ok()?;
-    
-    let final_img = if img.width() > MAX_DIM || img.height() > MAX_DIM {
-        let (nw, nh) = if img.width() > img.height() {
-            (MAX_DIM, (MAX_DIM as f32 * img.height() as f32 / img.width() as f32) as u32)
-        } else {
-            ((MAX_DIM as f32 * img.width() as f32 / img.height() as f32) as u32, MAX_DIM)
-        };
-        let resized = image::imageops::resize(
-            &img.to_rgba8(),
-            nw,
-            nh,
-            image::imageops::FilterType::Triangle,
-        );
-        image::DynamicImage::ImageRgba8(resized)
-    } else {
-        img
-    };
-    
+    let final_img = img.thumbnail(MAX_DIM, MAX_DIM);
     final_img.save(&png_path).ok()?;
     Some(png_path)
 }
@@ -153,7 +180,7 @@ pub struct ClipboardOverlay {
     pub entries: Vec<ClipItem>,
     pub selected_id: Option<u64>,
     pub preview_text: String,
-    pub preview_image_path: Option<String>,
+    pub preview_image_data: Option<(u32, u32, Vec<u8>)>,
     pub filter: ClipFilter,
 }
 
@@ -188,7 +215,7 @@ impl ClipboardOverlay {
             entries: Vec::new(),
             selected_id: None,
             preview_text: String::new(),
-            preview_image_path: None,
+            preview_image_data: None,
             filter: ClipFilter::All,
         }
     }
@@ -225,7 +252,15 @@ impl ClipboardOverlay {
         let index_path = dir.join("index.json");
         let mut items: Vec<ClipItem> = std::fs::read_to_string(&index_path).ok()
             .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
-        if items.first().and_then(|t| t.content_hash.as_deref()) == Some(hash.as_str()) {
+        // Dedup: check the last 5 items. If the same hash exists and was
+        // inserted within the last 5 seconds, it's a race condition duplicate.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        if items.iter().take(5).any(|t| {
+            t.content_hash.as_deref() == Some(hash.as_str()) && (now.saturating_sub(t.id)) < 5000
+        }) {
             return None;
         }
         let id = std::time::SystemTime::now()
@@ -243,6 +278,18 @@ impl ClipboardOverlay {
             String::from_utf8_lossy(&bytes[..bytes.len().min(100)]).to_string()
         };
         let ext_owned = ext.to_string();
+        
+        // Copy the file into the clipboard cache so it's self-contained
+        let dest_path = dir.join(format!("{}.{}", id, ext));
+        if std::fs::copy(source, &dest_path).is_err() {
+            return None;
+        }
+
+        // Pre-generate the 512x512 preview using the cached copy
+        if is_image {
+            let _ = ensure_image_preview(&dest_path);
+        }
+
         items.insert(0, ClipItem {
             id, text, is_image,
             content_hash: Some(hash),
@@ -267,10 +314,15 @@ impl ClipboardOverlay {
         let index = std::fs::read_to_string(dir.join("index.json")).ok()?;
         let items: Vec<ClipItem> = serde_json::from_str(&index).ok()?;
         let item = items.into_iter().find(|i| i.id == id)?;
+        // Prefer the self-contained clipboard copy
+        if let Some(p) = Self::get_file_path_with_ext(&dir, id, item.ext.as_deref()) {
+            return Some(p);
+        }
+        // Fallback to source_path if the cache was deleted
         if let Some(sp) = item.source_path {
             if sp.is_file() { return Some(sp); }
         }
-        Self::get_file_path_with_ext(&dir, id, item.ext.as_deref())
+        None
     }
 
     pub fn get_file_path(dir: &std::path::Path, id: u64) -> Option<std::path::PathBuf> {
@@ -370,15 +422,11 @@ impl ClipboardOverlay {
         list
     }
 
-    pub async fn load_preview(id: u64) -> (String, Option<String>) {
+    pub async fn load_preview(id: u64) -> (String, Option<(u32, u32, Vec<u8>)>) {
         let Some(path) = Self::resolve_path(id) else {
             return (String::new(), None);
         };
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
         if ext == "txt" || ext == "bin" {
             if let Ok(bytes) = std::fs::read(&path) {
                 if let Ok(text) = String::from_utf8(bytes) {
@@ -386,11 +434,19 @@ impl ClipboardOverlay {
                 }
             }
         }
-        // Generate 512x512 preview in the background to avoid UI hitching and RAM bloat
-        let preview = tokio::task::spawn_blocking(move || {
-            ensure_image_preview(&path)
+        
+        // Decode to RGBA bytes on a background thread so the UI thread
+        // never has to load anything asynchronously.
+        let path_clone = path.clone();
+        let image_data = tokio::task::spawn_blocking(move || {
+            let preview_path = ensure_image_preview(&path_clone).unwrap_or(path_clone);
+            let img = image::open(&preview_path).ok()?;
+            let rgba = img.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            Some((w, h, rgba.into_raw()))
         }).await.unwrap_or(None);
-        (String::new(), preview.map(|p| p.to_string_lossy().into_owned()))
+        
+        (String::new(), image_data)
     }
 
     pub async fn copy(id: u64) {
@@ -813,25 +869,13 @@ impl ClipboardOverlay {
             left: inner_pad,
         };
 
-        let preview_content: Element<'a, ClipboardMessage> = if let Some(img_path) =
-            &self.preview_image_path
-        {
+        let preview_content: Element<'a, ClipboardMessage> = if let Some((w, h, data)) = &self.preview_image_data {
+            let handle = iced::widget::image::Handle::from_rgba(*w, *h, data.clone());
             container(
                 container(
-                    {
-                        let __el: Element<'_, ClipboardMessage> = match handle_for_preview(std::path::Path::new(img_path)) {
-                            Some(h) => iced::widget::image(h)
-                                .width(Length::Fill)
-                                .content_fit(iced::ContentFit::Contain)
-                                .into(),
-                            None => container(
-                                text("(could not decode image)")
-                                    .size((theme.font_size_overlay) as f32)
-                                    .color(theme.muted),
-                            ).center_x(Length::Fill).center_y(Length::Fill).into(),
-                        };
-                        __el
-                    },
+                    iced::widget::image(handle)
+                        .width(Length::Fill)
+                        .content_fit(iced::ContentFit::Contain),
                 )
                 .padding(inner_padding)
                 .center_x(Length::Fill)

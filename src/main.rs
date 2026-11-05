@@ -242,6 +242,12 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             };
             let path = dir.join(format!("{}.{}", id, ext));
             let _ = std::fs::write(&path, &bytes);
+            
+            // Pre-generate the 512x512 preview so the long-running UI
+            // process never has to decode the full 4K image later.
+            if is_image {
+                let _ = moonbeauty::overlays::clipboard::ensure_image_preview(&path);
+            }
 
             // URI-list ingest (annotator saves, file-manager copies).
             if bytes.starts_with(b"file:") {
