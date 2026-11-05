@@ -537,7 +537,6 @@ impl AnnotatorOverlay {
             .content_fit(iced::ContentFit::Contain);
 
         let canvas = Canvas::new(OverlayCanvas {
-            handle: None,
             image_size: self.image_size,
             annotations: if self.reveal_mode {
                 Vec::new()
@@ -550,7 +549,6 @@ impl AnnotatorOverlay {
                 self.in_progress.clone()
             },
             reveal_mode: self.reveal_mode,
-            text_editing: self.text_editing.is_some(),
             editing_idx: self.text_editing,
         })
         .width(Length::Fill)
@@ -805,12 +803,10 @@ impl AnnotatorOverlay {
 #[derive(Clone)]
 #[allow(dead_code)]
 struct OverlayCanvas {
-    handle: Option<iced::widget::image::Handle>,
     image_size: Size,
     annotations: Vec<Annotation>,
     in_progress: Option<Annotation>,
     reveal_mode: bool,
-    text_editing: bool,
     editing_idx: Option<usize>,
 }
 

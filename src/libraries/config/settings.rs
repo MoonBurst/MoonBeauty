@@ -37,89 +37,6 @@ pub enum UnifiedToggle {
     Command { command: String },
 }
 
-impl UnifiedCheck {
-    pub fn type_str(&self) -> &'static str {
-        match self {
-            UnifiedCheck::Process { .. } => "process",
-            UnifiedCheck::PortOpen { .. } => "port_open",
-            UnifiedCheck::SystemdActive { .. } => "systemd_active",
-            UnifiedCheck::SystemdInactive { .. } => "systemd_inactive",
-            UnifiedCheck::File { .. } => "file",
-            UnifiedCheck::Directory { .. } => "directory",
-            UnifiedCheck::Mounted { .. } => "mounted",
-            UnifiedCheck::Command { .. } => "command",
-        }
-    }
-    pub fn param_str(&self) -> String {
-        match self {
-            UnifiedCheck::Process { name } => name.clone(),
-            UnifiedCheck::PortOpen { port } => port.to_string(),
-            UnifiedCheck::SystemdActive { unit } => unit.clone(),
-            UnifiedCheck::SystemdInactive { unit } => unit.clone(),
-            UnifiedCheck::File { path } => path.clone(),
-            UnifiedCheck::Directory { path } => path.clone(),
-            UnifiedCheck::Mounted { path } => path.clone(),
-            UnifiedCheck::Command { command } => command.clone(),
-        }
-    }
-    pub fn from_type_param(t: &str, p: &str) -> Option<Self> {
-        match t {
-            "process" => Some(UnifiedCheck::Process { name: p.into() }),
-            "port_open" => p
-                .parse::<u16>()
-                .ok()
-                .map(|port| UnifiedCheck::PortOpen { port }),
-            "systemd_active" => Some(UnifiedCheck::SystemdActive { unit: p.into() }),
-            "systemd_inactive" => Some(UnifiedCheck::SystemdInactive { unit: p.into() }),
-            "file" => Some(UnifiedCheck::File { path: p.into() }),
-            "directory" => Some(UnifiedCheck::Directory { path: p.into() }),
-            "mounted" => Some(UnifiedCheck::Mounted { path: p.into() }),
-            "command" => Some(UnifiedCheck::Command { command: p.into() }),
-            _ => None,
-        }
-    }
-}
-
-impl UnifiedToggle {
-    pub fn type_str(&self) -> &'static str {
-        match self {
-            UnifiedToggle::Systemctl { .. } => "systemctl",
-            UnifiedToggle::Podman { .. } => "podman",
-            UnifiedToggle::Docker { .. } => "docker",
-            UnifiedToggle::Command { .. } => "command",
-        }
-    }
-    pub fn param_str(&self) -> String {
-        match self {
-            UnifiedToggle::Systemctl { action, unit } => format!("{}:{}", action, unit),
-            UnifiedToggle::Podman { action, container } => format!("{}:{}", action, container),
-            UnifiedToggle::Docker { action, container } => format!("{}:{}", action, container),
-            UnifiedToggle::Command { command } => command.clone(),
-        }
-    }
-    pub fn from_type_param(t: &str, p: &str) -> Option<Self> {
-        if t == "command" {
-            return Some(UnifiedToggle::Command { command: p.into() });
-        }
-        let (action, target) = p.split_once(':')?;
-        match t {
-            "systemctl" => Some(UnifiedToggle::Systemctl {
-                action: action.into(),
-                unit: target.into(),
-            }),
-            "podman" => Some(UnifiedToggle::Podman {
-                action: action.into(),
-                container: target.into(),
-            }),
-            "docker" => Some(UnifiedToggle::Docker {
-                action: action.into(),
-                container: target.into(),
-            }),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnifiedItem {
     pub name: String,
@@ -412,12 +329,6 @@ pub struct ShellSettings {
     pub unified_items: Vec<UnifiedItem>,
     #[serde(default, alias = "visibleCapsules")]
     pub visible_capsules: HashMap<String, bool>,
-    #[serde(default, alias = "capsuleSlants")]
-    pub capsule_slants: HashMap<String, String>,
-    #[serde(default, alias = "capsuleShapes")]
-    pub capsule_shapes: HashMap<String, String>,
-    #[serde(default, alias = "capsuleBarWidths")]
-    pub capsule_bar_widths: HashMap<String, u32>,
     #[serde(default, alias = "standaloneWindows")]
     pub standalone_windows: HashMap<String, WindowDim>,
     #[serde(default = "default_overlay_width", alias = "overlayWidth")]
@@ -743,9 +654,6 @@ impl Default for ShellSettings {
             bar_center: default_bar_center(),
             bar_right: default_bar_right(),
             visible_capsules: visible,
-            capsule_slants: HashMap::new(),
-            capsule_shapes: HashMap::new(),
-            capsule_bar_widths: HashMap::new(),
             standalone_windows: HashMap::new(),
             overlay_width: default_overlay_width(),
             overlay_height: default_overlay_height(),

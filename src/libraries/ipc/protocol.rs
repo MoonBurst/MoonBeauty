@@ -79,7 +79,6 @@ pub enum IpcCommand {
     Toggle(OverlayTarget),
     Open(OverlayTarget, Option<String>),
     Close(OverlayTarget),
-    CloseAll,
     DismissLatestNotif,
     JumpToLatestNotif,
     ToggleHistory,
@@ -89,13 +88,6 @@ pub enum IpcCommand {
     MusicNext,
     MusicPrevious,
     MusicPlayPause,
-    IncomingNotif {
-        app_name: String,
-        summary: String,
-        body: String,
-        is_urgent: bool,
-    },
-    Ping,
 }
 
 pub fn get_socket_path() -> PathBuf {

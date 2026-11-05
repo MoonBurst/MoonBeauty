@@ -10,7 +10,6 @@ pub struct ClipItem {
     pub id: u64,
     pub text: String,
     pub is_image: bool,
-    pub thumb_path: Option<String>,
     /// SHA-256 of the raw ingested bytes. Used to skip duplicate inserts
     /// when `wl-paste --watch` fires more than once per wl-copy (fork-mode
     /// ownership change produces two events for the same payload).
@@ -99,54 +98,44 @@ pub fn serve_uri_list(paths: &[std::path::PathBuf]) {
     }
 }
 pub fn handle_for_preview(path: &std::path::Path) -> Option<iced::widget::image::Handle> {
-    use std::collections::HashMap;
-    use std::sync::{Mutex, OnceLock};
-    static CACHE: OnceLock<Mutex<HashMap<std::path::PathBuf, iced::widget::image::Handle>>> =
-        OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some(h) = cache.lock().unwrap().get(path) {
-        return Some(h.clone());
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if ext == "txt" || ext == "bin" {
+        return None;
     }
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    let handle = if ext == "jxl" {
-        let companion = ensure_jxl_preview_png(path)?;
-        iced::widget::image::Handle::from_path(&companion)
-    } else {
-        iced::widget::image::Handle::from_path(path)
-    };
-    cache.lock().unwrap().insert(path.to_path_buf(), handle.clone());
-    Some(handle)
+    // load_preview() has already generated the .preview.png for us
+    Some(iced::widget::image::Handle::from_path(path))
 }
 
 /// Ensure a persistent PNG companion exists for a JXL file.  Generated
 /// once via djxl, resized to max 1600px wide (screenshot-sized, keeps
 /// file small), reused forever.  Companion lives next to the .jxl as
 /// `{stem}.preview.png`.
-fn ensure_jxl_preview_png(jxl_path: &std::path::Path) -> Option<std::path::PathBuf> {
-    let png_path = jxl_path.with_extension("preview.png");
+fn ensure_image_preview(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    let png_path = path.with_extension("preview.png");
     if png_path.exists() {
         return Some(png_path);
     }
     
-    // Ensure the global image crate knows how to read JXL.
-    crate::overlays::screenshot::annotator::register_jxl_decoder();
+    // 512x512 is plenty for the preview pane and caps RAM at ~1MB per cached image
+    const MAX_DIM: u32 = 512;
     
-    // Read and decode natively. This avoids relying on `djxl` being in the
-    // systemd service's PATH, which is restricted compared to the user's shell.
-    let bytes = std::fs::read(jxl_path).ok()?;
-    let img = image::load_from_memory(&bytes).ok()?;
+    if ext == "jxl" {
+        crate::overlays::screenshot::annotator::register_jxl_decoder();
+    }
     
-    const MAX_W: u32 = 1600;
-    let final_img = if img.width() > MAX_W {
-        let h = (MAX_W as f32 * img.height() as f32 / img.width() as f32) as u32;
+    let img = image::open(path).ok()?;
+    
+    let final_img = if img.width() > MAX_DIM || img.height() > MAX_DIM {
+        let (nw, nh) = if img.width() > img.height() {
+            (MAX_DIM, (MAX_DIM as f32 * img.height() as f32 / img.width() as f32) as u32)
+        } else {
+            ((MAX_DIM as f32 * img.width() as f32 / img.height() as f32) as u32, MAX_DIM)
+        };
         let resized = image::imageops::resize(
             &img.to_rgba8(),
-            MAX_W,
-            h,
+            nw,
+            nh,
             image::imageops::FilterType::Triangle,
         );
         image::DynamicImage::ImageRgba8(resized)
@@ -256,7 +245,6 @@ impl ClipboardOverlay {
         let ext_owned = ext.to_string();
         items.insert(0, ClipItem {
             id, text, is_image,
-            thumb_path: Some(source.to_string_lossy().into_owned()),
             content_hash: Some(hash),
             source_path: Some(source.to_path_buf()),
             ext: Some(ext_owned),
@@ -369,7 +357,6 @@ impl ClipboardOverlay {
                                     item.text = format!("📸 Image {}", item.id);
                                 }
                             }
-                            item.thumb_path = Self::get_file_path_with_ext(&dir, item.id, item.ext.as_deref()).map(|p| p.to_string_lossy().into_owned());
                         } else {
                             if item.text.is_empty() {
                                 item.text = format!("📸 Image {}", item.id);
@@ -384,10 +371,6 @@ impl ClipboardOverlay {
     }
 
     pub async fn load_preview(id: u64) -> (String, Option<String>) {
-        // Single resolve_path call handles both text and image entries
-        // and already prefers source_path. Previous version called
-        // get_file_path three times before falling back — that was three
-        // stat-storms per preview request at 1000 entries.
         let Some(path) = Self::resolve_path(id) else {
             return (String::new(), None);
         };
@@ -402,9 +385,12 @@ impl ClipboardOverlay {
                     return (text, None);
                 }
             }
-            // Fall through to image preview path if text decode failed
         }
-        (String::new(), Some(path.to_string_lossy().into_owned()))
+        // Generate 512x512 preview in the background to avoid UI hitching and RAM bloat
+        let preview = tokio::task::spawn_blocking(move || {
+            ensure_image_preview(&path)
+        }).await.unwrap_or(None);
+        (String::new(), preview.map(|p| p.to_string_lossy().into_owned()))
     }
 
     pub async fn copy(id: u64) {

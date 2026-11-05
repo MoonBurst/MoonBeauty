@@ -323,7 +323,6 @@ pub fn main() -> Result<(), iced_layershell::Error> {
                     id,
                     text: text_preview,
                     is_image,
-                    thumb_path: None,
                     content_hash: Some(incoming_hash),
                     source_path: None,
                     ext: Some(ext.to_string()),

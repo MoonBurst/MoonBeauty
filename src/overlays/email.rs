@@ -332,6 +332,16 @@ impl EmailOverlay {
                     || trimmed.starts_with('✗');
                 if !is_synthetic {
                     if let Some(id) = self.active_mail_id.clone() {
+                        // Cap the cache at 5 entries to prevent memory leaks.
+                        // Emails with large attachments (PDFs, images) can be
+                        // tens of MB each. If we don't evict, RAM grows forever.
+                        if self.parsed_cache.len() >= 5 && !self.parsed_cache.contains_key(&id) {
+                            // Remove an arbitrary old entry (HashMap doesn't keep order,
+                            // but dropping *any* old entry is fine for an LRU cache).
+                            if let Some(oldest) = self.parsed_cache.keys().next().cloned() {
+                                self.parsed_cache.remove(&oldest);
+                            }
+                        }
                         self.parsed_cache.insert(id, b.clone());
                     }
                 }

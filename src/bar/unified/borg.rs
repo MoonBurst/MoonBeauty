@@ -20,7 +20,6 @@ pub struct BorgStatus {
 struct RawBorgPayload {
     status: Option<String>,
     percent: Option<u8>,
-    archive_name: Option<String>,
     speed: Option<String>,
     eta: Option<String>,
     processed_files: Option<u64>,
@@ -76,7 +75,6 @@ impl BorgBackend {
         let parsed: RawBorgPayload = serde_json::from_str(&raw).unwrap_or(RawBorgPayload {
             status: Some("idle".into()),
             percent: None,
-            archive_name: None,
             speed: None,
             eta: None,
             processed_files: None,

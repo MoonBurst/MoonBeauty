@@ -261,9 +261,6 @@ impl MoonBeautyShellApp {
                         self.active_overlay = None;
                     }
                 }
-                IpcCommand::CloseAll => {
-                    self.active_overlay = None;
-                }
                 IpcCommand::DismissLatestNotif => return self.dismiss_latest_notif(),
                 IpcCommand::JumpToLatestNotif => return self.jump_to_latest_notif(),
                 IpcCommand::ToggleHistory => return self.toggle_history(),
@@ -272,12 +269,10 @@ impl MoonBeautyShellApp {
                     self.theme = ShellTheme::from_settings(&self.settings);
                 }
                 IpcCommand::TestNotification => return self.test_notification(),
-                IpcCommand::IncomingNotif { .. } => {}
                 IpcCommand::MusicCycle => return self.music_cycle(),
                 IpcCommand::MusicNext => return self.music_next_track_ipc(),
                 IpcCommand::MusicPrevious => return self.music_previous_track_ipc(),
                 IpcCommand::MusicPlayPause => return self.music_toggle_play_pause_ipc(),
-                IpcCommand::Ping => {}
             },
             Message::TopBar(msg) => {
                 moonbeauty::dbg_log!("[topbar-msg] {:?}", msg);
@@ -1072,10 +1067,6 @@ impl MoonBeautyShellApp {
             Message::CheckLockscreenAlive => return self.check_lockscreen_alive(),
             Message::MusicCycleDone(new_state) => return self.handle_music_cycle_done(new_state),
             Message::Noop => {}
-            Message::CheckSigusr1 => {
-                // SIGUSR1 handler placeholder — not fully wired to clear iced's image cache.
-                // Falls back to the pkill approach in app/update/settings.rs.
-            }
             Message::SetToastInputRegion(_) => {
                 // Intercepted by `try_into` — never reaches update.
             }
