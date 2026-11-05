@@ -1072,6 +1072,10 @@ impl MoonBeautyShellApp {
             Message::CheckLockscreenAlive => return self.check_lockscreen_alive(),
             Message::MusicCycleDone(new_state) => return self.handle_music_cycle_done(new_state),
             Message::Noop => {}
+            Message::CheckSigusr1 => {
+                // SIGUSR1 handler placeholder — not fully wired to clear iced's image cache.
+                // Falls back to the pkill approach in app/update/settings.rs.
+            }
             Message::SetToastInputRegion(_) => {
                 // Intercepted by `try_into` — never reaches update.
             }

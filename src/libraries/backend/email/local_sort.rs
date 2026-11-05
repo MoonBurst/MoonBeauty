@@ -204,42 +204,6 @@ pub fn auto_sort(
     }
     (created, assigned)
 }
-
-/// Split envelope list into (assigned-to-local-folder, stays-visible).
-pub fn partition(
-    envelopes: &[NativeEnvelope],
-    gmail_folder: &str,
-) -> (Vec<NativeEnvelope>, Vec<NativeEnvelope>) {
-    let state = load();
-    let mut moved = Vec::new();
-    let mut stayed = Vec::new();
-    for env in envelopes {
-        let k = format!("{}@{}", env.id, gmail_folder);
-        if state.assignments.contains_key(&k) {
-            moved.push(env.clone());
-        } else {
-            stayed.push(env.clone());
-        }
-    }
-    (moved, stayed)
-}
-
-/// All envelopes belonging to a local folder, using cached INBOX data.
-pub fn envelopes_in_local_folder(
-    inbox_envelopes: &[NativeEnvelope],
-    folder_name: &str,
-) -> Vec<NativeEnvelope> {
-    let state = load();
-    let Some(info) = state.folders.get(folder_name) else {
-        return Vec::new();
-    };
-    inbox_envelopes
-        .iter()
-        .filter(|e| sender_key(&e.sender_email, &e.sender) == info.sender_key)
-        .cloned()
-        .collect()
-}
-
 /// Produce Gmail filter text for a local folder. User pastes this into
 /// Gmail → Settings → Filters → Create new filter → "Matches: ...".
 pub fn gmail_filter_text_for(folder_name: &str) -> Option<String> {

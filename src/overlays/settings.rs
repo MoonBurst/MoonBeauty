@@ -129,6 +129,8 @@ pub enum SettingsMessage {
     ProfileTtsTemplateChanged(usize, String),
     DeleteProfile(usize),
     AddNewProfile,
+    PickAvatar(usize),
+    AvatarUpdated,
 
     // Body Rules
     AddContentRule(usize),
@@ -460,6 +462,9 @@ impl SettingsOverlay {
                         &settings.friend_profiles,
                     );
                 }
+            }
+            SettingsMessage::PickAvatar(_) | SettingsMessage::AvatarUpdated => {
+                // Handled in app/update/settings.rs to allow async file dialogs.
             }
             SettingsMessage::AddNewProfile => {
                 settings.friend_profiles.push(FriendProfile {
@@ -1775,6 +1780,33 @@ impl SettingsOverlay {
                             },
                             ..Default::default()
                         }),
+                ]
+                .align_y(Alignment::Center)
+                .spacing(8),
+                row![
+                    text("Avatar Image:")
+                        .size((scale_sz(0.72)) as f32)
+                        .bold()
+                        .color(theme.text)
+                        .width(Length::Fixed(100.0)),
+                    button(
+                        container(
+                            text("📁 Pick Image & Auto-Crop")
+                                .size((scale_sz(0.72)) as f32)
+                                .color(Color::BLACK)
+                        )
+                        .padding([5, 10])
+                    )
+                    .on_press(SettingsMessage::PickAvatar(sel_idx))
+                    .style(move |_t, _s| button::Style {
+                        background: Some(iced::Background::Color(theme.text)),
+                        border: iced::Border {
+                            color: theme.text,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
+                    }),
                 ]
                 .align_y(Alignment::Center)
                 .spacing(8),

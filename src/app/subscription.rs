@@ -452,6 +452,12 @@ impl MoonBeautyShellApp {
         } else {
             iced::Subscription::none()
         };
+        let sigusr1_sub = if self.is_notif_surface {
+            iced::time::every(std::time::Duration::from_millis(500)).map(|_| Message::CheckSigusr1)
+        } else {
+            iced::Subscription::none()
+        };
+
         let ipc_sub = if self.is_standalone || self.is_notif_surface {
             iced::Subscription::none()
         } else {
@@ -533,6 +539,7 @@ impl MoonBeautyShellApp {
             esc_sub,
             enter_sub,
             ipc_sub,
+            sigusr1_sub,
             notif_sub,
             clip_sub,
             annotator_sub,

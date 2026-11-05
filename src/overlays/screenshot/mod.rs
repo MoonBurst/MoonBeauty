@@ -31,13 +31,11 @@ pub(crate) fn magick_or_convert() -> Option<&'static str> {
 pub mod annotator;
 pub mod capture;
 pub mod fragment;
-pub mod ipc;
 pub mod output;
 
 pub use annotator::{
-    grim_capture, save_annotated_image, slurp_region, AnnotatorMessage, AnnotatorOverlay,
+    save_annotated_image, AnnotatorMessage, AnnotatorOverlay,
 };
-pub use ipc::spawn as spawn_annotator_ipc;
 
 pub mod watermark;
 

@@ -1566,38 +1566,3 @@ pub fn save_annotated_image(
 }
 
 // ── slurp / grim ─────────────────────────────────────────────────────
-
-pub fn slurp_region() -> Option<String> {
-    let out = std::process::Command::new("slurp").output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() {
-        None
-    } else {
-        Some(s)
-    }
-}
-
-pub fn grim_capture(region: Option<&str>) -> Result<PathBuf, String> {
-    let dir = crate::libraries::process::mbs_subdir("mbs-annotator");
-    let path = dir.join(format!(
-        "shot_{}.png",
-        chrono::Local::now().format("%Y%m%d_%H%M%S")
-    ));
-    let mut cmd = std::process::Command::new("grim");
-    if let Some(r) = region {
-        cmd.args(["-g", r]);
-    }
-    cmd.arg(&path);
-    let ok = cmd.status().map(|s| s.success()).unwrap_or(false);
-    if !ok {
-        return Err("grim failed".into());
-    }
-    Ok(path)
-}
-
-pub fn capture_fullscreen_to_temp() -> Result<PathBuf, String> {
-    grim_capture(None)
-}

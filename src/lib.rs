@@ -9,7 +9,7 @@ pub mod libraries;
 pub mod overlays;
 
 pub use libraries::config::{Base16Palette, ShellSettings, ShellTheme};
-pub use libraries::ipc::{send_client_command, IpcCommand, IpcServer, OverlayTarget};
+pub use libraries::ipc::{send_client_command, IpcCommand, OverlayTarget};
 
 /// Debug-only logging. No-ops unless `MBS_DEBUG` is set in the environment.
 /// Use this for hot-path diagnostics that must not spam the journal every frame.

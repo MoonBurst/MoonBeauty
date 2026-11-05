@@ -96,16 +96,6 @@ impl AudioBackend {
         }
         AudioStatus::default()
     }
-
-    pub async fn adjust_sink_volume(step_pct: i8) {
-        let sign = if step_pct >= 0 { "+" } else { "-" };
-        let frac = format!("{:.2}{}", (step_pct.abs() as f32) / 100.0, sign);
-        let _ = Command::new("wpctl")
-            .args(["set-volume", "@DEFAULT_AUDIO_SINK@", &frac])
-            .status()
-            .await;
-    }
-
     pub async fn toggle_sink_mute() {
         let _ = Command::new("wpctl")
             .args(["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"])

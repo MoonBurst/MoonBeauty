@@ -1096,11 +1096,6 @@ impl AppLauncher {
     pub(crate) fn strip_field_codes_for_test(raw: &str) -> String {
         Self::strip_field_codes(raw)
     }
-
-    pub fn focus_search(&mut self) -> iced::Task<LauncherMessage> {
-        iced::widget::operation::focus(LAUNCHER_SEARCH_ID)
-    }
-
     /// Finding 39: strip .desktop %-field-codes per spec. Only %%
     /// survives (as literal %); everything else (%f %F %u %U %i %c %k
     /// plus deprecated variants) is dropped. Previously this used

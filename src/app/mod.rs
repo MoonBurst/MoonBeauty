@@ -112,6 +112,7 @@ pub enum Message {
     /// an unlocked screen. Runs fast (500ms) so the worst-case window
     /// between crash and respawn is 500ms + child boot (~300ms).
     CheckLockscreenAlive,
+    CheckSigusr1,
     /// Music cycle press completed — carries the updated state so
     /// subsequent presses continue from the right position.
     MusicCycleDone(moonbeauty::libraries::backend::MusicCycleState),

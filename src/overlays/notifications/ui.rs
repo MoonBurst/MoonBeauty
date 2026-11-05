@@ -1,6 +1,6 @@
 use chrono::Local;
 use iced::widget::{button, column, container, pin, row, scrollable, text, MouseArea, Stack};
-use iced::{Alignment, Color, Element, Length, Padding};
+use iced::{Alignment, Element, Length, Padding};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;

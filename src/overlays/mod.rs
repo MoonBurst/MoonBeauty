@@ -35,7 +35,7 @@ pub use power::{PowerAction, PowerMessage, PowerOverlay};
 pub use reminders::{ReminderMessage, RemindersOverlay};
 pub use rng::{RngMessage, RngOverlay};
 pub use screenshot::{
-    grim_capture, save_annotated_image, slurp_region, AnnotatorMessage, AnnotatorOverlay,
+    save_annotated_image, AnnotatorMessage, AnnotatorOverlay,
 };
 pub use settings::{SettingsMessage, SettingsOverlay};
 pub use todo::{TodoMessage, TodoOverlay};
