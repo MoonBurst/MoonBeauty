@@ -581,9 +581,13 @@ impl SystemCollector {
                 let mut new_ping = "OFFLINE".to_string();
                 if let Ok(addr) = "1.1.1.1:80".parse() {
                     let t0 = std::time::Instant::now();
+                    // #3: 400ms -> 150ms. A reachable host responds in
+                    // <50ms; >150ms is functionally offline for UI
+                    // feedback. Cuts worst-case blocking 60% even
+                    // before spawn_blocking.
                     if std::net::TcpStream::connect_timeout(
                         &addr,
-                        std::time::Duration::from_millis(400),
+                        std::time::Duration::from_millis(150),
                     )
                     .is_ok()
                     {

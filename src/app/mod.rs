@@ -67,6 +67,7 @@ pub enum Message {
         AudioStatus,
         AudioStatus,
         Option<MprisTrack>,
+        NetMetrics,
     ),
     IpcReceived(IpcCommand),
     PollNotifs,
@@ -153,7 +154,7 @@ pub struct MoonBeautyShellApp {
     pub telemetry: UnifiedTelemetry,
     pub active_overlay: Option<OverlayTarget>,
     pub is_standalone: bool,
-    pub system_collector: SystemCollector,
+    pub system_collector: std::sync::Arc<std::sync::Mutex<SystemCollector>>,
     pub standalone_child: Option<(OverlayTarget, std::process::Child)>,
     pub is_notif_surface: bool,
     pub notif_rx: Option<

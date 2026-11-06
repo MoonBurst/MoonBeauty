@@ -158,9 +158,16 @@ impl MoonBeautyShellApp {
                     .unwrap_or(0);
                 let bat = SystemCollector::collect_battery();
                 self.telemetry.battery = bat;
-                self.telemetry.net = self.system_collector.update_net();
 
                 let gpu_id = self.settings.gpu_selected_id.clone();
+                // #3: update_net() blocks on TcpStream::connect_timeout
+                // (ping check) and on an `ss` subprocess. Both used to
+                // run on the UI thread before this Command was even
+                // constructed, freezing the shell for up to ~450 ms
+                // every ping-cache cycle. Moving them into the async
+                // task on a dedicated blocking thread eliminates the
+                // stall.
+                let net_collector = self.system_collector.clone();
 
                 return Command::perform(
                     async move {
@@ -173,20 +180,28 @@ impl MoonBeautyShellApp {
                         // media when both are Playing.
                         let (mpris, _source) =
                             moonbeauty::libraries::backend::poll_track().await;
-                        (cpu, ram, gpu, audio, mic, mpris)
+                        // #3: blocking net poll on a dedicated thread,
+                        // not the async executor or the UI thread.
+                        let net = tokio::task::spawn_blocking(move || {
+                            net_collector.lock().unwrap().update_net()
+                        })
+                        .await
+                        .unwrap_or_default();
+                        (cpu, ram, gpu, audio, mic, mpris, net)
                     },
-                    |(cpu, ram, gpu, audio, mic, mpris)| {
-                        Message::MetricsCollected(cpu, ram, gpu, audio, mic, mpris)
+                    |(cpu, ram, gpu, audio, mic, mpris, net)| {
+                        Message::MetricsCollected(cpu, ram, gpu, audio, mic, mpris, net)
                     },
                 );
             }
-            Message::MetricsCollected(cpu, ram, gpu, audio, mic, mpris) => {
+            Message::MetricsCollected(cpu, ram, gpu, audio, mic, mpris, net) => {
                 self.telemetry.cpu = cpu;
                 self.telemetry.ram = ram;
                 self.telemetry.gpu = gpu;
                 self.telemetry.audio = audio;
                 self.telemetry.mic = mic;
                 self.telemetry.mpris = mpris;
+                self.telemetry.net = net;
             }
             Message::IpcReceived(cmd) => match cmd {
                 IpcCommand::Toggle(target) => {
