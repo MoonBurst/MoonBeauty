@@ -514,22 +514,19 @@ impl MoonBeautyShellApp {
             app.active_overlay,
             Some(OverlayTarget::NotificationsHistory)
         ) {
-            if let Some(y) = app
-                .notifs
-                .scroll_offset_for_selected(&app.theme, &app.settings)
-            {
-                init_tasks.push(iced::widget::operation::scroll_to(
-                    iced::widget::Id::new("history_list"),
-                    iced::widget::operation::AbsoluteOffset { x: 0.0, y },
-                ));
-                init_tasks.push(Command::perform(
-                    async move {
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        y
-                    },
-                    |y| Message::Notif(NotifMessage::HistoryScrollTo(y)),
-                ));
-            }
+            // Force scroll to the absolute bottom on mount.
+            // Using f32::MAX is the standard iced idiom to pin to the end.
+            init_tasks.push(iced::widget::operation::scroll_to(
+                iced::widget::Id::new("history_list"),
+                iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: f32::MAX },
+            ));
+            
+            init_tasks.push(Command::perform(
+                async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                },
+                |_| Message::Notif(NotifMessage::HistoryScrollTo(f32::MAX)),
+            ));
         }
 
         (app, Command::batch(init_tasks))

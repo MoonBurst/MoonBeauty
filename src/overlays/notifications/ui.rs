@@ -906,7 +906,7 @@ impl NotificationOverlay {
             );
             self.history.insert(0, item.clone());
             if self.history.len() > 80 {
-                self.history.truncate(80);
+                self.history.truncate(500);
             }
             self.mark_history_dirty();
             let mut held = load_held_notifs();
@@ -932,7 +932,7 @@ impl NotificationOverlay {
 
         self.history.insert(0, item);
         if self.history.len() > 80 {
-            self.history.truncate(80);
+            self.history.truncate(500);
         }
         self.mark_history_dirty();
     }
