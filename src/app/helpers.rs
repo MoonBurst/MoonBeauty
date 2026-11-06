@@ -144,3 +144,35 @@ impl MoonBeautyShellApp {
         rects
     }
 }
+
+/// Run a standalone-overlay copy to completion, then exit the process.
+///
+/// The `if self.is_standalone` branches in update handlers need to
+/// perform async work (wl-copy, pass -c) BEFORE exiting, otherwise
+/// the copy is lost. Historically they used
+/// `Runtime::new().unwrap()`, which panics on rare failures (FD
+/// exhaustion, fork-without-exec state from a signal handler). That
+/// is a hard crash for what is meant to be a graceful "copy and
+/// close" operation.
+///
+/// On runtime creation failure: log a diagnostic and exit anyway.
+/// The copy is best-effort; the overlay still closes. A panic here
+/// is worse than a silent skip — it takes down the whole process
+/// including any state the user was in the middle of.
+///
+/// Prefer `if let Ok(rt)` pattern used in bar/tray/context.rs, but
+/// codified here so every copy site shares the same fallback
+/// behavior and diagnostic tag.
+pub(crate) fn run_then_exit<F>(future: F) -> !
+where
+    F: std::future::Future<Output = ()>,
+{
+    match tokio::runtime::Runtime::new() {
+        Ok(rt) => rt.block_on(future),
+        Err(e) => eprintln!(
+            "[standalone-copy] failed to create tokio runtime: {e} \
+             (copy skipped, exiting anyway)"
+        ),
+    }
+    std::process::exit(0)
+}

@@ -26,13 +26,12 @@ impl MoonBeautyShellApp {
             }
             CalcMessage::CopyResult(val) => {
                 if self.is_standalone {
-                    // Block on the copy so it completes before exit.
+                    // Run copy to completion, then exit. On runtime
+                    // failure, log + exit anyway — copy is best-effort.
                     let v = val.clone();
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    rt.block_on(async move {
+                    crate::app::helpers::run_then_exit(async move {
                         CalculatorOverlay::copy_to_clipboard(&v).await;
                     });
-                    std::process::exit(0);
                 }
                 self.active_overlay = None;
                 return Command::perform(
@@ -156,15 +155,13 @@ impl MoonBeautyShellApp {
             }
             DictMessage::CopyDefinition(def) => {
                 if self.is_standalone {
-                    let def = def.clone();
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    rt.block_on(async move {
+                    let def_clone = def.clone();
+                    crate::app::helpers::run_then_exit(async move {
                         let _ = tokio::process::Command::new("wl-copy")
-                            .arg(&def)
+                            .arg(&def_clone)
                             .status()
                             .await;
                     });
-                    std::process::exit(0);
                 }
                 return Command::perform(
                     async move {
@@ -350,13 +347,11 @@ impl MoonBeautyShellApp {
             }
             PassMessage::CopyKey(k) => {
                 if self.is_standalone {
-                    // Block on copy so it completes before exit (no orphan tokio task)
-                    let k = k.clone();
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    rt.block_on(async move {
-                        PassOverlay::copy_password(&k).await;
+                    // Run copy to completion, then exit — no orphan task.
+                    let k_clone = k.clone();
+                    crate::app::helpers::run_then_exit(async move {
+                        PassOverlay::copy_password(&k_clone).await;
                     });
-                    std::process::exit(0);
                 }
                 self.active_overlay = None;
                 return Command::perform(

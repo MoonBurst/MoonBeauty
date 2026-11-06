@@ -20,7 +20,6 @@ isn't done. Everything else is independent.
 
 ## Bugs / gaps
 
-- [runtime-new-unwrap.md](runtime-new-unwrap.md) — 30-60m/site — 3 sites of `Runtime::new().unwrap()`
 - [try-into-pattern.md](try-into-pattern.md) — 2-4h — `TryInto<LayershellCustomActionWithId>` is opaque
 - [lockscreen-integration-tests.md](lockscreen-integration-tests.md) — 2-3h — no automated coverage for coordinator pure fns and shutdown
 
@@ -64,6 +63,7 @@ Sizes are current line counts.
   sharp edges (still partly stale; refactor/ supersedes it)
 
 ## Recently fixed
+- `runtime-new-unwrap` — 5 sites converted from `Runtime::new().unwrap()` (panics on rare failure) to `helpers::run_then_exit(future)` which logs the failure and exits anyway. Original `block_on` behavior preserved because these branches `exit(0)` before `update()` returns, so `Command::perform` cannot work here (documented in the tracker Caution). Reference pattern already used in `bar/tray/context.rs`.
 - `magick-or-convert-dedup` — resolved. Single `pub(crate) fn` in `overlays/screenshot/mod.rs`, imported by both `annotator.rs` and `watermark.rs`. Was two duplicate copies when the tracker item was filed.
 - `tooltip-zombie-reap` — `Message::IdleTick` now calls `try_wait()` on `weather_tooltip_child` and clears the handle when the child has exited. Self-terminating tooltips (AUTO_MS timeout, dismissal) no longer leave `<defunct>` children accumulating over hours of use.
 - `zombie-children` — replaced untracked `.spawn()` calls with `spawn_and_reap()` for notif-surface, wl-paste, and restart-bar.

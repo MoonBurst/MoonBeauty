@@ -20,12 +20,10 @@ impl MoonBeautyShellApp {
             }
             ClipboardMessage::CopyEntry(id) => {
                 if self.is_standalone {
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    rt.block_on(async move {
+                    crate::app::helpers::run_then_exit(async move {
                         ClipboardOverlay::copy(id).await;
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                     });
-                    std::thread::sleep(std::time::Duration::from_millis(200));
-                    std::process::exit(0);
                 }
                 self.active_overlay = None;
                 return Command::perform(

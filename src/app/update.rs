@@ -648,15 +648,13 @@ impl MoonBeautyShellApp {
                             .args(["-a", "Launcher", "Copied", &result])
                             .spawn();
                         if self.is_standalone {
-                            let rt = tokio::runtime::Runtime::new().unwrap();
                             let r = result.clone();
-                            rt.block_on(async move {
+                            crate::app::helpers::run_then_exit(async move {
                                 let _ = tokio::process::Command::new("wl-copy")
                                     .arg(&r)
                                     .status()
                                     .await;
                             });
-                            std::process::exit(0);
                         }
                         self.active_overlay = None;
                         return Command::perform(
