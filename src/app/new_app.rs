@@ -97,6 +97,71 @@ impl MoonBeautyShellApp {
             });
         }
 
+        // ── TTY return watcher ──
+        // Sway drops layer surfaces on TTY switch and does not recreate
+        // them on return. The bar cannot recreate its own surface from
+        // inside iced_layershell, so exit cleanly on return-to-desktop
+        // and let systemd's Restart=always (or --restart-bar for
+        // non-systemd launches) bring up a fresh bar with new surfaces.
+        //
+        // The lockscreen coordinator has its own TTY watcher and
+        // respawns its children independently. When the bar exits and
+        // systemd restarts it, the coordinator survives as an orphan
+        // and keeps the lockscreen up.
+        if !is_standalone && !is_notif_surface {
+            std::thread::spawn(|| {
+                let read_tty = || {
+                    std::fs::read_to_string("/sys/class/tty/tty0/active")
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                };
+                let desktop_tty = match read_tty() {
+                    Some(v) => v,
+                    None => {
+                        eprintln!(
+                            "[bar] TTY watcher disabled: \
+                             /sys/class/tty/tty0/active unreadable"
+                        );
+                        return;
+                    }
+                };
+                eprintln!(
+                    "[bar] TTY watcher active (desktop_tty={:?})",
+                    desktop_tty
+                );
+                let mut last_tty = Some(desktop_tty.clone());
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    let now_tty = read_tty();
+                    if now_tty == last_tty {
+                        continue;
+                    }
+                    if now_tty.as_deref() == Some(desktop_tty.as_str())
+                        && last_tty.as_deref() != Some(desktop_tty.as_str())
+                    {
+                        let is_systemd =
+                            std::env::var_os("INVOCATION_ID").is_some();
+                        eprintln!(
+                            "[bar] TTY return to desktop (from {:?}), \
+                             is_systemd={}",
+                            last_tty, is_systemd
+                        );
+                        if is_systemd {
+                            std::process::exit(0);
+                        } else {
+                            let _ = std::process::Command::new(
+                                crate::resolve_exe(),
+                            )
+                            .arg("--restart-bar")
+                            .spawn();
+                            std::process::exit(0);
+                        }
+                    }
+                    last_tty = now_tty;
+                }
+            });
+        }
+
         // Spawn exactly one wl-paste watcher. Kill any orphaned watcher
         // from previous runs first — the shell pkill pattern anchors on
         // "moonbeauty$", but the watcher cmdline ends with
