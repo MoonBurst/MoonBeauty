@@ -23,8 +23,7 @@ impl MoonBeautyShellApp {
                 let c1 = self.update(Message::TickClock);
                 let c2 = self.update(Message::TickHardware);
                 let c3 = self.update(Message::PollNotifs);
-                let c4 = self.update(Message::CheckLockscreenAlive);
-                return Command::batch(vec![c1, c2, c3, c4]);
+                return Command::batch(vec![c1, c2, c3]);
             }
             Message::PollNotifs => return self.handle_poll_notifs(),
             Message::TickClock => {
@@ -1075,7 +1074,6 @@ impl MoonBeautyShellApp {
                 self.active_overlay = None;
             }
 
-            Message::CheckLockscreenAlive => return self.check_lockscreen_alive(),
             Message::MusicCycleDone(new_state) => return self.handle_music_cycle_done(new_state),
             Message::Noop => {}
             Message::SetToastInputRegion(_) => {

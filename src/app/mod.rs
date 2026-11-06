@@ -112,7 +112,6 @@ pub enum Message {
     /// it immediately. Lockscreen must NEVER be absent — a dead lock is
     /// an unlocked screen. Runs fast (500ms) so the worst-case window
     /// between crash and respawn is 500ms + child boot (~300ms).
-    CheckLockscreenAlive,
     /// Music cycle press completed — carries the updated state so
     /// subsequent presses continue from the right position.
     MusicCycleDone(moonbeauty::libraries::backend::MusicCycleState),
@@ -206,12 +205,6 @@ pub struct MoonBeautyShellApp {
 
     pub last_cursor_x: f32,
     pub last_cursor_time: std::time::Instant,
-    /// Timestamp of the previous CheckLockscreenAlive tick. If a tick
-    /// fires more than ~2s after the previous one, the session was
-    /// paused (TTY switch, suspend, hibernate). In that case the lock
-    /// child surfaces are likely stale (sway drops layer surfaces on
-    /// output detach without telling the client), so force-respawn.
-    pub last_lockscreen_check: std::time::Instant,
     /// Last observed active-toast count. Changes trigger a fresh
     /// SetToastInputRegion emit so the click target tracks the toasts.
     pub last_toast_count: usize,

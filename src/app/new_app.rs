@@ -347,7 +347,6 @@ impl MoonBeautyShellApp {
             last_cursor_time: std::time::Instant::now() - std::time::Duration::from_secs(30),
             last_toast_count: 0,
             last_active_pending_written: None,
-            last_lockscreen_check: std::time::Instant::now(),
         };
 
         // Bar-only init tasks. Overlays (--notes, --clipboard, --settings,
