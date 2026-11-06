@@ -20,6 +20,20 @@ impl MoonBeautyShellApp {
                 let _ = (w, h);
             }
             Message::IdleTick => {
+                // Reap self-terminating tooltip children. Tooltips
+                // self-exit via process::exit(0) on AUTO_MS timeout
+                // (20s weather, 25s tray) or user dismissal. Without
+                // this try_wait, Child's Drop does NOT reap (Rust
+                // docs: no Drop impl for Child), so each self-exit
+                // leaves a zombie accumulating over hours of use.
+                // try_wait also clears the handle so the next toggle
+                // starts from a clean slate rather than take()-ing a
+                // dead child.
+                if let Some(c) = self.weather_tooltip_child.as_mut() {
+                    if matches!(c.try_wait(), Ok(Some(_))) {
+                        self.weather_tooltip_child = None;
+                    }
+                }
                 let c1 = self.update(Message::TickClock);
                 let c2 = self.update(Message::TickHardware);
                 let c3 = self.update(Message::PollNotifs);

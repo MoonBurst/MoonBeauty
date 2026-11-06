@@ -68,5 +68,6 @@ Sizes are current line counts.
   sharp edges (still partly stale; refactor/ supersedes it)
 
 ## Recently fixed
+- `tooltip-zombie-reap` — `Message::IdleTick` now calls `try_wait()` on `weather_tooltip_child` and clears the handle when the child has exited. Self-terminating tooltips (AUTO_MS timeout, dismissal) no longer leave `<defunct>` children accumulating over hours of use.
 - `zombie-children` — replaced untracked `.spawn()` calls with `spawn_and_reap()` for notif-surface, wl-paste, and restart-bar.
 - `socket-path-mismatch` — IPC socket renamed from `moon-beauty-shell.sock` to `moonbeauty.sock`.
