@@ -1567,19 +1567,47 @@ impl NotificationOverlay {
                 container(
                     row![
                         avatar,
-                        column![
-                            text(&toast.summary)
-                                .size((settings.notif_summary_size) as f32)
-                                .bold()
-                                .color(toast_text_color)
-                                .width(Length::Fill),
-                            text(&toast.body)
-                                .size((settings.notif_body_size) as f32)
-                                .color(toast_text_color)
-                                .width(Length::Fill),
-                        ]
-                        .width(Length::Fill)
-                        .spacing(2),
+                        {
+                            // Security: render app_name on the toast body.
+                            // Without this, any same-user process can send a
+                            // notification with app_name="Signal" and
+                            // summary="Alice" and trigger Alice's friend
+                            // profile match (color, sound path, TTS
+                            // template, avatar) with no visual tell. The
+                            // history panel already shows app_name; the
+                            // toast did not. Attribution here at least
+                            // surfaces the mismatch — the user sees
+                            // "via Signal" and can notice that the ping
+                            // claimed to be from Signal, not Alice.
+                            // Security attribution: show app_name inline with
+                            // the summary so a spoofed toast (app_name="Signal"
+                            // with summary="Alice") reveals the mismatch
+                            // immediately.
+                            let summary_row = if toast.app_name.is_empty() {
+                                row![text(&toast.summary)
+                                    .size((settings.notif_summary_size) as f32)
+                                    .bold()
+                                    .color(toast_text_color)]
+                            } else {
+                                row![
+                                    text(&toast.summary)
+                                        .size((settings.notif_summary_size) as f32)
+                                        .bold()
+                                        .color(toast_text_color),
+                                    text(format!(" via {}", toast.app_name))
+                                        .size((settings.notif_summary_size.saturating_sub(2)) as f32)
+                                        .color(theme.focus),
+                                ]
+                            };
+                            let mut text_col = column![
+                                summary_row.width(Length::Fill),
+                                text(&toast.body)
+                                    .size((settings.notif_body_size) as f32)
+                                    .color(toast_text_color)
+                                    .width(Length::Fill),
+                            ];
+                            text_col.width(Length::Fill).spacing(2)
+                        },
                     ]
                     .spacing(12)
                     .align_y(Alignment::Center)
