@@ -47,6 +47,10 @@ pub struct App {
     slant_r: SlantSide,
     closing_at: Option<Instant>,
     anim_frame: u64,
+    // Cached at boot so view() doesn't reload from disk at 60fps
+    // during the drop/expand animation (~400ms of ~24 frames each).
+    settings: ShellSettings,
+    theme: ShellTheme,
 }
 
 #[allow(dead_code)]
@@ -108,6 +112,8 @@ impl App {
             expand_ms,
             closing_at: None,
             anim_frame: 0,
+            settings: s.clone(),
+            theme: ShellTheme::from_settings(&s),
         };
         let task = Task::perform(
             async { WeatherBackend::fetch().await.ok() },
@@ -173,8 +179,8 @@ impl App {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let settings = ShellSettings::load();
-        let theme = ShellTheme::from_settings(&settings);
+        let settings = &self.settings;
+        let theme = &self.theme;
         let anim = if let Some(t) = self.closing_at {
             crate::overlays::tooltip_engine::compute_close(
                 t.elapsed().as_millis() as f32,
@@ -210,7 +216,7 @@ impl App {
             frame: self.opened.elapsed().as_millis() as u64,
         };
 
-        let content: Element<'_, Message> = self.build_content(&theme, &settings, anim.opacity);
+        let content: Element<'_, Message> = self.build_content(theme, settings, anim.opacity);
         let clipped = crate::overlays::tooltip_engine::clip_content(
             content,
             anim.w,
