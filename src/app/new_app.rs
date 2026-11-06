@@ -155,7 +155,9 @@ impl MoonBeautyShellApp {
             active_overlay: standalone_target.clone(),
             weather_tooltip_child: None,
             is_standalone,
-            system_collector: SystemCollector::new(),
+            system_collector: std::sync::Arc::new(std::sync::Mutex::new(
+                SystemCollector::new(),
+            )),
             standalone_child: None,
             is_notif_surface,
             notif_rx,
