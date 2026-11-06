@@ -1,7 +1,7 @@
 use crate::libraries::style::TextExt;
-use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke};
+use iced::widget::canvas::Canvas;
 use iced::widget::{button, column, container, row, text, text_input, Stack};
-use iced::{Alignment, Color, Element, Length, Padding, Point, Rectangle, Task, Theme};
+use iced::{Alignment, Color, Element, Length, Padding, Task, Theme};
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use std::time::Instant;
@@ -10,6 +10,8 @@ use crate::libraries::backend::system::{GpuInfo, ProcessItem, SystemCollector};
 use crate::libraries::config::theme::ShellTheme;
 use crate::libraries::config::ShellSettings;
 use crate::libraries::style::shape_box::SlantSide;
+
+use crate::overlays::tooltip_common::{slanted_row, KillButtonShape};
 
 const W_START: f32 = 130.0;
 const AUTO_MS: u128 = 10_000;
@@ -981,129 +983,8 @@ impl App {
     }
 }
 
-fn slanted_row<'a, M: 'a>(
-    inner: Element<'a, M>,
-    y_mid: f32,
-    total_h: f32,
-    slant: f32,
-    slant_right: bool,
-    safe: f32,
-    total_w: f32,
-    row_h: f32,
-) -> Element<'a, M> {
-    let frac = (y_mid / total_h.max(1.0)).clamp(0.0, 1.0);
-    let (lp, rp) = if slant_right {
-        (slant * (1.0 - frac) + safe, slant * frac + safe)
-    } else {
-        (slant * frac + safe, slant * (1.0 - frac) + safe)
-    };
-    let inner_w = (total_w - lp - rp).max(10.0);
 
-    let inner_clipped = container(inner)
-        .width(Length::Fixed(inner_w))
-        .height(Length::Fixed(row_h))
-        .clip(true);
 
-    row![
-        iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(lp)),
-        inner_clipped,
-        iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(rp)),
-    ]
-    .height(Length::Fixed(row_h))
-    .width(Length::Fixed(total_w))
-    .into()
-}
-
-struct KillButtonShape {
-    w: f32,
-    h: f32,
-    slant: f32,
-    slant_right: bool,
-    background: Color,
-    border_color: Color,
-    border_width: f32,
-    x_color: Color,
-}
-
-impl<Message> canvas::Program<Message> for KillButtonShape {
-    type State = ();
-    fn draw(
-        &self,
-        _state: &Self::State,
-        renderer: &iced::Renderer,
-        _theme: &Theme,
-        bounds: Rectangle,
-        _cursor: iced::mouse::Cursor,
-    ) -> Vec<Geometry> {
-        let mut frame = Frame::new(renderer, bounds.size());
-        let half = self.border_width / 2.0;
-        let w = self.w;
-        let h = self.h;
-        let sl = self.slant;
-
-        let path = if self.slant_right {
-            Path::new(|b| {
-                b.move_to(Point::new(sl + half, half));
-                b.line_to(Point::new(w - half, half));
-                b.line_to(Point::new(w - sl - half, h - half));
-                b.line_to(Point::new(half, h - half));
-                b.close();
-            })
-        } else {
-            Path::new(|b| {
-                b.move_to(Point::new(half, half));
-                b.line_to(Point::new(w - sl - half, half));
-                b.line_to(Point::new(w - half, h - half));
-                b.line_to(Point::new(sl + half, h - half));
-                b.close();
-            })
-        };
-
-        if self.background.a > 0.0 {
-            frame.fill(&path, self.background);
-        }
-        if self.border_width > 0.0 && self.border_color.a > 0.0 {
-            frame.stroke(
-                &path,
-                Stroke::default()
-                    .with_color(self.border_color)
-                    .with_width(self.border_width),
-            );
-        }
-
-        let cx = w / 2.0;
-        let cy = h / 2.0;
-        let r_x = (w * 0.26).max(3.0);
-        let r_y = (h * 0.26).max(3.0);
-        let stroke_w = (h * 0.09).max(1.5);
-
-        let inner_h = (h - 2.0 * half).max(1.0);
-        let sl_sign = if self.slant_right { 1.0 } else { -1.0 };
-        let delta = sl_sign * sl * r_y / inner_h;
-
-        let tl = Point::new(cx - r_x + delta, cy - r_y);
-        let tr = Point::new(cx + r_x + delta, cy - r_y);
-        let bl = Point::new(cx - r_x - delta, cy + r_y);
-        let br = Point::new(cx + r_x - delta, cy + r_y);
-
-        let x_stroke = Stroke::default()
-            .with_color(self.x_color)
-            .with_width(stroke_w)
-            .with_line_cap(canvas::LineCap::Round);
-        let diag_a = Path::new(|b| {
-            b.move_to(tl);
-            b.line_to(br);
-        });
-        let diag_b = Path::new(|b| {
-            b.move_to(bl);
-            b.line_to(tr);
-        });
-        frame.stroke(&diag_a, x_stroke);
-        frame.stroke(&diag_b, x_stroke);
-
-        vec![frame.into_geometry()]
-    }
-}
 
 pub fn run() -> Result<(), iced_layershell::Error> {
     let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());

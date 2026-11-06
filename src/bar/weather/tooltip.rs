@@ -11,6 +11,8 @@ use crate::libraries::config::ShellSettings;
 use crate::libraries::style::shape_box::SlantSide;
 use crate::libraries::style::TextExt;
 
+pub use crate::overlays::tooltip_common::slanted_row;
+
 const W_START: f32 = 130.0;
 const AUTO_MS: u128 = 20_000;
 
@@ -384,38 +386,6 @@ impl App {
     }
 }
 
-pub fn slanted_row<'a, M: 'a>(
-    inner: Element<'a, M>,
-    y_mid: f32,
-    total_h: f32,
-    slant: f32,
-    slant_right: bool,
-    safe: f32,
-    total_w: f32,
-    row_h: f32,
-) -> Element<'a, M> {
-    let frac = (y_mid / total_h.max(1.0)).clamp(0.0, 1.0);
-    let (lp, rp) = if slant_right {
-        (slant * (1.0 - frac) + safe, slant * frac + safe)
-    } else {
-        (slant * frac + safe, slant * (1.0 - frac) + safe)
-    };
-    let inner_w = (total_w - lp - rp).max(10.0);
-
-    let inner_clipped = container(inner)
-        .width(Length::Fixed(inner_w))
-        .height(Length::Fixed(row_h))
-        .clip(true);
-
-    row![
-        iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(lp)),
-        inner_clipped,
-        iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(rp)),
-    ]
-    .height(Length::Fixed(row_h))
-    .width(Length::Fixed(total_w))
-    .into()
-}
 
 pub fn run() -> Result<(), iced_layershell::Error> {
     let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());

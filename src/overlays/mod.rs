@@ -18,6 +18,7 @@ pub mod size_resizer;
 pub mod system_tooltip;
 pub mod todo;
 pub mod tooltip_engine;
+pub mod tooltip_common;
 pub mod unicode;
 pub mod websearch;
 
