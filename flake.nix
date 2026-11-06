@@ -233,6 +233,30 @@ export NIX_RPATH_PATHS="${pkgs.lib.makeLibraryPath (linkLibs pkgs)}:/run/opengl-
 
                 Install.WantedBy = [ "graphical-session.target" ];
               };
+
+              # Lockscreen coordinator unit — started on demand by the
+              # bar's --toggle lockscreen IPC (systemctl --user start).
+              # No Install.WantedBy: the lockscreen must not appear at
+              # session start; it only locks when the user requests it.
+              # Restart=on-failure (not always) means auth success
+              # (exit 0) does NOT re-spawn the coordinator, so the
+              # screen stays unlocked after password entry.
+              systemd.user.services.moonbeauty-lockscreen = {
+                Unit = {
+                  Description = "Moon Beauty Lockscreen Coordinator";
+                  After = [ "graphical-session.target" ];
+                };
+                Service = {
+                  ExecStart = "${cfg.package}/bin/moon-beauty-shell --lockscreen";
+                  Restart = "on-failure";
+                  RestartSec = "500ms";
+                  Environment = [ "RUST_BACKTRACE=1" ];
+                  UnsetEnvironment = lib.optionals cfg.harden [
+                    "MBS_DEBUG"
+                    "MBS_LOCK_DEBUG_PASS"
+                  ];
+                };
+              };
             };
           };
 
@@ -308,6 +332,27 @@ export NIX_RPATH_PATHS="${pkgs.lib.makeLibraryPath (linkLibs pkgs)}:/run/opengl-
                   ];
                 };
                 Install.WantedBy = [ "graphical-session.target" ];
+              };
+
+              # Lockscreen coordinator unit — see the Home Manager
+              # module above for detailed comments. Same on-failure
+              # restart policy, same on-demand start via
+              # systemctl --user start.
+              systemd.user.services.moonbeauty-lockscreen = {
+                Unit = {
+                  Description = "Moon Beauty Lockscreen Coordinator";
+                  After = [ "graphical-session.target" ];
+                };
+                Service = {
+                  ExecStart = "${cfg.package}/bin/moon-beauty-shell --lockscreen";
+                  Restart = "on-failure";
+                  RestartSec = "500ms";
+                  Environment = [ "RUST_BACKTRACE=1" ];
+                  UnsetEnvironment = lib.optionals cfg.harden [
+                    "MBS_DEBUG"
+                    "MBS_LOCK_DEBUG_PASS"
+                  ];
+                };
               };
             };
           };
