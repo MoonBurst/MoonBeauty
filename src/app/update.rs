@@ -9,6 +9,7 @@ mod lockscreen;
 mod clipboard;
 mod settings;
 mod overlays;
+mod top_bar;
 
 impl MoonBeautyShellApp {
     pub fn update(&mut self, message: Message) -> Command<Message> {
@@ -298,13 +299,7 @@ impl MoonBeautyShellApp {
                 IpcCommand::MusicPrevious => return self.music_previous_track_ipc(),
                 IpcCommand::MusicPlayPause => return self.music_toggle_play_pause_ipc(),
             },
-            Message::TopBar(msg) => {
-                moonbeauty::dbg_log!("[topbar-msg] {:?}", msg);
-                if let TopBarMessage::Action(act) = msg {
-                    return self.handle_capsule_action(act);
-
-                }
-            }
+            Message::TopBar(msg) => return self.handle_top_bar(msg),
             Message::Launcher(msg) => match msg {
                 LauncherMessage::Dismiss => {
                     if self.is_standalone {
