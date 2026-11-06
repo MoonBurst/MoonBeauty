@@ -115,6 +115,54 @@ fn find_bin(name: &str) -> Option<std::path::PathBuf> {
     None
 }
 
+/// Sweep stale lockscreen sockets whose embedded PID is not a live
+/// coordinator. Called from spawn() before binding the new socket so
+/// the sweep can't race with our own freshly-created file.
+fn sweep_stale_lockscreen_sockets(runtime_dir: &str, current_pid: u32) {
+    let Ok(entries) = std::fs::read_dir(runtime_dir) else { return; };
+    let mut cleaned = 0u32;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(s) = name.to_str() else { continue; };
+        let Some(rest) = s.strip_prefix("moon-beauty-lock-") else { continue; };
+        let Some(pid_str) = rest.strip_suffix(".sock") else { continue; };
+        let Ok(pid) = pid_str.parse::<u32>() else { continue; };
+        if pid == current_pid { continue; }
+        let cmdline = std::fs::read(format!("/proc/{}/cmdline", pid)).ok();
+        let is_live = cmdline
+            .as_ref()
+            .map(|c| c.split(|b| *b == 0).any(|part| part == b"--lockscreen"))
+            .unwrap_or(false);
+        if is_live { continue; }
+        if std::fs::remove_file(entry.path()).is_ok() {
+            cleaned += 1;
+            eprintln!(
+                "[lock-coord] cleaned stale socket {:?} (pid {} no longer a coordinator)",
+                entry.path(), pid
+            );
+        }
+    }
+    if cleaned > 0 {
+        eprintln!("[lock-coord] swept {} stale socket file(s)", cleaned);
+    }
+}
+
+/// Kill all children, wait for them, remove the socket file. Called from
+/// the SIGTERM/SIGINT handler before std::process::exit(0).
+fn shutdown_lockscreen_children(
+    children: &Arc<Mutex<HashMap<String, Child>>>,
+    socket_path: &std::path::Path,
+) {
+    if let Ok(mut g) = children.lock() {
+        for (_, mut child) in g.drain() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+    let _ = std::fs::remove_file(socket_path);
+    eprintln!("[lock-coord] shutdown complete");
+}
+
 pub struct LockCoordinator;
 
 impl LockCoordinator {
@@ -196,6 +244,7 @@ impl LockCoordinator {
         let pid = std::process::id();
         let socket_path =
             PathBuf::from(&runtime_dir).join(format!("moon-beauty-lock-{}.sock", pid));
+        sweep_stale_lockscreen_sockets(&runtime_dir, pid);
         let _ = std::fs::remove_file(&socket_path);
 
         #[cfg(not(feature = "lock-debug-bypass"))]
@@ -528,16 +577,30 @@ impl LockCoordinator {
             // Default disposition is TERMINATE. That would kill the
             // coordinator, orphan every child, and unlock the screen.
             // Ignore them (log for diagnosis).
+            let children_sig = children.clone();
+            let socket_path_sig = socket_path.clone();
             tokio::spawn(async move {
                 use tokio::signal::unix::{signal, SignalKind};
                 let Ok(mut usr1) = signal(SignalKind::user_defined1()) else { return; };
                 let Ok(mut usr2) = signal(SignalKind::user_defined2()) else { return; };
                 let Ok(mut hup)  = signal(SignalKind::hangup())      else { return; };
+                let Ok(mut term) = signal(SignalKind::terminate())   else { return; };
+                let Ok(mut intr) = signal(SignalKind::interrupt())   else { return; };
                 loop {
                     tokio::select! {
                         _ = usr1.recv() => eprintln!("[lock-coord] SIGUSR1 ignored"),
                         _ = usr2.recv() => eprintln!("[lock-coord] SIGUSR2 ignored"),
                         _ = hup.recv()  => eprintln!("[lock-coord] SIGHUP ignored"),
+                        _ = term.recv() => {
+                            eprintln!("[lock-coord] SIGTERM received — shutting down cleanly");
+                            shutdown_lockscreen_children(&children_sig, &socket_path_sig);
+                            std::process::exit(0);
+                        },
+                        _ = intr.recv() => {
+                            eprintln!("[lock-coord] SIGINT received — shutting down cleanly");
+                            shutdown_lockscreen_children(&children_sig, &socket_path_sig);
+                            std::process::exit(0);
+                        },
                     }
                 }
             });
