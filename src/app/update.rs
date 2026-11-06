@@ -218,12 +218,7 @@ impl MoonBeautyShellApp {
                     // two toggles. Lockscreen is now idempotent-spawn: IPC
                     // can spawn it, but only password auth removes it.
                     if matches!(target, OverlayTarget::Lockscreen) {
-                        if let Some(OverlayTarget::Lockscreen) = self.standalone_running() {
-                            eprintln!("[ipc] lockscreen already active; ignoring duplicate toggle");
-                            return Command::none();
-                        }
-                        eprintln!("[ipc] lockscreen spawn (cannot be toggled off via IPC)");
-                        self.spawn_standalone(OverlayTarget::Lockscreen);
+                        return self.start_lockscreen_service();
                     } else {
                         self.toggle_standalone(target);
                     }
@@ -241,15 +236,7 @@ impl MoonBeautyShellApp {
                     ) {
                         self.spawn_standalone(target);
                     } else if matches!(target, OverlayTarget::Lockscreen) {
-                        // Lockscreen MUST be a standalone process so it can
-                        // spawn the multi-monitor coordinator. Idempotent: if
-                        // it's already active, ignore. Respawn = kill+spawn =
-                        // unlocked window. Only auth success removes the lock.
-                        if let Some(OverlayTarget::Lockscreen) = self.standalone_running() {
-                            eprintln!("[ipc] lockscreen already active; ignoring duplicate open");
-                            return Command::none();
-                        }
-                        self.spawn_standalone(target);
+                        return self.start_lockscreen_service();
                     } else if matches!(target, OverlayTarget::Annotator) {
                         // Annotator needs fullscreen + exclusive keyboard, which only
                         // the standalone (--annotator-session) process gets via its
@@ -272,7 +259,16 @@ impl MoonBeautyShellApp {
                     }
                 }
                 IpcCommand::Close(target) => {
-                    if self.active_overlay == Some(target) {
+                    // SECURITY: the lockscreen cannot be closed via IPC.
+                    // Unlocking requires password auth handled by the
+                    // coordinator; the only exit path is the coordinator's
+                    // own SIGTERM handler after successful auth (exit 0,
+                    // which systemd's Restart=on-failure honors).
+                    if matches!(target, OverlayTarget::Lockscreen) {
+                        eprintln!(
+                            "[ipc] Close(Lockscreen) refused — requires auth via coordinator"
+                        );
+                    } else if self.active_overlay == Some(target) {
                         self.active_overlay = None;
                     }
                 }

@@ -38,6 +38,28 @@ impl MoonBeautyShellApp {
     /// 500ms watchdog: respawn the lockscreen child if it has crashed,
     /// and force-respawn after suspend/resume (detected via elapsed-time
     /// gap between ticks).
+    /// Start the systemd-managed lockscreen coordinator. Idempotent:
+    /// `systemctl --user start` is a no-op when already active. Never
+    /// stop from here — unlocking requires password auth handled by
+    /// the coordinator; the only exit path is the coordinator's own
+    /// SIGTERM handler after successful auth (exit 0, which systemd's
+    /// Restart=on-failure honors).
+    ///
+    /// Non-blocking: `.spawn()` forks systemctl without waiting for
+    /// the unit to be up. The coordinator becomes visible within
+    /// ~200-500ms; the UI does not stall in the meantime.
+    pub(crate) fn start_lockscreen_service(&self) -> Command<Message> {
+        eprintln!("[ipc] lockscreen: systemctl --user start moonbeauty-lockscreen.service");
+        match std::process::Command::new("systemctl")
+            .args(["--user", "start", "moonbeauty-lockscreen.service"])
+            .spawn()
+        {
+            Ok(_) => {}
+            Err(e) => eprintln!("[ipc] systemctl spawn failed: {e}"),
+        }
+        Command::none()
+    }
+
     pub(crate) fn check_lockscreen_alive(&mut self) -> Command<Message> {
         // Only the primary bar watches the lock.
         if self.is_notif_surface || self.is_standalone {
