@@ -163,6 +163,30 @@ fn shutdown_lockscreen_children(
     eprintln!("[lock-coord] shutdown complete");
 }
 
+fn sudo_is_nopasswd() -> bool {
+    // Detect whether `sudo` requires a password on this host.
+    //
+    // Runs `sudo -k -n -v`:
+    //   -k  invalidate any cached sudo timestamp (avoids false positives)
+    //   -n  never prompt (fails immediately if a password would be needed)
+    //   -v  validate (renew) the sudo timestamp
+    //
+    // Exit 0 = sudo did NOT need a password → NOPASSWD rule active.
+    // Exit !=0 = sudo needs a password, or sudo is missing.
+    //
+    // On a NOPASSWD host, `sudo -v` in authenticate() would return 0
+    // with ANY input, making sudo useless as an auth oracle. This check
+    // short-circuits that strategy.
+    let sudo_bin = find_bin("sudo").unwrap_or_else(|| std::path::PathBuf::from("sudo"));
+    std::process::Command::new(&sudo_bin)
+        .args(["-k", "-n", "-v"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 pub struct LockCoordinator;
 
 impl LockCoordinator {
@@ -272,19 +296,34 @@ impl LockCoordinator {
         // from the coordinator's buffer.
         let primary_output: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
-        // Startup sanity: verify sudo is on PATH
+        // Startup diagnostic: report what auth strategies are usable.
+        // Logs a clear WARNING when no strategy can succeed — the
+        // lockscreen will fail closed (refuse all passwords) rather than
+        // silently accept any input, and the warning tells the user
+        // exactly which config line to fix.
         {
-            let check = std::process::Command::new("which").arg("sudo").output();
-            match check {
-                Ok(out) => {
-                    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                    if path.is_empty() {
-                        eprintln!("[lock-coord] WARN: sudo not found on PATH");
-                    } else {
-                        eprintln!("[lock-coord] sudo binary: {}", path);
-                    }
-                }
-                Err(e) => eprintln!("[lock-coord] WARN: which sudo failed: {}", e),
+            let pam_bin = find_bin("pamtester");
+            let sudo_bin = find_bin("sudo");
+            let sudo_nopasswd = if sudo_bin.is_some() {
+                sudo_is_nopasswd()
+            } else {
+                false
+            };
+            eprintln!(
+                "[lock-coord] auth: pamtester={:?} sudo={:?} sudo_nopasswd={}",
+                pam_bin, sudo_bin, sudo_nopasswd
+            );
+            let usable = pam_bin.is_some() as u32
+                + (sudo_bin.is_some() && !sudo_nopasswd) as u32;
+            if usable == 0 {
+                eprintln!(
+                    "[lock-coord] WARNING: no working auth strategy. \
+                     The lockscreen will FAIL CLOSED — even the correct \
+                     password will not unlock. Fix one of: (a) install \
+                     pamtester AND enable security.pam.services.login, \
+                     (b) remove NOPASSWD from the invoking user's sudoers \
+                     rule."
+                );
             }
         }
 
@@ -826,56 +865,10 @@ impl LockCoordinator {
 
         let pass_line = format!("{}\n", clean);
 
-        // ── Strategy 0: sudo -S -k -v ──
-        // Wheel users: sudo is the most reliable auth. pamtester requires
-        // `security.pam.services.login` to be configured, which many minimal
-        // NixOS configs don't have. Try sudo first.
-        {
-            let sudo_bin = find_bin("sudo").unwrap_or_else(|| std::path::PathBuf::from("sudo"));
-            eprintln!("[lock-coord] trying sudo -v");
-            match tokio::process::Command::new(&sudo_bin)
-                .args(["-S", "-k", "-v"])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-            {
-                Ok(mut c) => {
-                    if let Some(mut stdin) = c.stdin.take() {
-                        let _ = stdin.write_all(pass_line.as_bytes()).await;
-                        drop(stdin);
-                    }
-                    match tokio::time::timeout(
-                        std::time::Duration::from_secs(5),
-                        c.wait_with_output(),
-                    )
-                    .await
-                    {
-                        Ok(Ok(out)) => {
-                            let success = out.status.success();
-                            let stderr = String::from_utf8_lossy(&out.stderr);
-                            eprintln!(
-                                "[lock-coord] sudo -v exit={:?} success={} stderr={:?}",
-                                out.status.code(),
-                                success,
-                                stderr.trim().chars().take(200).collect::<String>()
-                            );
-                            if success {
-                                return true;
-                            }
-                        }
-                        Ok(Err(e)) => eprintln!("[lock-coord] sudo wait: {}", e),
-                        Err(_) => eprintln!("[lock-coord] sudo TIMEOUT"),
-                    }
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    eprintln!("[lock-coord] sudo not installed");
-                }
-                Err(e) => eprintln!("[lock-coord] sudo spawn: {}", e),
-            }
-        }
-
-        // ── Strategy 1: pamtester ──
+        // ── Strategy 0: pamtester ──
+        // Talks to real PAM auth (the same stack login(1) uses). The only
+        // strategy in this file guaranteed to require the actual password.
+        // Try it first.
         {
             let user = resolve_user();
             let pam_bin =
@@ -923,15 +916,22 @@ impl LockCoordinator {
             }
         }
 
-        // ── Strategy 2: sudo via script(1) PTY ──
-        {
-            let script_bin =
-                find_bin("script").unwrap_or_else(|| std::path::PathBuf::from("script"));
-            eprintln!("[lock-coord] trying sudo via script(1)");
-            match tokio::process::Command::new(&script_bin)
-                .args(["-q", "-e", "-c", "sudo -k -v", "/dev/null"])
+        // ── Strategy 1: sudo -S -k -v, guarded by NOPASSWD check ──
+        // `sudo -v` returns 0 with ANY input on hosts where the invoking
+        // user has a NOPASSWD sudoers rule (common: wheel, docker,
+        // podman). Detect this and skip sudo entirely — it cannot serve
+        // as an auth oracle when it never asks for a password.
+        if sudo_is_nopasswd() {
+            eprintln!(
+                "[lock-coord] sudo is NOPASSWD — refusing to use it as auth oracle"
+            );
+        } else {
+            let sudo_bin = find_bin("sudo").unwrap_or_else(|| std::path::PathBuf::from("sudo"));
+            eprintln!("[lock-coord] trying sudo -v");
+            match tokio::process::Command::new(&sudo_bin)
+                .args(["-S", "-k", "-v"])
                 .stdin(Stdio::piped())
-                .stdout(Stdio::null())
+                .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
             {
@@ -948,67 +948,36 @@ impl LockCoordinator {
                     {
                         Ok(Ok(out)) => {
                             let success = out.status.success();
+                            let stderr = String::from_utf8_lossy(&out.stderr);
                             eprintln!(
-                                "[lock-coord] script+sudo exit={:?} success={}",
+                                "[lock-coord] sudo -v exit={:?} success={} stderr={:?}",
                                 out.status.code(),
-                                success
+                                success,
+                                stderr.trim().chars().take(200).collect::<String>()
                             );
                             if success {
                                 return true;
                             }
                         }
-                        Ok(Err(e)) => eprintln!("[lock-coord] script wait: {}", e),
-                        Err(_) => eprintln!("[lock-coord] script+sudo TIMEOUT"),
+                        Ok(Err(e)) => eprintln!("[lock-coord] sudo wait: {}", e),
+                        Err(_) => eprintln!("[lock-coord] sudo TIMEOUT"),
                     }
                 }
-                Err(e) => eprintln!("[lock-coord] script spawn: {}", e),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    eprintln!("[lock-coord] sudo not installed");
+                }
+                Err(e) => eprintln!("[lock-coord] sudo spawn: {}", e),
             }
         }
 
-        // ── Strategy 3: su via script(1) PTY ──
-        {
-            let user = resolve_user();
-            eprintln!("[lock-coord] trying su via script(1)");
-            match tokio::process::Command::new("script")
-                .args([
-                    "-q",
-                    "-e",
-                    "-c",
-                    &format!("su -c true {}", user),
-                    "/dev/null",
-                ])
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::piped())
-                .spawn()
-            {
-                Ok(mut c) => {
-                    if let Some(mut stdin) = c.stdin.take() {
-                        let _ = stdin.write_all(pass_line.as_bytes()).await;
-                        drop(stdin);
-                    }
-                    match tokio::time::timeout(
-                        std::time::Duration::from_secs(5),
-                        c.wait_with_output(),
-                    )
-                    .await
-                    {
-                        Ok(Ok(out)) => {
-                            let success = out.status.success();
-                            eprintln!(
-                                "[lock-coord] su-script exit={:?} success={}",
-                                out.status.code(),
-                                success
-                            );
-                            return success;
-                        }
-                        Ok(Err(e)) => eprintln!("[lock-coord] su-script wait: {}", e),
-                        Err(_) => eprintln!("[lock-coord] su-script TIMEOUT"),
-                    }
-                }
-                Err(e) => eprintln!("[lock-coord] su-script spawn: {}", e),
-            }
-        }
+        // Strategies 2 (script + sudo -k -v) and 3 (su -c true <self>)
+        // are REMOVED:
+        //   - Strategy 2 has identical bypass semantics to the sudo check
+        //     above (a NOPASSWD rule makes both succeed with any input)
+        //     and is redundant with the guarded sudo.
+        //   - Strategy 3 succeeds WITHOUT prompting when <user> equals
+        //     the invoking user (no user transition = no PAM check), so
+        //     it is a bypass on every Linux host with util-linux su.
 
         eprintln!("[lock-coord] ALL AUTH STRATEGIES FAILED");
         false
