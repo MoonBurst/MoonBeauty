@@ -305,11 +305,6 @@ impl MoonBeautyShellApp {
                         CapsuleAction::OpenOverlay(id) => {
                             eprintln!("[topbar-action] OpenOverlay: id = {:?}", id);
 
-                            // Recent click => use cursor position for dynamic placement.
-                            // Fallback to capsule_center_x if no click in last 5s (e.g. IPC trigger).
-                            let recent_click =
-                                self.last_cursor_time.elapsed() < std::time::Duration::from_secs(5);
-
                             // 1. ALARM — standalone reminders overlay.
                             // Handled BEFORE the tooltip-open/toggle block so:
                             //   (a) an open tooltip can't hijack the click,
@@ -326,6 +321,10 @@ impl MoonBeautyShellApp {
                             }
 
                             // 2. DROPDOWN TOOLTIPS (CPU, GPU, RAM, Tray)
+                            // Helper handles toggle-off-if-open, cursor-vs-
+                            // capsule-center positioning, slant selection,
+                            // per-capsule bias, spawn, and error logging.
+                            // See app::helpers::toggle_tooltip.
                             if matches!(
                                 id.as_str(),
                                 "weather"
@@ -339,139 +338,8 @@ impl MoonBeautyShellApp {
                                     | "custom"
                                     | "clock"
                             ) {
-                                // Toggle off if already open
-                                let running = self
-                                    .weather_tooltip_child
-                                    .as_mut()
-                                    .and_then(|c| c.try_wait().ok())
-                                    .is_some_and(|status| status.is_none());
-                                if running {
-                                    eprintln!("[tooltip] Already open; toggling off");
-                                    if let Some(mut c) = self.weather_tooltip_child.take() {
-                                        let _ = c.kill();
-                                        let _ = c.wait();
-                                    }
-                                    return Command::none();
-                                }
-                                self.weather_tooltip_child = None;
-
-                                let target_output = if self.settings.notif_screen_name != "Auto"
-                                    && self.settings.notif_screen_name != "Auto (Primary)"
-                                    && !self.settings.notif_screen_name.is_empty()
-                                {
-                                    Some(self.settings.notif_screen_name.as_str())
-                                } else {
-                                    None
-                                };
-                                let sw = get_screen_width_for(target_output);
-                                let in_left = self.settings.bar_left.contains(&id);
-                                let in_center = self.settings.bar_center.contains(&id);
-                                let in_right = self.settings.bar_right.contains(&id);
-                                // Finding 78: right-side capsules use capsule_center_x, not
-                                // last_cursor_x. Right-anchored math is
-                                //   margin_right = sw - cx - half_cap + adjust_right
-                                // which assumes cx = capsule center. If cx = click_x (near
-                                // capsule right edge), tooltip lands half_cap - adjust past
-                                // capsule_right — off-screen at larger font sizes. Left-anchored
-                                // works because the clamp catches the (cx - half_cap) overshoot.
-                                let cx = if id == "clock" {
-                                    capsule_center_x(&self.settings, sw, &id)
-                                } else if recent_click && self.last_cursor_x > 0.0 && in_left {
-                                    self.last_cursor_x as i32
-                                } else {
-                                    capsule_center_x(&self.settings, sw, &id)
-                                };
-                                let (slant_l, slant_r): (&str, &str) =
-                                    match self.settings.slant_mode.as_str() {
-                                        "left" => ("L", "L"),
-                                        "right" => ("R", "R"),
-                                        _ => {
-                                            if in_center {
-                                                let vis: Vec<&String> = self
-                                                    .settings
-                                                    .bar_center
-                                                    .iter()
-                                                    .filter(|x| {
-                                                        self.settings
-                                                            .visible_capsules
-                                                            .get(*x)
-                                                            .copied()
-                                                            .unwrap_or(true)
-                                                    })
-                                                    .collect();
-                                                let k = vis.len() / 2;
-                                                match vis.iter().position(|x| **x == id) {
-                                                    Some(i) if i == k => ("L", "R"),
-                                                    Some(i) if i < k => ("L", "L"),
-                                                    Some(_) => ("R", "R"),
-                                                    None => ("L", "R"),
-                                                }
-                                            } else if in_right {
-                                                ("R", "R")
-                                            } else {
-                                                ("L", "L")
-                                            }
-                                        }
-                                    };
-                                let cap_w = capsule_actual_width(&id);
-                                let grow_right = if in_left {
-                                    true
-                                } else if in_right {
-                                    false
-                                } else {
-                                    cx < (sw as i32) / 2
-                                };
-                                let (tip_w, _tip_h) = self.settings.tooltip_size(&id);
-                                let tip_output = if self.settings.bar_monitor != "All"
-                                    && !self.settings.bar_monitor.is_empty()
-                                {
-                                    Some(self.settings.bar_monitor.clone())
-                                } else {
-                                    std::env::var("MBS_OUTPUT")
-                                        .ok()
-                                        .filter(|s| !s.is_empty())
-                                        .or_else(resolve_primary_output)
-                                };
-
-                                // Finding 76: per-capsule tooltip bias.
-                                let (bias_l, bias_r) =
-                                    moonbeauty::bar::capsules::tooltip_bias(
-                                        &id,
-                                        &self.theme,
-                                    );
-                                let req = moonbeauty::bar::tooltip_spawn::SpawnRequest {
-                                    id: &id,
-                                    exe: resolve_exe(),
-                                    output: tip_output.as_deref(),
-                                    tooltip_w: tip_w,
-                                    tooltip_h:
-                                        moonbeauty::bar::tooltip_spawn::compute_height(
-                                            &id,
-                                            &self.settings,
-                                            &self.telemetry,
-                                        ),
-                                    drop_ms: self.settings.tooltip_drop_ms,
-                                    expand_ms: self.settings.tooltip_expand_ms,
-                                    capsule_cx: cx,
-                                    capsule_w: cap_w,
-                                    screen_w: sw,
-                                    slant_l,
-                                    slant_r,
-                                    grow_right,
-                                    offset_left_extra: bias_l,
-                                    offset_right_extra: bias_r,
-                                };
-
-                                match moonbeauty::bar::tooltip_spawn::spawn(&req) {
-                                    Ok(c) => {
-                                        eprintln!("[ipc] spawned tooltip pid={}", c.id());
-                                        self.weather_tooltip_child = Some(c);
-                                    }
-                                    Err(e) => eprintln!("[tooltip] Failed to spawn: {e}"),
-                                }
-                                return Command::none();
+                                return self.toggle_tooltip(&id);
                             }
-
                             // 2. FULLSCREEN / STANDALONE OVERLAYS (Settings, History, Power)
                             let mapped: Option<OverlayTarget> = match id.as_str() {
                                 "notify" => Some(OverlayTarget::NotificationsHistory),

@@ -53,6 +53,164 @@ impl MoonBeautyShellApp {
         }
     }
 
+    /// Toggle the tooltip for `id` (bar capsule click handler).
+    ///
+    /// Extracted from the TopBar `OpenOverlay` arm (tracker item
+    /// `topbar-sub-extraction.md`, patch 1 of 3). Handles four
+    /// concerns that were inline:
+    ///   1. Toggle-off: kill existing tooltip if already open.
+    ///   2. Positioning: cursor position (if recent click) vs
+    ///      capsule_center_x. Right-side capsules use center (see
+    ///      Finding 78 comment preserved below).
+    ///   3. Slant selection: from settings.slant_mode plus
+    ///      left/center/right membership (center uses keystone).
+    ///   4. Spawn: SpawnRequest with per-capsule tooltip_bias,
+    ///      height from compute_height (derived from telemetry),
+    ///      output from settings.bar_monitor or MBS_OUTPUT/primary.
+    ///
+    /// The id clone at the top is paid once per user click (sub-Hz
+    /// even with rapid clicking). Preserving `id` as String inside
+    /// the body keeps the extracted logic byte-for-byte identical
+    /// to the inline version; no per-site &str/String juggling.
+    pub fn toggle_tooltip(&mut self, id: &str) -> Command<Message> {
+        let id = id.to_string();
+        // Recent click => use cursor position for dynamic placement.
+        // Fallback to capsule_center_x if no click in last 5s (e.g. IPC trigger).
+        let recent_click =
+            self.last_cursor_time.elapsed() < std::time::Duration::from_secs(5);
+        // Toggle off if already open
+        let running = self
+            .weather_tooltip_child
+            .as_mut()
+            .and_then(|c| c.try_wait().ok())
+            .is_some_and(|status| status.is_none());
+        if running {
+            eprintln!("[tooltip] Already open; toggling off");
+            if let Some(mut c) = self.weather_tooltip_child.take() {
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+            return Command::none();
+        }
+        self.weather_tooltip_child = None;
+
+        let target_output = if self.settings.notif_screen_name != "Auto"
+            && self.settings.notif_screen_name != "Auto (Primary)"
+            && !self.settings.notif_screen_name.is_empty()
+        {
+            Some(self.settings.notif_screen_name.as_str())
+        } else {
+            None
+        };
+        let sw = get_screen_width_for(target_output);
+        let in_left = self.settings.bar_left.contains(&id);
+        let in_center = self.settings.bar_center.contains(&id);
+        let in_right = self.settings.bar_right.contains(&id);
+        // Finding 78: right-side capsules use capsule_center_x, not
+        // last_cursor_x. Right-anchored math is
+        //   margin_right = sw - cx - half_cap + adjust_right
+        // which assumes cx = capsule center. If cx = click_x (near
+        // capsule right edge), tooltip lands half_cap - adjust past
+        // capsule_right — off-screen at larger font sizes. Left-anchored
+        // works because the clamp catches the (cx - half_cap) overshoot.
+        let cx = if id == "clock" {
+            capsule_center_x(&self.settings, sw, &id)
+        } else if recent_click && self.last_cursor_x > 0.0 && in_left {
+            self.last_cursor_x as i32
+        } else {
+            capsule_center_x(&self.settings, sw, &id)
+        };
+        let (slant_l, slant_r): (&str, &str) =
+            match self.settings.slant_mode.as_str() {
+                "left" => ("L", "L"),
+                "right" => ("R", "R"),
+                _ => {
+                    if in_center {
+                        let vis: Vec<&String> = self
+                            .settings
+                            .bar_center
+                            .iter()
+                            .filter(|x| {
+                                self.settings
+                                    .visible_capsules
+                                    .get(*x)
+                                    .copied()
+                                    .unwrap_or(true)
+                            })
+                            .collect();
+                        let k = vis.len() / 2;
+                        match vis.iter().position(|x| **x == id) {
+                            Some(i) if i == k => ("L", "R"),
+                            Some(i) if i < k => ("L", "L"),
+                            Some(_) => ("R", "R"),
+                            None => ("L", "R"),
+                        }
+                    } else if in_right {
+                        ("R", "R")
+                    } else {
+                        ("L", "L")
+                    }
+                }
+            };
+        let cap_w = capsule_actual_width(&id);
+        let grow_right = if in_left {
+            true
+        } else if in_right {
+            false
+        } else {
+            cx < (sw as i32) / 2
+        };
+        let (tip_w, _tip_h) = self.settings.tooltip_size(&id);
+        let tip_output = if self.settings.bar_monitor != "All"
+            && !self.settings.bar_monitor.is_empty()
+        {
+            Some(self.settings.bar_monitor.clone())
+        } else {
+            std::env::var("MBS_OUTPUT")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .or_else(resolve_primary_output)
+        };
+
+        // Finding 76: per-capsule tooltip bias.
+        let (bias_l, bias_r) =
+            moonbeauty::bar::capsules::tooltip_bias(
+                &id,
+                &self.theme,
+            );
+        let req = moonbeauty::bar::tooltip_spawn::SpawnRequest {
+            id: &id,
+            exe: resolve_exe(),
+            output: tip_output.as_deref(),
+            tooltip_w: tip_w,
+            tooltip_h:
+                moonbeauty::bar::tooltip_spawn::compute_height(
+                    &id,
+                    &self.settings,
+                    &self.telemetry,
+                ),
+            drop_ms: self.settings.tooltip_drop_ms,
+            expand_ms: self.settings.tooltip_expand_ms,
+            capsule_cx: cx,
+            capsule_w: cap_w,
+            screen_w: sw,
+            slant_l,
+            slant_r,
+            grow_right,
+            offset_left_extra: bias_l,
+            offset_right_extra: bias_r,
+        };
+
+        match moonbeauty::bar::tooltip_spawn::spawn(&req) {
+            Ok(c) => {
+                eprintln!("[ipc] spawned tooltip pid={}", c.id());
+                self.weather_tooltip_child = Some(c);
+            }
+            Err(e) => eprintln!("[tooltip] Failed to spawn: {e}"),
+        }
+        Command::none()
+    }
+
     pub fn spawn_standalone(&mut self, target: OverlayTarget) {
         self.kill_standalone();
         moonbeauty::libraries::process::prune_standalone_logs();
