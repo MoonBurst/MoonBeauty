@@ -62,12 +62,22 @@ impl WebSearchOverlay {
             ("https://www.startpage.com/sp/search?query=", q)
         };
 
+        // RFC 3986 percent-encoding over UTF-8 bytes. The previous version
+        // used `c as u32` (Unicode code point) which:
+        //   (a) emitted the wrong byte sequence for any non-ASCII input
+        //       (é U+00E9 -> "%E9", should be "%C3%A9"); and
+        //   (b) emitted 3+ hex digits for code points >= U+0100, producing
+        //       malformed escapes like "%100" that parsers split as
+        //       "%10" + "0".
+        // Iterating bytes fixes both, matching curl --data-urlencode.
         let encoded: String = clean_q
-            .chars()
-            .map(|c| match c {
-                ' ' => "+".into(),
-                'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
-                _ => format!("%{:02X}", c as u32),
+            .bytes()
+            .map(|b| match b {
+                b' ' => "+".into(),
+                b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                    (b as char).to_string()
+                }
+                _ => format!("%{:02X}", b),
             })
             .collect();
 
@@ -134,5 +144,90 @@ impl WebSearchOverlay {
             .center_x(Length::Fill)
             .center_y(Length::Fill)
             .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WebSearchOverlay;
+
+    fn encode(query: &str) -> String {
+        WebSearchOverlay::build_url(query).expect("non-empty query")
+    }
+
+    #[test]
+    fn ascii_space_becomes_plus() {
+        assert!(encode("hello world").ends_with("hello+world"));
+    }
+
+    #[test]
+    fn unreserved_ascii_passes_through() {
+        assert!(encode("abcXYZ019-_.~").ends_with("abcXYZ019-_.~"));
+    }
+
+    #[test]
+    fn reserved_ascii_is_percent_encoded() {
+        // & = ? # / must be encoded or they break out of the query param.
+        let out = encode("a&b=c?d#e/f");
+        assert!(out.ends_with("a%26b%3Dc%3Fd%23e%2Ff"), "got {out}");
+    }
+
+    #[test]
+    fn latin1_non_ascii_uses_utf8_bytes() {
+        // é = U+00E9, UTF-8 = C3 A9. Regression: old code emitted %E9.
+        let out = encode("café");
+        assert!(out.ends_with("caf%C3%A9"), "got {out}");
+        assert!(!out.contains("%E9"), "old broken encoding: {out}");
+    }
+
+    #[test]
+    fn cjk_uses_utf8_bytes() {
+        // 日 = U+65E5 (E6 97 A5); 本 = U+672C (E6 9C AC).
+        let out = encode("日本");
+        assert!(out.ends_with("%E6%97%A5%E6%9C%AC"), "got {out}");
+    }
+
+    #[test]
+    fn emoji_uses_utf8_bytes() {
+        // 🦀 = U+1F980, UTF-8 = F0 9F A6 80. Old code emitted %1F980.
+        let out = encode("🦀");
+        assert!(out.ends_with("%F0%9F%A6%80"), "got {out}");
+    }
+
+    #[test]
+    fn no_oversized_hex_escapes() {
+        // Ā = U+0100, UTF-8 = C4 80. Old code emitted %100 (malformed).
+        let out = encode("Ā");
+        assert!(out.ends_with("%C4%80"), "got {out}");
+        let bytes = out.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%' {
+                assert!(i + 2 < bytes.len(), "truncated escape at {i} in {out}");
+                assert!(
+                    bytes[i + 1].is_ascii_hexdigit() && bytes[i + 2].is_ascii_hexdigit(),
+                    "bad escape at {i} in {out}"
+                );
+                i += 3;
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    #[test]
+    fn prefix_stripping_still_works() {
+        assert!(encode("!g rust").starts_with("https://www.google.com/search?q="));
+        assert!(encode("!ddg rust").starts_with("https://duckduckgo.com/?q="));
+        assert!(encode("!w rust").contains("wikipedia.org"));
+        assert!(encode("!gh rust").starts_with("https://github.com/search?q="));
+        assert!(encode("!nix rust").contains("search.nixos.org"));
+        assert!(encode("rust").starts_with("https://www.startpage.com/sp/search?query="));
+    }
+
+    #[test]
+    fn empty_query_returns_none() {
+        assert!(WebSearchOverlay::build_url("").is_none());
+        assert!(WebSearchOverlay::build_url("   ").is_none());
     }
 }
