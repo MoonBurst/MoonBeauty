@@ -379,6 +379,93 @@ impl LockCoordinator {
             });
 
 
+            // ── TTY return watcher ──
+            // When the user switches to another VT and back, sway drops
+            // the layer surfaces held by our lockscreen children but does
+            // not send Closed. The children stay alive with no visible
+            // surface. We capture the desktop TTY at watcher-startup and
+            // respawn on return-to-desktop. Switching away does nothing
+            // (surfaces hidden anyway).
+            //
+            // Safe now that only the primary child is Exclusive: three
+            // simultaneous Exclusive surfaces was what caused the earlier
+            // focus-flap regression. With primary/secondary split, respawn
+            // order is primary-first (300ms settle, then secondaries 200ms
+            // apart) so sway has clean windows to composite.
+            let children_tty = children.clone();
+            let socket_tty = socket_path.clone();
+            let primary_tty = primary_output.clone();
+            tokio::spawn(async move {
+                let read_tty = || {
+                    std::fs::read_to_string("/sys/class/tty/tty0/active")
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                };
+                let desktop_tty = match read_tty() {
+                    Some(v) => v,
+                    None => {
+                        eprintln!(
+                            "[lock-coord] TTY watcher disabled: \
+                             /sys/class/tty/tty0/active unreadable"
+                        );
+                        return;
+                    }
+                };
+                eprintln!(
+                    "[lock-coord] TTY watcher active (desktop_tty={:?})",
+                    desktop_tty
+                );
+                let mut last_tty = Some(desktop_tty.clone());
+                loop {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    let now_tty = read_tty();
+                    if now_tty == last_tty {
+                        continue;
+                    }
+                    // Transition: only act on return-to-desktop.
+                    if now_tty.as_deref() == Some(desktop_tty.as_str())
+                        && last_tty.as_deref() != Some(desktop_tty.as_str())
+                    {
+                        eprintln!(
+                            "[lock-coord] TTY return to desktop (from {:?}): respawning",
+                            last_tty
+                        );
+                        let current_primary: Option<String> =
+                            primary_tty.lock().ok().and_then(|g| g.clone());
+                        let mut outputs: Vec<(String, bool)> = Vec::new();
+                        if let Ok(mut g) = children_tty.lock() {
+                            for (output, mut child) in g.drain() {
+                                let _ = child.kill();
+                                let _ = child.wait();
+                                let is_primary =
+                                    current_primary.as_deref() == Some(output.as_str());
+                                outputs.push((output, is_primary));
+                            }
+                        }
+                        // Primary first.
+                        outputs.sort_by_key(|(_, is_primary)| !*is_primary);
+                        // Let sway settle before spawning fresh surfaces.
+                        tokio::time::sleep(Duration::from_millis(300)).await;
+                        for (idx, (output, is_primary)) in outputs.iter().enumerate() {
+                            if idx > 0 {
+                                tokio::time::sleep(Duration::from_millis(200)).await;
+                            }
+                            eprintln!(
+                                "[lock-coord] TTY respawn: {:?} primary={}",
+                                output, is_primary
+                            );
+                            Self::spawn_child(
+                                output,
+                                &socket_tty,
+                                &children_tty,
+                                *is_primary,
+                            );
+                        }
+                    }
+                    last_tty = now_tty;
+                }
+            });
+
             // ── Watchdog: respawn dead children ──
             // A dead child = dead lock surface = visible desktop = the
             // security hole the user reported. This polls every 200ms;
