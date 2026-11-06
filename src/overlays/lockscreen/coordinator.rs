@@ -216,6 +216,12 @@ impl LockCoordinator {
         }
 
         let children: Arc<Mutex<HashMap<String, Child>>> = Arc::new(Mutex::new(HashMap::new()));
+        // Which output's child currently holds the Exclusive keyboard
+        // grab. Only one child may be primary: Wayland allows one
+        // Exclusive layer surface per seat, and spawning all three as
+        // Exclusive lets sway rotate focus mid-typing, dropping chars
+        // from the coordinator's buffer.
+        let primary_output: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
         // Startup sanity: verify sudo is on PATH
         {
@@ -255,16 +261,21 @@ impl LockCoordinator {
         let outputs = Self::list_outputs();
         if outputs.is_empty() {
             eprintln!("[lock-coord] no outputs — spawning single instance");
-            Self::spawn_child("", &socket_path, &children);
+            *primary_output.lock().unwrap() = Some(String::new());
+            Self::spawn_child("", &socket_path, &children, true);
         } else {
             eprintln!(
                 "[lock-coord] spawning {} children for {:?}",
                 outputs.len(),
                 outputs
             );
-            for output in &outputs {
-                eprintln!("[lock-coord-v225] spawning child for output={:?}", output);
-                Self::spawn_child(output, &socket_path, &children);
+            for (idx, output) in outputs.iter().enumerate() {
+                let is_primary = idx == 0;
+                if is_primary {
+                    *primary_output.lock().unwrap() = Some(output.clone());
+                }
+                eprintln!("[lock-coord-v225] spawning child for output={:?} primary={}", output, is_primary);
+                Self::spawn_child(output, &socket_path, &children, is_primary);
             }
         }
 
@@ -294,6 +305,7 @@ impl LockCoordinator {
             // Hotplug watcher
             let children_watch = children.clone();
             let socket_watch = socket_path.clone();
+            let primary_output_watch = primary_output.clone();
             tokio::spawn(async move {
                 let mut cmd = match tokio::process::Command::new("swaymsg")
                     .args(["-t", "subscribe", "-m", r#"["output"]"#])
@@ -321,6 +333,20 @@ impl LockCoordinator {
                             // Kill any blocker/orphan before spawning fresh.
                             // Brief gap here is unavoidable; the important
                             // guarantee is that we get a working child.
+                            let is_primary = {
+                                let mut po = primary_output_watch.lock().unwrap();
+                                if po.as_deref() == Some(output.as_str()) {
+                                    // Replacing the primary; new one is
+                                    // also primary.
+                                    *po = None;
+                                    true
+                                } else if po.is_none() {
+                                    *po = Some(output.clone());
+                                    true
+                                } else {
+                                    false
+                                }
+                            };
                             if let Ok(mut map) = children_watch.lock() {
                                 if let Some(mut old) = map.remove(&output) {
                                     eprintln!(
@@ -331,7 +357,7 @@ impl LockCoordinator {
                                     let _ = old.wait();
                                 }
                             }
-                            Self::spawn_child(&output, &socket_watch, &children_watch);
+                            Self::spawn_child(&output, &socket_watch, &children_watch, is_primary);
                         }
                         "removed" => {
                             // Do NOT kill the child. On TTY switch, sway
@@ -361,6 +387,7 @@ impl LockCoordinator {
             // for the underlying panic (RUST_BACKTRACE is set on children).
             let children_watchdog = children.clone();
             let socket_watchdog = socket_path.clone();
+            let primary_output_watchdog = primary_output.clone();
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(Duration::from_millis(200));
                 interval.tick().await;
@@ -390,8 +417,21 @@ impl LockCoordinator {
                         }
                     }
                     for output in dead {
-                        eprintln!("[lock-coord] WATCHDOG: respawning {:?}", output);
-                        Self::spawn_child(&output, &socket_watchdog, &children_watchdog);
+                        let is_primary = primary_output_watchdog
+                            .lock()
+                            .unwrap()
+                            .as_deref()
+                            == Some(output.as_str());
+                        eprintln!(
+                            "[lock-coord] WATCHDOG: respawning {:?} primary={}",
+                            output, is_primary
+                        );
+                        Self::spawn_child(
+                            &output,
+                            &socket_watchdog,
+                            &children_watchdog,
+                            is_primary,
+                        );
                     }
                 }
             });
@@ -561,6 +601,7 @@ impl LockCoordinator {
         output: &str,
         socket_path: &PathBuf,
         children: &Arc<Mutex<HashMap<String, Child>>>,
+        is_primary: bool,
     ) {
         if let Ok(map) = children.lock() {
             if map.contains_key(output) {
@@ -573,6 +614,7 @@ impl LockCoordinator {
         let mut cmd = Command::new(&exe);
         cmd.arg("--lockscreen-instance")
             .env("MBS_LOCK_SOCKET", socket_path)
+            .env("MBS_LOCK_PRIMARY", if is_primary { "1" } else { "0" })
             .env("RUST_BACKTRACE", "1")
             .stdout(Stdio::null())
             .stderr(Stdio::inherit());

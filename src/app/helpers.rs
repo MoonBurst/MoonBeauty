@@ -64,8 +64,24 @@ impl MoonBeautyShellApp {
         let stdout_file = stderr_file.as_ref().and_then(|f| f.try_clone().ok());
 
         let mut cmd = std::process::Command::new(exe);
-        cmd.arg("--overlay");
-        cmd.arg(tag);
+        if matches!(target, OverlayTarget::Lockscreen) {
+            // Lockscreen is not a normal overlay. --overlay spawns a
+            // standalone shell that renders a UI, but the lockscreen UI
+            // is only useful when a coordinator exists to receive key
+            // events and run authenticate(). main.rs only starts the
+            // coordinator when `--lockscreen` is present (bare flag,
+            // not `--overlay lockscreen`). Passing --overlay therefore
+            // spawned a LockscreenOverlay with ipc_tx = None: the UI
+            // rendered, but every Enter was silently dropped in
+            // forward_key() because there was no coordinator to submit
+            // to. The correct spawn is the coordinator, which then
+            // spawns per-output --lockscreen-instance children that
+            // connect to the coordinator socket.
+            cmd.arg("--lockscreen");
+        } else {
+            cmd.arg("--overlay");
+            cmd.arg(tag);
+        }
         if let Some(sf) = stderr_file {
             cmd.stderr(sf);
         }

@@ -998,18 +998,28 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             ..Default::default()
         }
     } else if standalone_target.as_ref() == Some(&OverlayTarget::Lockscreen) {
-        // Each lock child is bound to a specific output (or the primary if
-        // no arg was provided — single-monitor fallback).
+        // Each lock child is bound to a specific output. Only the primary
+        // child gets KeyboardInteractivity::Exclusive — Wayland allows
+        // only one Exclusive layer surface per seat, and three competing
+        // Exclusive surfaces let sway rotate focus mid-typing, dropping
+        // characters from the coordinator's buffer.
         let lock_output = std::env::var("MBS_LOCK_OUTPUT")
             .ok()
             .filter(|s| !s.is_empty())
             .or(binded_output_name.clone());
+        let is_primary = std::env::var("MBS_LOCK_PRIMARY")
+            .map(|s| s == "1")
+            .unwrap_or(false);
         LayerShellSettings {
             size: None,
             exclusive_zone: -1,
             anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
             layer: Layer::Overlay,
-            keyboard_interactivity: KeyboardInteractivity::Exclusive,
+            keyboard_interactivity: if is_primary {
+                KeyboardInteractivity::Exclusive
+            } else {
+                KeyboardInteractivity::None
+            },
             events_transparent: false,
             start_mode: (lock_output)
                 .map(iced_layershell::settings::StartMode::TargetScreen)
