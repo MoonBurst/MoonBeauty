@@ -279,10 +279,22 @@ impl ClipboardOverlay {
         };
         let ext_owned = ext.to_string();
         
-        // Copy the file into the clipboard cache so it's self-contained
+        // Copy the file into the clipboard cache so it's self-contained.
+        // std::fs::copy inherits the source file's mode (could be 0644),
+        // so chmod explicitly to 0600.
         let dest_path = dir.join(format!("{}.{}", id, ext));
         if std::fs::copy(source, &dest_path).is_err() {
             return None;
+        }
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            if let Ok(meta) = std::fs::metadata(&dest_path) {
+                let mut perms = meta.permissions();
+                if perms.mode() & 0o777 != 0o600 {
+                    perms.set_mode(0o600);
+                    let _ = std::fs::set_permissions(&dest_path, perms);
+                }
+            }
         }
 
         // Pre-generate the 512x512 preview using the cached copy
@@ -298,7 +310,7 @@ impl ClipboardOverlay {
         });
         items.truncate(2000);
         let tmp = dir.join("index.json.tmp");
-        std::fs::write(&tmp, serde_json::to_string(&items).ok()?).ok()?;
+        crate::libraries::process::private_write_file(&tmp, serde_json::to_string(&items).ok()?.as_bytes()).ok()?;
         std::fs::rename(&tmp, &index_path).ok()?;
         // Purge AFTER successful write: if the write fails, the old
         // index still references files we would have deleted.
@@ -491,7 +503,7 @@ impl ClipboardOverlay {
         if let Ok(mut items) = serde_json::from_str::<Vec<ClipItem>>(&content) {
             items.retain(|i| i.id != id);
             if let Ok(new_json) = serde_json::to_string(&items) {
-                let _ = std::fs::write(&index_path, &new_json);
+                let _ = crate::libraries::process::private_write_file(&index_path, new_json.as_bytes());
             }
         }
     }

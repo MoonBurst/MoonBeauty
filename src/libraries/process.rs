@@ -840,3 +840,55 @@ mod unique_tmp_tests {
         );
     }
 }
+
+/// Chmod the shell's user-content files and their parent directories to
+/// safe permissions. Idempotent; prints only when a change is made.
+///
+/// Files that contain user content (settings including password_cmd,
+/// notes, todos, clipboard index with content previews, friend profiles
+/// with tts templates, local_sort sender display names, reminders) were
+/// previously written with `fs::write`, which inherits umask (022 -> 0644).
+/// That made them world-readable on any host with a default umask. The
+/// save paths now use `private_write_file`; this sweep fixes pre-existing
+/// files that were written by a pre-fix build and never touched again.
+///
+/// Directories are tightened to 0700 so future leaks via any residual
+/// 0644 file are contained by the parent directory.
+pub fn tighten_user_state_files() {
+    use std::os::unix::fs::PermissionsExt as _;
+    fn chmod(p: &std::path::Path, mode: u32) {
+        let Ok(meta) = std::fs::metadata(p) else { return };
+        let mut perms = meta.permissions();
+        if perms.mode() & 0o777 != mode {
+            perms.set_mode(mode);
+            if std::fs::set_permissions(p, perms).is_ok() {
+                eprintln!("[perms] tightened {} -> {:o}", p.display(), mode);
+            }
+        }
+    }
+    if let Some(config) = dirs::config_dir() {
+        let base = config.join("moonbeauty");
+        chmod(&base, 0o700);
+        chmod(&base.join("settings.json"), 0o600);
+    }
+    if let Some(data) = dirs::data_dir() {
+        let base = data.join("moonbeauty");
+        chmod(&base, 0o700);
+        for f in [
+            "notes.json",
+            "todos.json",
+            "friend_profiles.json",
+            "email_cache/local_sort.json",
+            "clipboard/index.json",
+        ] {
+            chmod(&base.join(f), 0o600);
+        }
+        chmod(&base.join("clipboard"), 0o700);
+        chmod(&data.join("quickshell/todos.json"), 0o600);
+    }
+    if let Ok(rt) = std::env::var("XDG_RUNTIME_DIR") {
+        let base = std::path::PathBuf::from(rt);
+        chmod(&base.join("moon_reminders.json"), 0o600);
+        chmod(&base.join("quickshell_reminders.json"), 0o600);
+    }
+}

@@ -85,7 +85,7 @@ pub fn find_friend_profiles_path() -> PathBuf {
                     if let Some(parent) = target.parent() {
                         let _ = fs::create_dir_all(parent);
                     }
-                    let _ = fs::write(&target, content);
+                    let _ = crate::libraries::process::private_write_file(&target, content.as_bytes());
                 }
             }
         }
@@ -108,7 +108,7 @@ pub fn save_friend_profiles(profiles: &[FriendProfile]) -> Result<(), std::io::E
         fs::create_dir_all(parent)?;
     }
     let json = serde_json::to_string_pretty(profiles)?;
-    fs::write(path, json)?;
+    crate::libraries::process::private_write_file(&path, json.as_bytes())?;
     Ok(())
 }
 
@@ -774,7 +774,7 @@ impl ShellSettings {
         }
         let json = serde_json::to_string_pretty(self)?;
         let tmp_path = path.with_extension("tmp");
-        fs::write(&tmp_path, &json)?;
+        crate::libraries::process::private_write_file(&tmp_path, json.as_bytes())?;
         fs::rename(tmp_path, &path)?;
 
         let _ = save_friend_profiles(&self.friend_profiles);

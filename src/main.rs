@@ -241,7 +241,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
                 "txt"
             };
             let path = dir.join(format!("{}.{}", id, ext));
-            let _ = std::fs::write(&path, &bytes);
+            let _ = moonbeauty::libraries::process::private_write_file(&path, &bytes);
             
             // Pre-generate the 512x512 preview so the long-running UI
             // process never has to decode the full 4K image later.
@@ -338,7 +338,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
             if let Ok(json) = serde_json::to_string(&items) {
                 let tmp = dir.join("index.json.tmp");
-                if std::fs::write(&tmp, &json).is_ok() {
+                if moonbeauty::libraries::process::private_write_file(&tmp, json.as_bytes()).is_ok() {
                     let _ = std::fs::rename(&tmp, &index_path);
                     // Purge AFTER successful write: if the write fails,
                     // the old index still references files we would
@@ -892,6 +892,11 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         "[main-v225] standalone_target={:?} is_notif={}",
         standalone_target, is_notif_surface
     );
+    // Tighten user-content file permissions once per process. Fixes
+    // pre-existing 0644 files written by earlier builds; new writes go
+    // through private_write_file at 0600.
+    moonbeauty::libraries::process::tighten_user_state_files();
+
     let settings = ShellSettings::load();
 
     if !is_notif_surface && standalone_target.is_none() {

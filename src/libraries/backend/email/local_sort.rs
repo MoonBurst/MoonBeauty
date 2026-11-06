@@ -53,7 +53,7 @@ pub fn save(s: &LocalSort) {
     }
     if let Ok(json) = serde_json::to_string_pretty(s) {
         let tmp = p.with_extension("tmp");
-        if std::fs::write(&tmp, json).is_ok() {
+        if crate::libraries::process::private_write_file(&tmp, json.as_bytes()).is_ok() {
             let _ = std::fs::rename(tmp, p);
         }
     }

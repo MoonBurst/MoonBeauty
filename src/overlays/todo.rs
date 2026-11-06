@@ -166,7 +166,7 @@ impl TodoOverlay {
         }
         if let Ok(data) = serde_json::to_string_pretty(&self.db) {
             let tmp = path.with_extension("tmp");
-            if fs::write(&tmp, data).is_ok() {
+            if crate::libraries::process::private_write_file(&tmp, data.as_bytes()).is_ok() {
                 let _ = fs::rename(tmp, path);
             }
         }

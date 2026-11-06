@@ -118,7 +118,7 @@ impl RemindersOverlay {
         let path = Self::storage_path();
         if let Ok(data) = serde_json::to_string_pretty(&self.entries) {
             let tmp = path.with_extension("tmp");
-            if fs::write(&tmp, data).is_ok() {
+            if crate::libraries::process::private_write_file(&tmp, data.as_bytes()).is_ok() {
                 let _ = fs::rename(tmp, path);
             }
         }
@@ -612,7 +612,7 @@ pub fn save_reminders(entries: &[ReminderEntry]) {
     let path = RemindersOverlay::storage_path();
     if let Ok(data) = serde_json::to_string_pretty(entries) {
         let tmp = path.with_extension("tmp");
-        if std::fs::write(&tmp, data).is_ok() {
+        if crate::libraries::process::private_write_file(&tmp, data.as_bytes()).is_ok() {
             let _ = std::fs::rename(tmp, path);
         }
     }
