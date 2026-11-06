@@ -5,7 +5,7 @@ file.
 
 **Verification for every item:**
 - `cargo check --locked` — zero warnings
-- `cargo test --locked --lib` — 67 passing
+- `cargo test --locked --lib` — 76 passing
 - Manual test after `systemctl --user restart moonbeauty`
 
 **Effort** is wall-clock for an experienced Rust/Iced dev.
