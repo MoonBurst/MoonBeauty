@@ -255,9 +255,14 @@ impl MoonBeautyShellApp {
             WebSearchMessage::ExecuteSearch => {
                 if let Some(url) = WebSearchOverlay::build_url(&self.web.query) {
                     if self.is_standalone {
-                        tokio::spawn(async move {
-                            WebSearchOverlay::launch_browser(&url).await;
-                        });
+                        // Fork synchronously so the child process exists
+                        // before exit(0). The previous tokio::spawn +
+                        // exit(0) raced: the spawned task could be killed
+                        // before it forked xdg-open, so Enter sometimes
+                        // did nothing.
+                        let _ = std::process::Command::new("xdg-open")
+                            .arg(&url)
+                            .spawn();
                         std::process::exit(0);
                     }
                     self.active_overlay = None;
