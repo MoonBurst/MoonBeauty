@@ -211,6 +211,217 @@ impl MoonBeautyShellApp {
         Command::none()
     }
 
+    /// Handle a bar capsule action (bar-side click handler dispatch).
+    ///
+    /// Extracted from the TopBar `Action` arm (tracker item
+    /// `topbar-sub-extraction.md`, patch 2 of 3). Contains every
+    /// CapsuleAction variant handler: tooltip open (via
+    /// toggle_tooltip), music control, audio mute/cycle, notification
+    /// DND, tooltip cancel, tray expand/activate/context-menu, GPU
+    /// cycle. Arms that mutate state without returning a Command
+    /// fall through to `Command::none()`.
+    pub fn handle_capsule_action(
+        &mut self,
+        act: CapsuleAction,
+    ) -> Command<Message> {
+        match act {
+            CapsuleAction::OpenOverlay(id) => {
+                eprintln!("[topbar-action] OpenOverlay: id = {:?}", id);
+
+                // 1. ALARM — standalone reminders overlay.
+                // Handled BEFORE the tooltip-open/toggle block so:
+                //   (a) an open tooltip can't hijack the click,
+                //   (b) id="alarm" never enters the tooltip spawn
+                //       selection and falls through to --sys-tooltip
+                //       (which defaults unknown targets to RAM).
+                if id == "alarm" {
+                    if let Some(mut c) = self.weather_tooltip_child.take() {
+                        let _ = c.kill();
+                        let _ = c.wait();
+                    }
+                    self.toggle_standalone(OverlayTarget::Reminders);
+                    return Command::none();
+                }
+
+                // 2. DROPDOWN TOOLTIPS (CPU, GPU, RAM, Tray)
+                // Helper handles toggle-off-if-open, cursor-vs-
+                // capsule-center positioning, slant selection,
+                // per-capsule bias, spawn, and error logging.
+                // See app::helpers::toggle_tooltip.
+                if matches!(
+                    id.as_str(),
+                    "weather"
+                        | "cpu"
+                        | "gpu"
+                        | "ram"
+                        | "calendar"
+                        | "music"
+                        | "unified"
+                        | "net"
+                        | "custom"
+                        | "clock"
+                ) {
+                    return self.toggle_tooltip(&id);
+                }
+                // 2. FULLSCREEN / STANDALONE OVERLAYS (Settings, History, Power)
+                let mapped: Option<OverlayTarget> = match id.as_str() {
+                    "notify" => Some(OverlayTarget::NotificationsHistory),
+                    "battery" => Some(OverlayTarget::Power),
+                    _ => OverlayTarget::from_str(&id),
+                };
+                if let Some(target) = mapped {
+                    if matches!(
+                        target,
+                        OverlayTarget::Launcher
+                            | OverlayTarget::Clipboard
+                            | OverlayTarget::NotificationsHistory
+                            | OverlayTarget::Settings
+                    ) {
+                        self.spawn_standalone(target);
+                    } else {
+                        self.active_overlay = Some(target);
+                    }
+                }
+            }
+            CapsuleAction::TogglePlayPause => return self.music_toggle_play_pause(),
+            CapsuleAction::NextTrack => return self.music_next_track(),
+            CapsuleAction::PreviousTrack => return self.music_previous_track(),
+            CapsuleAction::CycleAudioSink => {
+                return Command::perform(AudioBackend::cycle_sinks(), |_| {
+                    Message::TopBar(TopBarMessage::Noop)
+                });
+            }
+            CapsuleAction::ToggleSinkMute => {
+                return Command::perform(AudioBackend::toggle_sink_mute(), |_| {
+                    Message::TopBar(TopBarMessage::Noop)
+                });
+            }
+            CapsuleAction::ToggleNotificationDnd => return self.toggle_notification_dnd(),
+            CapsuleAction::CancelTooltip(id) => {
+                eprintln!("[topbar] CancelTooltip: {}", id);
+                if let Some(mut c) = self.weather_tooltip_child.take() {
+                    let _ = c.kill();
+                    let _ = c.wait();
+                }
+                // Right-click on alarm capsule: wipe active timers
+                if id == "alarm" {
+                    moonbeauty::overlays::reminders::save_reminders(&[]);
+                    eprintln!("[topbar] cleared active timers");
+                }
+            }
+            CapsuleAction::ToggleSourceMute => {
+                return Command::perform(AudioBackend::toggle_source_mute(), |_| {
+                    Message::TopBar(TopBarMessage::Noop)
+                });
+            }
+            CapsuleAction::ToggleTrayExpanded => {
+                if !self.tray_expanded {
+                    // OPENING
+                    self.tray_timeout_gen = self.tray_timeout_gen.wrapping_add(1);
+                    let _my_gen = self.tray_timeout_gen;
+
+                    self.tray_opened_at = std::time::Instant::now();
+                    self.tray_expanded = true;
+                    self.tray_anim_start_width = self.tray_anim_width;
+                    self.tray_anim_started_at = std::time::Instant::now();
+                    let expanded_w = moonbeauty::bar::capsules::compute_expanded_visible_width(
+                        &self.settings, self.tray_items.len()
+                    );
+                    self.tray_target_width = expanded_w;
+                    self.tray_anim_duration_ms = 220;
+
+                    // Auto-close is handled by the tray_watchdog_sub
+                    // subscription (see subscription()), which polls
+                    // tray_opened_at.elapsed() every 500ms while
+                    // tray_expanded is true. No per-open timer needed.
+                    return Command::perform(
+                        moonbeauty::bar::tray::watcher::fetch_tray_items(),
+                        Message::TrayItemsLoaded,
+                    );
+                } else {
+                    // CLOSING — bump gen to invalidate any pending timer
+                    self.close_tray();
+                }
+            }
+            CapsuleAction::TrayActivate(item) => {
+                self.close_tray();
+                return Command::perform(
+                    async move {
+                        let _ =
+                            moonbeauty::bar::tray::watcher::activate_tray_item(
+                                &item.bus, &item.path,
+                            )
+                            .await;
+                    },
+                    |_| Message::TopBar(TopBarMessage::Noop),
+                );
+            }
+            CapsuleAction::TrayContextMenu(item) => {
+                let item_clone = item.clone();
+                return Command::perform(
+                    async move {
+                        if let Some((menu_path, items)) =
+                            moonbeauty::bar::tray::watcher::get_menu_tree(
+                                &item_clone.bus,
+                                &item_clone.path,
+                            )
+                            .await
+                        {
+                            let json = serde_json::to_string(&items).unwrap();
+                            let tmp_path =
+                                moonbeauty::libraries::process::mbs_unique_tmp(
+                                    "mbs-tray-menu",
+                                    "json",
+                                );
+                            if let Err(e) =
+                                moonbeauty::libraries::process::private_write_new(
+                                    &tmp_path,
+                                    json.as_bytes(),
+                                )
+                            {
+                                eprintln!("[tray-menu] write failed: {e}");
+                                return;
+                            }
+                            let exe = resolve_exe();
+                            let h = (items.len() as u32 * 36).clamp(100, 600) + 40;
+                            let _ = std::process::Command::new(exe)
+                                .args([
+                                    "--tray-context-menu",
+                                    tmp_path.to_str().unwrap_or(""),
+                                    &item_clone.bus,
+                                    &menu_path,
+                                    "250",
+                                    &h.to_string(),
+                                ])
+                                .spawn();
+                        }
+                    },
+                    |_| Message::TopBar(TopBarMessage::Noop),
+                );
+            }
+            CapsuleAction::CycleGpuTarget => {
+                let gpus = &self.detected_gpus;
+                if !gpus.is_empty() {
+                    let current = &self.settings.gpu_selected_id;
+                    let next_idx = gpus
+                        .iter()
+                        .position(|g| &g.card_id == current)
+                        .map(|i| (i + 1) % gpus.len())
+                        .unwrap_or(0);
+                    self.settings.gpu_selected_id = gpus[next_idx].card_id.clone();
+                    let _ = self.settings.save();
+                    eprintln!(
+                        "[bar] right-click GPU: switched to {}",
+                        self.settings.gpu_selected_id
+                    );
+                    return Command::done(Message::TickHardware);
+                }
+            }
+            _ => {}
+        }
+        Command::none()
+    }
+
     pub fn spawn_standalone(&mut self, target: OverlayTarget) {
         self.kill_standalone();
         moonbeauty::libraries::process::prune_standalone_logs();
