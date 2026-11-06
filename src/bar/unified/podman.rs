@@ -65,7 +65,7 @@ fn connect_engines() -> Vec<Docker> {
 
     for path in &paths {
         if std::path::Path::new(path).exists() {
-            match Docker::connect_with_unix(path, 120, bollard::API_DEFAULT_VERSION) {
+            match Docker::connect_with_unix(path, 5, bollard::API_DEFAULT_VERSION) {
                 Ok(d) => {
                     crate::dbg_log!("[bollard] connected {}", path);
                     engines.push(d);
@@ -109,25 +109,41 @@ impl PodmanBackend {
             std::collections::HashMap::new();
 
         for (engine_idx, engine) in engines.iter().enumerate() {
-            match engine.list_containers(options.clone()).await {
-                Ok(list) => {
-                    for c in list {
-                        let name = c
-                            .names
-                            .as_ref()
-                            .and_then(|n| n.first())
-                            .map(|n| n.trim_start_matches('/').to_string())
-                            .unwrap_or_default();
-                        if name.is_empty() {
-                            continue;
-                        }
-                        if seen_names.insert(name.clone()) {
-                            container_to_engine.insert(name, engine_idx);
-                            containers_raw.push(c);
-                        }
-                    }
+            // #E2: bollard's connect timeout does not bound the response.
+            // A reachable-but-hung daemon would block this await past the
+            // client timeout. Wrapping in tokio::time::timeout bounds the
+            // total wall-clock per engine, so one bad engine cannot stall
+            // the entire tooltip open.
+            let list = match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                engine.list_containers(options.clone()),
+            )
+            .await
+            {
+                Ok(Ok(l)) => l,
+                Ok(Err(e)) => {
+                    crate::dbg_log!("[bollard] engine {} list failed: {}", engine_idx, e);
+                    continue;
                 }
-                Err(e) => crate::dbg_log!("[bollard] engine {} list failed: {}", engine_idx, e),
+                Err(_) => {
+                    crate::dbg_log!("[bollard] engine {} list timed out at 5s", engine_idx);
+                    continue;
+                }
+            };
+            for c in list {
+                let name = c
+                    .names
+                    .as_ref()
+                    .and_then(|n| n.first())
+                    .map(|n| n.trim_start_matches('/').to_string())
+                    .unwrap_or_default();
+                if name.is_empty() {
+                    continue;
+                }
+                if seen_names.insert(name.clone()) {
+                    container_to_engine.insert(name, engine_idx);
+                    containers_raw.push(c);
+                }
             }
         }
         eprintln!(
@@ -216,12 +232,26 @@ impl PodmanBackend {
             ..Default::default()
         });
 
-        let mut stream = docker.logs(container, options);
-        let mut full_output = String::new();
-        use futures_util::StreamExt;
-        while let Some(Ok(chunk)) = stream.next().await {
-            full_output.push_str(&String::from_utf8_lossy(&chunk.into_bytes()));
-        }
+        // #E2: bound the stream consumption. A daemon that accepts the
+        // connection but stalls mid-stream would otherwise block forever.
+        let full_output = {
+            use futures_util::StreamExt;
+            let collect = async move {
+                let mut stream = docker.logs(container, options);
+                let mut out = String::new();
+                while let Some(Ok(chunk)) = stream.next().await {
+                    out.push_str(&String::from_utf8_lossy(&chunk.into_bytes()));
+                }
+                out
+            };
+            match tokio::time::timeout(std::time::Duration::from_secs(5), collect).await {
+                Ok(s) => s,
+                Err(_) => {
+                    crate::dbg_log!("[bollard] {} logs timed out at 5s", container);
+                    String::new()
+                }
+            }
+        };
 
         let logs = full_output;
         let mut streamer = String::new();
@@ -285,7 +315,12 @@ impl PodmanBackend {
 
     pub async fn restart(container: &str) {
         for engine in connect_engines() {
-            if engine.restart_container(container, None).await.is_ok() {
+            let ok = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                engine.restart_container(container, None),
+            )
+            .await;
+            if matches!(ok, Ok(Ok(_))) {
                 return;
             }
         }
@@ -295,7 +330,12 @@ impl PodmanBackend {
         let engines = connect_engines();
         for target in ["twitch-miner", "twitchminer-berrydrop", "flaresolverr"] {
             for engine in &engines {
-                if engine.restart_container(target, None).await.is_ok() {
+                let ok = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    engine.restart_container(target, None),
+                )
+                .await;
+                if matches!(ok, Ok(Ok(_))) {
                     break;
                 }
             }
