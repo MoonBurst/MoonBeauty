@@ -44,7 +44,6 @@ Sizes are current line counts.
 ## Extraction
 
 - [update-rs-remaining-extractions.md](update-rs-remaining-extractions.md) — 4-6h — remaining ~1,085 lines in `app/update.rs`
-- [topbar-sub-extraction.md](topbar-sub-extraction.md) — 2h across 3 patches — the 600-line `Message::TopBar` arm
 
 ## How to pick one
 
@@ -63,6 +62,7 @@ Sizes are current line counts.
   sharp edges (still partly stale; refactor/ supersedes it)
 
 ## Recently fixed
+- `topbar-sub-extraction` — three patches landed: (1) `toggle_tooltip(&mut self, id: &str)` extracted to `app/helpers.rs`; (2) `handle_capsule_action(&mut self, act: CapsuleAction)` extracted to `app/helpers.rs`; (3) `handle_top_bar(&mut self, msg: TopBarMessage)` in new `app/update/top_bar.rs`. `Message::TopBar` arm is now a one-line dispatch. `app/update.rs` lost ~800 lines total (the arm plus the match body). The tracker draft signature (13 params) was wrong — every field reads from `self`.
 - `runtime-new-unwrap` — 5 sites converted from `Runtime::new().unwrap()` (panics on rare failure) to `helpers::run_then_exit(future)` which logs the failure and exits anyway. Original `block_on` behavior preserved because these branches `exit(0)` before `update()` returns, so `Command::perform` cannot work here (documented in the tracker Caution). Reference pattern already used in `bar/tray/context.rs`.
 - `magick-or-convert-dedup` — resolved. Single `pub(crate) fn` in `overlays/screenshot/mod.rs`, imported by both `annotator.rs` and `watermark.rs`. Was two duplicate copies when the tracker item was filed.
 - `tooltip-zombie-reap` — `Message::IdleTick` now calls `try_wait()` on `weather_tooltip_child` and clears the handle when the child has exited. Self-terminating tooltips (AUTO_MS timeout, dismissal) no longer leave `<defunct>` children accumulating over hours of use.
