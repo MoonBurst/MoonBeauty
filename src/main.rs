@@ -82,24 +82,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     cli::notify::run(&args);
 
-    // Music CLI flags — fired from the tooltip's Cycle/Prev/Play/Next
-    // buttons and bindable to sway keybinds.
-    for (flag, cmd) in [
-        ("--music-cycle", IpcCommand::MusicCycle),
-        ("--music-next", IpcCommand::MusicNext),
-        ("--music-previous", IpcCommand::MusicPrevious),
-        ("--music-play-pause", IpcCommand::MusicPlayPause),
-    ] {
-        if args.iter().any(|a| a == flag) {
-            match send_ipc_sync(&cmd) {
-                Ok(_) => std::process::exit(0),
-                Err(e) => {
-                    eprintln!("[{flag}] IPC failed: {e}");
-                    std::process::exit(1);
-                }
-            }
-        }
-    }
+    cli::music::run(&args);
 
     // Restart bar (used by Settings when changing monitor)
     if args.iter().any(|a| a == "--restart-bar") {
@@ -182,42 +165,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         std::process::exit(0);
     }
 
-    // Generic IPC toggle: moonbeauty --toggle <overlay>
-    // e.g. sway: bindsym $mod+Tab exec moonbeauty --toggle history
-    if let Some(idx) = args.iter().position(|a| a == "--toggle") {
-        let target_str = args.get(idx + 1).cloned().unwrap_or_default();
-        match OverlayTarget::from_str(&target_str) {
-            Some(target) => match send_ipc_sync(&IpcCommand::Toggle(target)) {
-                Ok(_) => std::process::exit(0),
-                Err(e) => {
-                    eprintln!("[toggle] IPC failed: {e}");
-                    std::process::exit(1);
-                }
-            },
-            None => {
-                eprintln!("[toggle] unknown target: {}", target_str);
-                std::process::exit(2);
-            }
-        }
-    }
-
-    // Bare `--<overlay>` (e.g. `moonbeauty --history`) = implicit IPC
-    // toggle, equivalent to `--toggle <overlay>`.  Explicit standalone
-    // spawn is `--overlay <target>` — used internally by the bar to
-    // spawn overlay children; not meant for user invocation.
-    if let Some(arg) = args.get(1) {
-        if let Some(name) = arg.strip_prefix("--") {
-            if let Some(target) = OverlayTarget::from_str(name) {
-                match send_ipc_sync(&IpcCommand::Toggle(target)) {
-                    Ok(_) => std::process::exit(0),
-                    Err(e) => {
-                        eprintln!("[toggle] IPC failed: {e}");
-                        std::process::exit(1);
-                    }
-                }
-            }
-        }
-    }
+    cli::toggle::run(&args);
 
     // ── Screenshot CLI ────────────────────────────────────────────────
     // --screenshot [--annotate] [--watermark "name"]
@@ -229,33 +177,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     // (--notify push moved to cli::notify::run above)
 
-    if let Some(idx) = args.iter().position(|a| a == "--tray-context-menu") {
-        let json_path = args.get(idx + 1).cloned().unwrap_or_default();
-        let bus = args.get(idx + 2).cloned().unwrap_or_default();
-        let menu_path = args.get(idx + 3).cloned().unwrap_or_default();
-        let w = args
-            .get(idx + 4)
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(250u32);
-        let h = args
-            .get(idx + 5)
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(400u32);
-        if let Ok(json) = std::fs::read_to_string(&json_path) {
-            if let Ok(items) =
-                serde_json::from_str::<Vec<moonbeauty::bar::tray::TrayMenuItem>>(&json)
-            {
-                let _ = std::fs::remove_file(&json_path);
-                std::process::exit(
-                    match moonbeauty::bar::tray::context::run(items, bus, menu_path, w, h) {
-                        Ok(_) => 0,
-                        Err(_) => 1,
-                    },
-                );
-            }
-        }
-        std::process::exit(1);
-    }
+    cli::tray::run(&args);
 
     let is_notif_surface = detect_notif_surface(&args);
 
@@ -467,35 +389,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         }
     };
 
-    if args.iter().any(|a| a == "--sys-tooltip") {
-        match moonbeauty::overlays::system_tooltip::run() {
-            Ok(()) => std::process::exit(0),
-            Err(e) => {
-                eprintln!("[sys-tooltip] {e}");
-                std::process::exit(1);
-            }
-        }
-    }
-
-    if args.iter().any(|a| a == "--weather-tooltip") {
-        match moonbeauty::bar::weather::tooltip::run() {
-            Ok(()) => std::process::exit(0),
-            Err(e) => {
-                eprintln!("[weather-tooltip] {e}");
-                std::process::exit(1);
-            }
-        }
-    }
-
-    if args.iter().any(|a| a == "--info-tooltip") {
-        match moonbeauty::overlays::info_tooltip::run() {
-            Ok(()) => std::process::exit(0),
-            Err(e) => {
-                eprintln!("[info-tooltip] {e}");
-                std::process::exit(1);
-            }
-        }
-    }
+    cli::tooltips::run(&args);
 
     let _app = iced_layershell::application(
         MoonBeautyShellApp::new_app,

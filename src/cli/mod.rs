@@ -5,3 +5,7 @@ pub mod lockscreen_coordinator;
 pub mod screenshot;
 pub mod keys;
 pub mod notify;
+pub mod music;
+pub mod toggle;
+pub mod tray;
+pub mod tooltips;
