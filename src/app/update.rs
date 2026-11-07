@@ -1,15 +1,16 @@
 #![allow(clippy::collapsible_match)]
 use super::*;
 
-mod music;
-mod notifications;
-mod reminders;
+mod clipboard;
 mod email;
 mod lockscreen;
-mod clipboard;
-mod settings;
+mod music;
+mod notifications;
 mod overlays;
+mod reminders;
+mod settings;
 mod top_bar;
+mod tray;
 
 impl MoonBeautyShellApp {
     pub fn update(&mut self, message: Message) -> Command<Message> {
@@ -70,11 +71,16 @@ impl MoonBeautyShellApp {
                     return Command::perform(
                         async move {
                             let old_envs =
-                                moonbeauty::libraries::backend::email::client::load_index(
+                                moonbeauty::libraries::backend::email::client::load_index(&folder);
+                            if let Ok(new_envs) =
+                                moonbeauty::libraries::backend::email::client::fetch_from_network(
                                     &folder,
+                                )
+                                .await
+                            {
+                                moonbeauty::libraries::backend::email::client::save_index(
+                                    &folder, &new_envs,
                                 );
-                            if let Ok(new_envs) = moonbeauty::libraries::backend::email::client::fetch_from_network(&folder).await {
-                                moonbeauty::libraries::backend::email::client::save_index(&folder, &new_envs);
                                 moonbeauty::libraries::backend::email::client::sync_bodies_background(folder).await;
                                 Ok::<_, String>((old_envs, new_envs))
                             } else {
@@ -153,11 +159,7 @@ impl MoonBeautyShellApp {
             Message::EmailSynced => {}
             Message::TickWeather => {
                 return Command::perform(
-                    async {
-                        moonbeauty::bar::weather::WeatherBackend::fetch()
-                            .await
-                            .ok()
-                    },
+                    async { moonbeauty::bar::weather::WeatherBackend::fetch().await.ok() },
                     Message::WeatherLoaded,
                 );
             }
@@ -192,8 +194,7 @@ impl MoonBeautyShellApp {
                         // Finding 74: MPD-priority-over-MPRIS. Prefer the
                         // dedicated music daemon over incidental browser
                         // media when both are Playing.
-                        let (mpris, _source) =
-                            moonbeauty::libraries::backend::poll_track().await;
+                        let (mpris, _source) = moonbeauty::libraries::backend::poll_track().await;
                         // #3: blocking net poll on a dedicated thread,
                         // not the async executor or the UI thread.
                         let net = tokio::task::spawn_blocking(move || {
@@ -461,14 +462,13 @@ impl MoonBeautyShellApp {
                                 let out = save_dir.join(format!("Revealed {}.jxl", time_str));
 
                                 // reveal() emits PNG bytes; encode to JXL for disk.
-                                let tmp_reveal = save_dir.join(format!(
-                                    ".mbs-reveal-{}.png",
-                                    std::process::id()
-                                ));
+                                let tmp_reveal = save_dir
+                                    .join(format!(".mbs-reveal-{}.png", std::process::id()));
                                 let write_ok = std::fs::write(&tmp_reveal, &bytes).is_ok();
                                 let convert_ok = write_ok
                                     && moonbeauty::overlays::screenshot::annotator::png_to_jxl(
-                                        &tmp_reveal, &out,
+                                        &tmp_reveal,
+                                        &out,
                                     )
                                     .is_ok();
                                 let _ = std::fs::remove_file(&tmp_reveal);
@@ -591,7 +591,12 @@ impl MoonBeautyShellApp {
                                 Some(self.annotator.watermark_input.clone())
                             };
                             match source {
-                                Some(p) => match save_annotated_image(p, annotations, watermark, self.settings.screenshot_save_format) {
+                                Some(p) => match save_annotated_image(
+                                    p,
+                                    annotations,
+                                    watermark,
+                                    self.settings.screenshot_save_format,
+                                ) {
                                     Ok(paths) => {
                                         eprintln!("[annotator] saved {} file(s)", paths.len());
                                         if self.is_standalone {
@@ -626,95 +631,11 @@ impl MoonBeautyShellApp {
             Message::Notif(msg) => return self.handle_notif(msg),
             Message::Settings(msg) => return self.handle_settings(msg),
             Message::Lock(msg) => return self.handle_lock(msg),
-            Message::TrayWatchdogTick => {
-                // 1) Timeout check
-                if self.tray_expanded
-                    && self.settings.tray_timeout_sec > 0
-                    && self.tray_opened_at.elapsed().as_secs()
-                        >= self.settings.tray_timeout_sec as u64
-                {
-                    eprintln!(
-                        "[tray-watchdog] elapsed={}s >= timeout={}s, closing (settings.tray_width={})",
-                        self.tray_opened_at.elapsed().as_secs(),
-                        self.settings.tray_timeout_sec,
-                        self.settings.tray_width
-                    );
-                    self.close_tray();
-                }
+            Message::TrayWatchdogTick => return self.handle_tray_watchdog(),
+            Message::TrayAnimTick => return self.handle_tray_anim(),
+            Message::FetchTrayItems => return self.handle_fetch_tray_items(),
+            Message::TrayItemsLoaded(items) => return self.handle_tray_items_loaded(items),
 
-                // 2) Animation step. Note: the completion check is OUTSIDE
-                //    the `elapsed < duration` guard so the snap-to-target
-                //    ALWAYS runs on the first tick past duration. Previous
-                //    version froze at width=89.7 because once elapsed
-                //    reached 180ms, the guard `elapsed < duration` became
-                //    false and the inner `if t >= 1.0 { snap }` never ran.
-                if (self.tray_anim_width - self.tray_target_width).abs() > 0.01 {
-                    let elapsed_ms = self.tray_anim_started_at.elapsed().as_millis() as u64;
-                    let dur = self.tray_anim_duration_ms.max(1);
-                    let t = (elapsed_ms as f32 / dur as f32).clamp(0.0, 1.0);
-                    let expanding = self.tray_target_width > self.tray_anim_start_width;
-                    let eased = if expanding {
-                        1.0 - (1.0 - t).powi(3)
-                    } else {
-                        t * t * t
-                    };
-                    let delta = self.tray_target_width - self.tray_anim_start_width;
-                    self.tray_anim_width = self.tray_anim_start_width + delta * eased;
-                    // Force-snap when past duration OR t is at ceiling.
-                    if elapsed_ms >= dur || t >= 1.0 {
-                        self.tray_anim_width = self.tray_target_width;
-                    }
-                    moonbeauty::dbg_log!(
-                        "[tray-anim] elapsed={}ms t={:.2} width={:.1} target={:.1}",
-                        elapsed_ms, t, self.tray_anim_width, self.tray_target_width
-                    );
-                }
-            }
-            Message::TrayAnimTick => {
-                let elapsed_ms = self.tray_anim_started_at.elapsed().as_millis() as f32;
-                let t = (elapsed_ms / self.tray_anim_duration_ms.max(1) as f32).clamp(0.0, 1.0);
-
-                // Expand: ease-out-cubic (fast start, smooth settle)
-                // Collapse: ease-in-cubic (slow start, snap finish)
-                let expanding = self.tray_target_width > self.tray_anim_start_width;
-                let eased = if expanding {
-                    1.0 - (1.0 - t).powi(3)
-                } else {
-                    t * t * t
-                };
-
-                let delta = self.tray_target_width - self.tray_anim_start_width;
-                self.tray_anim_width = self.tray_anim_start_width + delta * eased;
-
-                if t >= 1.0 {
-                    self.tray_anim_width = self.tray_target_width;
-                }
-            }
-            Message::FetchTrayItems => {
-                // Background refresh so tray_items is populated before
-                // the user ever clicks the tray capsule. Eliminates the
-                // 0-item → N-item re-animation on first open.
-                return Command::perform(
-                    moonbeauty::bar::tray::watcher::fetch_tray_items(),
-                    Message::TrayItemsLoaded,
-                );
-            }
-            Message::TrayItemsLoaded(items) => {
-                self.tray_items = items;
-                if self.tray_expanded {
-                    let new_target =
-                        moonbeauty::bar::capsules::compute_expanded_visible_width(
-                            &self.settings,
-                            self.tray_items.len(),
-                        );
-                    // Re-anchor if target changed mid-animation
-                    if (new_target - self.tray_target_width).abs() > 1.0 {
-                        self.tray_anim_start_width = self.tray_anim_width;
-                        self.tray_anim_started_at = std::time::Instant::now();
-                        self.tray_target_width = new_target;
-                    }
-                }
-            }
             Message::DismissActiveOverlay => {
                 // Todo edit mode: Escape cancels the edit rather than
                 // closing the overlay.
