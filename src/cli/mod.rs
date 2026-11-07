@@ -9,3 +9,4 @@ pub mod music;
 pub mod toggle;
 pub mod tray;
 pub mod tooltips;
+pub mod restart;
