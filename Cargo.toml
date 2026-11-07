@@ -29,7 +29,6 @@ native-tls = "0.2"
 mail-parser = "0.9"
 html2text = "0.12"
 rfd = { version = "0.14", default-features = false, features = ["xdg-portal", "tokio"] }
-sysinfo = "0.31"
 zbus = { version = "4.4", features = ["tokio"] }
 
 [features]
