@@ -17,8 +17,7 @@ Still inline:
 - `Message::Annotator(msg)` — ~150 lines (has an `is_text_press`
   post-match check that MUST be preserved verbatim)
 - `Message::DismissActiveOverlay` — ~50 lines (cross-overlay router)
-- Tray family — `ToggleTrayExpanded`, `TrayActivate`, `TrayContextMenu`,
-  `TrayItemsLoaded`, `TrayAnimTick`, `TrayWatchdogTick` (~70 lines)
+- ~~Tray family~~ — *Extracted to `app/update/tray.rs`*
 - Email sync — `TickEmailSync`, `EmailSyncedWithDiff` (~90 lines)
 - Background ticks — `TickHardware`, `MetricsCollected`, `TickWeather`,
   `WeatherLoaded`, `IdleTick` (~30 lines)
@@ -30,7 +29,7 @@ Extract in this order (each independently mergeable, each a commit):
 
 1. `Message::Launcher` → `app/update/launcher.rs`
 2. `Message::Annotator` → `app/update/annotator.rs`
-3. Tray family → `app/update/tray.rs`
+3. ~~Tray family → `app/update/tray.rs`~~ *(Done)*
 4. Email sync → `app/update/email_sync.rs`
 5. Background ticks → `app/update/hardware.rs`
 6. Remaining IPC arms → `app/update/ipc.rs`
