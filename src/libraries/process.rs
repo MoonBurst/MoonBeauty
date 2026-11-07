@@ -291,8 +291,7 @@ pub fn prune_standalone_logs() {
             }
         })
         .collect();
-    let cutoff = std::time::SystemTime::now()
-        - std::time::Duration::from_secs(3600);
+    let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
     logs.retain(|(mtime, path)| {
         if *mtime < cutoff {
             let _ = std::fs::remove_file(path);
@@ -857,7 +856,9 @@ mod unique_tmp_tests {
 pub fn tighten_user_state_files() {
     use std::os::unix::fs::PermissionsExt as _;
     fn chmod(p: &std::path::Path, mode: u32) {
-        let Ok(meta) = std::fs::metadata(p) else { return };
+        let Ok(meta) = std::fs::metadata(p) else {
+            return;
+        };
         let mut perms = meta.permissions();
         if perms.mode() & 0o777 != mode {
             perms.set_mode(mode);

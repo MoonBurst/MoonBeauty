@@ -65,7 +65,10 @@ pub enum ClipFilter {
 // (image.jxl.enabled covers JXL). Non-PNG is served as text/uri-list.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Payload { UriList, Bytes(&'static str) }
+pub enum Payload {
+    UriList,
+    Bytes(&'static str),
+}
 
 impl Payload {
     pub fn for_extension(ext: &str) -> Self {
@@ -73,20 +76,25 @@ impl Payload {
             "jxl" | "webp" | "gif" | "bmp" => Self::UriList,
             "png" => Self::Bytes("image/png"),
             "jpg" | "jpeg" => Self::Bytes("image/jpeg"),
-        // Text content: serve actual bytes as text/plain so
-        // pasting a text entry yields the text, not a file://
-        // URI. The UriList path exists only because Firefox/
-        // Chrome silently ignore non-PNG image payloads.
-        "txt" => Self::Bytes("text/plain;charset=utf-8"),
+            // Text content: serve actual bytes as text/plain so
+            // pasting a text entry yields the text, not a file://
+            // URI. The UriList path exists only because Firefox/
+            // Chrome silently ignore non-PNG image payloads.
+            "txt" => Self::Bytes("text/plain;charset=utf-8"),
             _ => Self::UriList,
         }
     }
 }
 
 pub fn serve_uri_list(paths: &[std::path::PathBuf]) {
-    if paths.is_empty() { return; }
+    if paths.is_empty() {
+        return;
+    }
     use std::io::Write;
-    let body: String = paths.iter().map(|p| format!("file://{}\n", p.display())).collect();
+    let body: String = paths
+        .iter()
+        .map(|p| format!("file://{}\n", p.display()))
+        .collect();
     if let Ok(mut child) = std::process::Command::new("wl-copy")
         .args(["--type", "text/uri-list"])
         .stdin(std::process::Stdio::piped())
@@ -104,17 +112,31 @@ pub fn serve_uri_list(paths: &[std::path::PathBuf]) {
 /// file small), reused forever.  Companion lives next to the .jxl as
 /// `{stem}.preview.png`.
 pub fn ensure_image_preview(path: &std::path::Path) -> Option<std::path::PathBuf> {
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     let png_path = path.with_extension("preview.png");
     if png_path.exists() {
         return Some(png_path);
     }
-    
+
     const MAX_DIM: u32 = 512;
 
-    let magick = if std::process::Command::new("magick").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+    let magick = if std::process::Command::new("magick")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
         Some("magick")
-    } else if std::process::Command::new("convert").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+    } else if std::process::Command::new("convert")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
         Some("convert")
     } else {
         None
@@ -126,7 +148,7 @@ pub fn ensure_image_preview(path: &std::path::Path) -> Option<std::path::PathBuf
         // fails with EXDEV on Linux.
         let token = crate::libraries::process::random_token();
         let tmp_path = png_path.with_file_name(format!(".preview-{}.tmp.png", token));
-        
+
         let status = std::process::Command::new(bin)
             .arg(path)
             .args(["-resize", "512x512>"])
@@ -134,7 +156,7 @@ pub fn ensure_image_preview(path: &std::path::Path) -> Option<std::path::PathBuf
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
-            
+
         if status.map(|s| s.success()).unwrap_or(false) {
             if std::fs::rename(&tmp_path, &png_path).is_ok() {
                 return Some(png_path);
@@ -167,13 +189,12 @@ pub fn ensure_image_preview(path: &std::path::Path) -> Option<std::path::PathBuf
         }
         crate::overlays::screenshot::annotator::register_jxl_decoder();
     }
-    
+
     let img = image::open(path).ok()?;
     let final_img = img.thumbnail(MAX_DIM, MAX_DIM);
     final_img.save(&png_path).ok()?;
     Some(png_path)
 }
-
 
 pub struct ClipboardOverlay {
     pub search_query: String,
@@ -225,7 +246,9 @@ impl ClipboardOverlay {
     /// Ingest a file into the index by reference. Used by annotator
     /// save and URI-list ingest. Sync — no tokio runtime needed.
     pub fn add_entry(source: &std::path::Path, display_name: Option<String>) -> Option<u64> {
-        if !source.is_file() { return None; }
+        if !source.is_file() {
+            return None;
+        }
         // 100 MB cap. Annotation saves and URI-list ingests otherwise
         // load an arbitrarily large file into memory. Skip (do not
         // truncate) to preserve file integrity.
@@ -241,17 +264,23 @@ impl ClipboardOverlay {
             return None;
         }
         let bytes = std::fs::read(source).ok()?;
-        if bytes.is_empty() { return None; }
+        if bytes.is_empty() {
+            return None;
+        }
         let hash = {
             use sha2::Digest as _;
             format!("{:x}", sha2::Sha256::digest(&bytes))
         };
-        let dir = dirs::data_dir().unwrap_or_else(std::env::temp_dir)
-            .join("moonbeauty").join("clipboard");
+        let dir = dirs::data_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join("moonbeauty")
+            .join("clipboard");
         std::fs::create_dir_all(&dir).ok()?;
         let index_path = dir.join("index.json");
-        let mut items: Vec<ClipItem> = std::fs::read_to_string(&index_path).ok()
-            .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        let mut items: Vec<ClipItem> = std::fs::read_to_string(&index_path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
         // Dedup: check the last 5 items. If the same hash exists and was
         // inserted within the last 5 seconds, it's a race condition duplicate.
         let now = std::time::SystemTime::now()
@@ -265,20 +294,22 @@ impl ClipboardOverlay {
         }
         let id = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64).unwrap_or(0);
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
         let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("bin");
         let is_image = matches!(
             ext.to_ascii_lowercase().as_str(),
             "jxl" | "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"
         );
         let text = if is_image {
-            display_name.or_else(|| source.file_name().map(|n| n.to_string_lossy().into_owned()))
+            display_name
+                .or_else(|| source.file_name().map(|n| n.to_string_lossy().into_owned()))
                 .unwrap_or_else(|| format!("Image {}", id))
         } else {
             String::from_utf8_lossy(&bytes[..bytes.len().min(100)]).to_string()
         };
         let ext_owned = ext.to_string();
-        
+
         // Copy the file into the clipboard cache so it's self-contained.
         // std::fs::copy inherits the source file's mode (could be 0644),
         // so chmod explicitly to 0600.
@@ -302,15 +333,24 @@ impl ClipboardOverlay {
             let _ = ensure_image_preview(&dest_path);
         }
 
-        items.insert(0, ClipItem {
-            id, text, is_image,
-            content_hash: Some(hash),
-            source_path: Some(source.to_path_buf()),
-            ext: Some(ext_owned),
-        });
+        items.insert(
+            0,
+            ClipItem {
+                id,
+                text,
+                is_image,
+                content_hash: Some(hash),
+                source_path: Some(source.to_path_buf()),
+                ext: Some(ext_owned),
+            },
+        );
         items.truncate(2000);
         let tmp = dir.join("index.json.tmp");
-        crate::libraries::process::private_write_file(&tmp, serde_json::to_string(&items).ok()?.as_bytes()).ok()?;
+        crate::libraries::process::private_write_file(
+            &tmp,
+            serde_json::to_string(&items).ok()?.as_bytes(),
+        )
+        .ok()?;
         std::fs::rename(&tmp, &index_path).ok()?;
         // Purge AFTER successful write: if the write fails, the old
         // index still references files we would have deleted.
@@ -321,8 +361,10 @@ impl ClipboardOverlay {
     /// Resolve the preferred paste path: source_path if the file still
     /// exists, else the cache copy.
     pub fn resolve_path(id: u64) -> Option<std::path::PathBuf> {
-        let dir = dirs::data_dir().unwrap_or_else(std::env::temp_dir)
-            .join("moonbeauty").join("clipboard");
+        let dir = dirs::data_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join("moonbeauty")
+            .join("clipboard");
         let index = std::fs::read_to_string(dir.join("index.json")).ok()?;
         let items: Vec<ClipItem> = serde_json::from_str(&index).ok()?;
         let item = items.into_iter().find(|i| i.id == id)?;
@@ -332,7 +374,9 @@ impl ClipboardOverlay {
         }
         // Fallback to source_path if the cache was deleted
         if let Some(sp) = item.source_path {
-            if sp.is_file() { return Some(sp); }
+            if sp.is_file() {
+                return Some(sp);
+            }
         }
         None
     }
@@ -353,7 +397,6 @@ impl ClipboardOverlay {
     /// generate a one-time `{id}.preview.png` companion via the registered
     /// JXL decoder and return that instead. PNG is iced-native, so this
     /// always renders.
-    
 
     /// Like `get_file_path` but uses a known extension for a single
     /// stat instead of walking the ext list. Falls back to the stat
@@ -377,17 +420,22 @@ impl ClipboardOverlay {
     /// `items`. Called after successful index write. Skips non-numeric
     /// filenames (index.json, index.json.tmp, etc.).
     pub fn purge_orphans(dir: &std::path::Path, items: &[ClipItem]) {
-        let live: std::collections::HashSet<u64> =
-            items.iter().map(|i| i.id).collect();
+        let live: std::collections::HashSet<u64> = items.iter().map(|i| i.id).collect();
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
         let mut purged = 0u32;
         for entry in entries.flatten() {
             let name = entry.file_name();
-            let Some(name_str) = name.to_str() else { continue; };
-            let Some(dot) = name_str.find(".") else { continue; };
-            let Ok(id) = name_str[..dot].parse::<u64>() else { continue; };
+            let Some(name_str) = name.to_str() else {
+                continue;
+            };
+            let Some(dot) = name_str.find(".") else {
+                continue;
+            };
+            let Ok(id) = name_str[..dot].parse::<u64>() else {
+                continue;
+            };
             if !live.contains(&id) && std::fs::remove_file(entry.path()).is_ok() {
                 purged += 1;
             }
@@ -409,13 +457,15 @@ impl ClipboardOverlay {
             if let Ok(items) = serde_json::from_str::<Vec<ClipItem>>(&content) {
                 for mut item in items {
                     if item.is_image {
-                        if let Some(path) = Self::get_file_path_with_ext(&dir, item.id, item.ext.as_deref()) {
+                        if let Some(path) =
+                            Self::get_file_path_with_ext(&dir, item.id, item.ext.as_deref())
+                        {
                             if item.text.is_empty()
                                 || item.text == "📸 Image"
                                 || item.text.starts_with("📸 Image 1")
                             {
                                 crate::overlays::screenshot::annotator::register_jxl_decoder();
-                        if let Ok((w, h)) = ::image::image_dimensions(&path) {
+                                if let Ok((w, h)) = ::image::image_dimensions(&path) {
                                     item.text = format!("📸 Image {}x{}", w, h);
                                 } else {
                                     item.text = format!("📸 Image {}", item.id);
@@ -438,7 +488,11 @@ impl ClipboardOverlay {
         let Some(path) = Self::resolve_path(id) else {
             return (String::new(), None);
         };
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
         if ext == "txt" || ext == "bin" {
             if let Ok(bytes) = std::fs::read(&path) {
                 if let Ok(text) = String::from_utf8(bytes) {
@@ -446,7 +500,7 @@ impl ClipboardOverlay {
                 }
             }
         }
-        
+
         // Decode to RGBA bytes on a background thread so the UI thread
         // never has to load anything asynchronously.
         let path_clone = path.clone();
@@ -456,14 +510,21 @@ impl ClipboardOverlay {
             let rgba = img.to_rgba8();
             let (w, h) = rgba.dimensions();
             Some((w, h, rgba.into_raw()))
-        }).await.unwrap_or(None);
-        
+        })
+        .await
+        .unwrap_or(None);
+
         (String::new(), image_data)
     }
 
     pub async fn copy(id: u64) {
-        let Some(paste_path) = Self::resolve_path(id) else { return };
-        let ext = paste_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let Some(paste_path) = Self::resolve_path(id) else {
+            return;
+        };
+        let ext = paste_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
         let payload = Payload::for_extension(ext);
         use tokio::io::AsyncWriteExt;
         let (mime, body) = match payload {
@@ -472,7 +533,9 @@ impl ClipboardOverlay {
                 format!("file://{}\n", paste_path.display()).into_bytes(),
             ),
             Payload::Bytes(m) => {
-                let Ok(data) = std::fs::read(&paste_path) else { return };
+                let Ok(data) = std::fs::read(&paste_path) else {
+                    return;
+                };
                 (m, data)
             }
         };
@@ -480,7 +543,9 @@ impl ClipboardOverlay {
             .args(["--type", mime])
             .stdin(std::process::Stdio::piped())
             .spawn()
-        else { return; };
+        else {
+            return;
+        };
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(&body).await;
         }
@@ -488,26 +553,29 @@ impl ClipboardOverlay {
     }
 
     pub fn delete(id: u64) {
-    let dir = dirs::data_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("moonbeauty")
-        .join("clipboard");
-    let index_path = dir.join("index.json");
+        let dir = dirs::data_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join("moonbeauty")
+            .join("clipboard");
+        let index_path = dir.join("index.json");
 
-    if let Some(path) = Self::get_file_path(&dir, id) {
-        let _ = std::fs::remove_file(&path);
-    }
-    let _ = std::fs::remove_file(dir.join(format!("{}.preview.png", id)));
+        if let Some(path) = Self::get_file_path(&dir, id) {
+            let _ = std::fs::remove_file(&path);
+        }
+        let _ = std::fs::remove_file(dir.join(format!("{}.preview.png", id)));
 
-    if let Ok(content) = std::fs::read_to_string(&index_path) {
-        if let Ok(mut items) = serde_json::from_str::<Vec<ClipItem>>(&content) {
-            items.retain(|i| i.id != id);
-            if let Ok(new_json) = serde_json::to_string(&items) {
-                let _ = crate::libraries::process::private_write_file(&index_path, new_json.as_bytes());
+        if let Ok(content) = std::fs::read_to_string(&index_path) {
+            if let Ok(mut items) = serde_json::from_str::<Vec<ClipItem>>(&content) {
+                items.retain(|i| i.id != id);
+                if let Ok(new_json) = serde_json::to_string(&items) {
+                    let _ = crate::libraries::process::private_write_file(
+                        &index_path,
+                        new_json.as_bytes(),
+                    );
+                }
             }
         }
     }
-}
 
     pub async fn wipe() {
         let dir = dirs::data_dir()
@@ -881,52 +949,53 @@ impl ClipboardOverlay {
             left: inner_pad,
         };
 
-        let preview_content: Element<'a, ClipboardMessage> = if let Some((w, h, data)) = &self.preview_image_data {
-            let handle = iced::widget::image::Handle::from_rgba(*w, *h, data.clone());
-            container(
+        let preview_content: Element<'a, ClipboardMessage> =
+            if let Some((w, h, data)) = &self.preview_image_data {
+                let handle = iced::widget::image::Handle::from_rgba(*w, *h, data.clone());
                 container(
-                    iced::widget::image(handle)
-                        .width(Length::Fill)
-                        .content_fit(iced::ContentFit::Contain),
+                    container(
+                        iced::widget::image(handle)
+                            .width(Length::Fill)
+                            .content_fit(iced::ContentFit::Contain),
+                    )
+                    .padding(inner_padding)
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill)
+                    .width(Length::Fill)
+                    .height(Length::Fill),
+                )
+                .into()
+            } else if !self.preview_text.is_empty() {
+                container(
+                    scrollable(
+                        container(
+                            text(&self.preview_text)
+                                .size((theme.font_size_overlay) as f32)
+                                .font(iced::Font::MONOSPACE)
+                                .color(theme.text)
+                                .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+                        )
+                        .width(Length::Fill),
+                    )
+                    .width(Length::Fill)
+                    .height(Length::Fill),
                 )
                 .padding(inner_padding)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+            } else {
+                container(
+                    text("Select an entry to preview")
+                        .size((theme.font_size_overlay) as f32)
+                        .color(theme.muted),
+                )
                 .center_x(Length::Fill)
                 .center_y(Length::Fill)
                 .width(Length::Fill)
-                .height(Length::Fill),
-            )
-            .into()
-        } else if !self.preview_text.is_empty() {
-            container(
-                scrollable(
-                    container(
-                        text(&self.preview_text)
-                            .size((theme.font_size_overlay) as f32)
-                            .font(iced::Font::MONOSPACE)
-                            .color(theme.text)
-                            .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
-                    )
-                    .width(Length::Fill),
-                )
-                .width(Length::Fill)
-                .height(Length::Fill),
-            )
-            .padding(inner_padding)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
-        } else {
-            container(
-                text("Select an entry to preview")
-                    .size((theme.font_size_overlay) as f32)
-                    .color(theme.muted),
-            )
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
-        };
+                .height(Length::Fill)
+                .into()
+            };
 
         let right_bg = ShapeBox::new()
             .shape(ShapeType::Hexagon { cut })

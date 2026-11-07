@@ -196,11 +196,7 @@ pub fn resolve_alarm_sound_path(sound: &str) -> Option<std::path::PathBuf> {
 
     // Stable per-user data dir — where ImportAlarmSound now copies files.
     if let Some(data) = dirs::data_dir() {
-        candidates.push(
-            data.join("moonbeauty")
-                .join("sounds")
-                .join(&filename),
-        );
+        candidates.push(data.join("moonbeauty").join("sounds").join(&filename));
     }
 
     // Finding 19: cwd-relative and CARGO_MANIFEST_DIR candidates dropped.

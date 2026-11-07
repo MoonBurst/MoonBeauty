@@ -17,8 +17,8 @@ pub mod settings;
 pub mod size_resizer;
 pub mod system_tooltip;
 pub mod todo;
-pub mod tooltip_engine;
 pub mod tooltip_common;
+pub mod tooltip_engine;
 pub mod unicode;
 pub mod websearch;
 
@@ -35,9 +35,7 @@ pub use pass::{PassMessage, PassOverlay};
 pub use power::{PowerAction, PowerMessage, PowerOverlay};
 pub use reminders::{ReminderMessage, RemindersOverlay};
 pub use rng::{RngMessage, RngOverlay};
-pub use screenshot::{
-    save_annotated_image, AnnotatorMessage, AnnotatorOverlay,
-};
+pub use screenshot::{save_annotated_image, AnnotatorMessage, AnnotatorOverlay};
 pub use settings::{SettingsMessage, SettingsOverlay};
 pub use todo::{TodoMessage, TodoOverlay};
 pub use unicode::{UnicodeMessage, UnicodeOverlay};

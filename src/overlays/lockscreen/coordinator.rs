@@ -119,26 +119,41 @@ fn find_bin(name: &str) -> Option<std::path::PathBuf> {
 /// coordinator. Called from spawn() before binding the new socket so
 /// the sweep can't race with our own freshly-created file.
 fn sweep_stale_lockscreen_sockets(runtime_dir: &str, current_pid: u32) {
-    let Ok(entries) = std::fs::read_dir(runtime_dir) else { return; };
+    let Ok(entries) = std::fs::read_dir(runtime_dir) else {
+        return;
+    };
     let mut cleaned = 0u32;
     for entry in entries.flatten() {
         let name = entry.file_name();
-        let Some(s) = name.to_str() else { continue; };
-        let Some(rest) = s.strip_prefix("moon-beauty-lock-") else { continue; };
-        let Some(pid_str) = rest.strip_suffix(".sock") else { continue; };
-        let Ok(pid) = pid_str.parse::<u32>() else { continue; };
-        if pid == current_pid { continue; }
+        let Some(s) = name.to_str() else {
+            continue;
+        };
+        let Some(rest) = s.strip_prefix("moon-beauty-lock-") else {
+            continue;
+        };
+        let Some(pid_str) = rest.strip_suffix(".sock") else {
+            continue;
+        };
+        let Ok(pid) = pid_str.parse::<u32>() else {
+            continue;
+        };
+        if pid == current_pid {
+            continue;
+        }
         let cmdline = std::fs::read(format!("/proc/{}/cmdline", pid)).ok();
         let is_live = cmdline
             .as_ref()
             .map(|c| c.split(|b| *b == 0).any(|part| part == b"--lockscreen"))
             .unwrap_or(false);
-        if is_live { continue; }
+        if is_live {
+            continue;
+        }
         if std::fs::remove_file(entry.path()).is_ok() {
             cleaned += 1;
             eprintln!(
                 "[lock-coord] cleaned stale socket {:?} (pid {} no longer a coordinator)",
-                entry.path(), pid
+                entry.path(),
+                pid
             );
         }
     }
@@ -313,8 +328,7 @@ impl LockCoordinator {
                 "[lock-coord] auth: pamtester={:?} sudo={:?} sudo_nopasswd={}",
                 pam_bin, sudo_bin, sudo_nopasswd
             );
-            let usable = pam_bin.is_some() as u32
-                + (sudo_bin.is_some() && !sudo_nopasswd) as u32;
+            let usable = pam_bin.is_some() as u32 + (sudo_bin.is_some() && !sudo_nopasswd) as u32;
             if usable == 0 {
                 eprintln!(
                     "[lock-coord] WARNING: no working auth strategy. \
@@ -362,7 +376,10 @@ impl LockCoordinator {
                 if is_primary {
                     *primary_output.lock().unwrap() = Some(output.clone());
                 }
-                eprintln!("[lock-coord-v225] spawning child for output={:?} primary={}", output, is_primary);
+                eprintln!(
+                    "[lock-coord-v225] spawning child for output={:?} primary={}",
+                    output, is_primary
+                );
                 Self::spawn_child(output, &socket_path, &children, is_primary);
             }
         }
@@ -922,9 +939,7 @@ impl LockCoordinator {
         // podman). Detect this and skip sudo entirely — it cannot serve
         // as an auth oracle when it never asks for a password.
         if sudo_is_nopasswd() {
-            eprintln!(
-                "[lock-coord] sudo is NOPASSWD — refusing to use it as auth oracle"
-            );
+            eprintln!("[lock-coord] sudo is NOPASSWD — refusing to use it as auth oracle");
         } else {
             let sudo_bin = find_bin("sudo").unwrap_or_else(|| std::path::PathBuf::from("sudo"));
             eprintln!("[lock-coord] trying sudo -v");

@@ -2,7 +2,9 @@ use iced::widget::{button, column, container, row, scrollable, slider, text, tex
 use iced::{Alignment, Color, Element, Length, Padding};
 
 use crate::libraries::backend::system::{GpuInfo, SystemCollector};
-use crate::libraries::config::settings::{ContentRule, FriendProfile, ScreenshotSaveFormat, ShellSettings};
+use crate::libraries::config::settings::{
+    ContentRule, FriendProfile, ScreenshotSaveFormat, ShellSettings,
+};
 
 /// Debug log — gated on MBS_DEBUG or MBS_SETTINGS_DEBUG so release builds
 /// stay silent. Uses a persistent file handle (opened once) instead of
@@ -273,7 +275,9 @@ impl SettingsOverlay {
         match message {
             SettingsMessage::TrayIconSize(v) => settings.tray_icon_size = v.clamp(12, 48),
             SettingsMessage::LauncherIconSize(v) => settings.launcher_icon_size = v.clamp(48, 160),
-            SettingsMessage::ClipboardThumbnailSize(v) => settings.clipboard_thumbnail_size = v.clamp(32, 160),
+            SettingsMessage::ClipboardThumbnailSize(v) => {
+                settings.clipboard_thumbnail_size = v.clamp(32, 160)
+            }
             SettingsMessage::SelectGpuId(id) => {
                 settings.gpu_selected_id = id;
             }
@@ -346,7 +350,9 @@ impl SettingsOverlay {
                 settings.control_border_width = (v as f32).clamp(1.0, 8.0)
             }
             SettingsMessage::CapsuleSpacing(v) => settings.capsule_spacing = v.clamp(-50, 40),
-            SettingsMessage::CapsuleInternalPadding(v) => settings.capsule_internal_padding = v.clamp(0, 60),
+            SettingsMessage::CapsuleInternalPadding(v) => {
+                settings.capsule_internal_padding = v.clamp(0, 60)
+            }
             SettingsMessage::TrayWidth(v) => settings.tray_width = v.clamp(50, 400),
             SettingsMessage::TrayTimeout(v) => settings.tray_timeout_sec = v.clamp(0, 30),
             SettingsMessage::HardwarePollInterval(v) => {
@@ -1561,8 +1567,12 @@ impl SettingsOverlay {
                         .bold()
                         .color(theme.text)
                 ],
-                slider(24..=96, settings.notif_icon_size, SettingsMessage::NotifIconSize)
-                    .width(Length::Fill),
+                slider(
+                    24..=96,
+                    settings.notif_icon_size,
+                    SettingsMessage::NotifIconSize
+                )
+                .width(Length::Fill),
             ]
             .spacing(2),
         ]
@@ -3555,31 +3565,31 @@ impl SettingsOverlay {
         );
 
         // ── Screenshot Save Format ─────────────────────────────
-        let fmt_btn = |fmt: ScreenshotSaveFormat, label: &'static str| -> Element<'a, SettingsMessage> {
-            let is_sel = settings.screenshot_save_format == fmt;
-            button(
-                text(label)
-                    .size(11)
-                    .bold()
-                    .color(if is_sel { theme.background } else { theme.text }),
-            )
-            .on_press(SettingsMessage::ScreenshotSaveFormat(fmt))
-            .padding([3, 8])
-            .style(move |_t, _s| button::Style {
-                background: Some(iced::Background::Color(if is_sel {
-                    theme.text
+        let fmt_btn =
+            |fmt: ScreenshotSaveFormat, label: &'static str| -> Element<'a, SettingsMessage> {
+                let is_sel = settings.screenshot_save_format == fmt;
+                button(text(label).size(11).bold().color(if is_sel {
+                    theme.background
                 } else {
-                    Color::TRANSPARENT
-                })),
-                border: iced::Border {
-                    color: if is_sel { theme.text } else { theme.border },
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            })
-            .into()
-        };
+                    theme.text
+                }))
+                .on_press(SettingsMessage::ScreenshotSaveFormat(fmt))
+                .padding([3, 8])
+                .style(move |_t, _s| button::Style {
+                    background: Some(iced::Background::Color(if is_sel {
+                        theme.text
+                    } else {
+                        Color::TRANSPARENT
+                    })),
+                    border: iced::Border {
+                        color: if is_sel { theme.text } else { theme.border },
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .into()
+            };
 
         col = col.push(
             container(
@@ -3664,10 +3674,7 @@ impl SettingsOverlay {
             (
                 "OVERLAYS — each command toggles. Both --<target> and --toggle <target> work.",
                 &[
-                    (
-                        "Application launcher",
-                        "moonbeauty --launcher",
-                    ),
+                    ("Application launcher", "moonbeauty --launcher"),
                     ("Clipboard manager", "moonbeauty --clipboard"),
                     ("Notification history", "moonbeauty --history"),
                     ("Settings", "moonbeauty --settings"),
@@ -3681,7 +3688,10 @@ impl SettingsOverlay {
                     ("Web search", "moonbeauty --web"),
                     ("Email client", "moonbeauty --email"),
                     ("Among Us tracker", "moonbeauty --amogus"),
-                    ("Lock screen (must use --toggle; bare --lockscreen starts the coordinator)", "moonbeauty --toggle lockscreen"),
+                    (
+                        "Lock screen (must use --toggle; bare --lockscreen starts the coordinator)",
+                        "moonbeauty --toggle lockscreen",
+                    ),
                 ],
             ),
             (
@@ -3695,10 +3705,7 @@ impl SettingsOverlay {
                         "Focus the app that sent the newest toast",
                         "moonbeauty --activate-latest-notif",
                     ),
-                    (
-                        "Dismiss the newest toast",
-                        "moonbeauty --dismiss-notif",
-                    ),
+                    ("Dismiss the newest toast", "moonbeauty --dismiss-notif"),
                     (
                         "Toggle the notification history panel",
                         "moonbeauty --notif-history",
@@ -3725,10 +3732,7 @@ impl SettingsOverlay {
                         "Restart the bar (picks up new settings)",
                         "moonbeauty --restart-bar",
                     ),
-                    (
-                        "Test IMAP/SMTP email connection",
-                        "moonbeauty --test-email",
-                    ),
+                    ("Test IMAP/SMTP email connection", "moonbeauty --test-email"),
                     (
                         "Test lockscreen password authentication",
                         "moonbeauty --test-lock-auth",

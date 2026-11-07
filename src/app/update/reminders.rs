@@ -21,14 +21,14 @@ impl MoonBeautyShellApp {
                 self.active_overlay = None;
                 Command::none()
             }
-            ReminderMessage::InitialFocus => iced::widget::operation::focus(
-                moonbeauty::overlays::reminders::REMINDER_TASK_ID,
-            )
-            .map(Message::Reminders),
-            ReminderMessage::Refocus => iced::widget::operation::focus(
-                moonbeauty::overlays::reminders::REMINDER_WHEN_ID,
-            )
-            .map(Message::Reminders),
+            ReminderMessage::InitialFocus => {
+                iced::widget::operation::focus(moonbeauty::overlays::reminders::REMINDER_TASK_ID)
+                    .map(Message::Reminders)
+            }
+            ReminderMessage::Refocus => {
+                iced::widget::operation::focus(moonbeauty::overlays::reminders::REMINDER_WHEN_ID)
+                    .map(Message::Reminders)
+            }
             ReminderMessage::FocusNextField => {
                 self.reminders.cycle_focus_forward();
                 let target = if self.reminders.active_field == 0 {

@@ -3,6 +3,8 @@ use super::*;
 
 mod clipboard;
 mod email;
+mod hardware;
+mod launcher;
 mod lockscreen;
 mod music;
 mod notifications;
@@ -21,31 +23,11 @@ impl MoonBeautyShellApp {
                 // to keep the match exhaustive.
                 let _ = (w, h);
             }
-            Message::IdleTick => {
-                // Reap self-terminating tooltip children. Tooltips
-                // self-exit via process::exit(0) on AUTO_MS timeout
-                // (20s weather, 25s tray) or user dismissal. Without
-                // this try_wait, Child's Drop does NOT reap (Rust
-                // docs: no Drop impl for Child), so each self-exit
-                // leaves a zombie accumulating over hours of use.
-                // try_wait also clears the handle so the next toggle
-                // starts from a clean slate rather than take()-ing a
-                // dead child.
-                if let Some(c) = self.weather_tooltip_child.as_mut() {
-                    if matches!(c.try_wait(), Ok(Some(_))) {
-                        self.weather_tooltip_child = None;
-                    }
-                }
-                let c1 = self.update(Message::TickClock);
-                let c2 = self.update(Message::TickHardware);
-                let c3 = self.update(Message::PollNotifs);
-                return Command::batch(vec![c1, c2, c3]);
-            }
+            Message::IdleTick => return self.handle_idle_tick(),
+
             Message::PollNotifs => return self.handle_poll_notifs(),
-            Message::TickClock => {
-                self.telemetry.bar_time = ClockBackend::get_bar_time();
-                return self.check_reminder_alerts();
-            }
+            Message::TickClock => return self.handle_tick_clock(),
+
             Message::TickToasts => return self.handle_tick_toasts(),
             Message::ComposeTabPressed(shift) => {
                 if self.email.is_composing {
@@ -157,67 +139,16 @@ impl MoonBeautyShellApp {
                 );
             }
             Message::EmailSynced => {}
-            Message::TickWeather => {
-                return Command::perform(
-                    async { moonbeauty::bar::weather::WeatherBackend::fetch().await.ok() },
-                    Message::WeatherLoaded,
-                );
-            }
-            Message::WeatherLoaded(w) => {
-                self.telemetry.weather = w;
-            }
-            Message::TickHardware => {
-                self.telemetry.gpu_selected_idx = self
-                    .detected_gpus
-                    .iter()
-                    .position(|g| g.card_id == self.settings.gpu_selected_id)
-                    .unwrap_or(0);
-                let bat = SystemCollector::collect_battery();
-                self.telemetry.battery = bat;
+            Message::TickWeather => return self.handle_tick_weather(),
 
-                let gpu_id = self.settings.gpu_selected_id.clone();
-                // #3: update_net() blocks on TcpStream::connect_timeout
-                // (ping check) and on an `ss` subprocess. Both used to
-                // run on the UI thread before this Command was even
-                // constructed, freezing the shell for up to ~450 ms
-                // every ping-cache cycle. Moving them into the async
-                // task on a dedicated blocking thread eliminates the
-                // stall.
-                let net_collector = self.system_collector.clone();
+            Message::WeatherLoaded(w) => return self.handle_weather_loaded(w),
 
-                return Command::perform(
-                    async move {
-                        let (cpu, ram) = SystemCollector::collect_all().await;
-                        let gpu = SystemCollector::collect_gpu_by_card_id(&gpu_id).await;
-                        let audio = AudioBackend::get_sink().await;
-                        let mic = AudioBackend::get_source().await;
-                        // Finding 74: MPD-priority-over-MPRIS. Prefer the
-                        // dedicated music daemon over incidental browser
-                        // media when both are Playing.
-                        let (mpris, _source) = moonbeauty::libraries::backend::poll_track().await;
-                        // #3: blocking net poll on a dedicated thread,
-                        // not the async executor or the UI thread.
-                        let net = tokio::task::spawn_blocking(move || {
-                            net_collector.lock().unwrap().update_net()
-                        })
-                        .await
-                        .unwrap_or_default();
-                        (cpu, ram, gpu, audio, mic, mpris, net)
-                    },
-                    |(cpu, ram, gpu, audio, mic, mpris, net)| {
-                        Message::MetricsCollected(cpu, ram, gpu, audio, mic, mpris, net)
-                    },
-                );
-            }
+            Message::TickHardware => return self.handle_tick_hardware(),
+
             Message::MetricsCollected(cpu, ram, gpu, audio, mic, mpris, net) => {
-                self.telemetry.cpu = cpu;
-                self.telemetry.ram = ram;
-                self.telemetry.gpu = gpu;
-                self.telemetry.audio = audio;
-                self.telemetry.mic = mic;
-                self.telemetry.mpris = mpris;
-                self.telemetry.net = net;
+                return self.handle_metrics_collected(cpu, ram, gpu, audio, mic, mpris, net)
             }
+
             Message::IpcReceived(cmd) => match cmd {
                 IpcCommand::Toggle(target) => {
                     // Every overlay runs as a standalone child so it gets
@@ -301,111 +232,7 @@ impl MoonBeautyShellApp {
                 IpcCommand::MusicPlayPause => return self.music_toggle_play_pause_ipc(),
             },
             Message::TopBar(msg) => return self.handle_top_bar(msg),
-            Message::Launcher(msg) => match msg {
-                LauncherMessage::Dismiss => {
-                    if self.is_standalone {
-                        std::process::exit(0);
-                    }
-                    self.active_overlay = None;
-                }
-                LauncherMessage::ExecuteApp(cmd) => {
-                    // __tab__ branch removed (problem 10): nothing emits
-                    // ExecuteApp("__tab__").
-                    // Math result — copy to clipboard and close
-                    if let Some(result) = cmd.strip_prefix("math:") {
-                        let result = result.to_string();
-                        eprintln!("[launcher] math result -> wl-copy: {}", result);
-                        let _ = std::process::Command::new("notify-send")
-                            .args(["-a", "Launcher", "Copied", &result])
-                            .spawn();
-                        if self.is_standalone {
-                            let r = result.clone();
-                            crate::app::helpers::run_then_exit(async move {
-                                let _ = tokio::process::Command::new("wl-copy")
-                                    .arg(&r)
-                                    .status()
-                                    .await;
-                            });
-                        }
-                        self.active_overlay = None;
-                        return Command::perform(
-                            async move {
-                                let _ = tokio::process::Command::new("wl-copy")
-                                    .arg(&result)
-                                    .status()
-                                    .await;
-                            },
-                            |_| Message::DismissActiveOverlay,
-                        );
-                    }
-
-                    if let Some(definition) = cmd.strip_prefix("dict:") {
-                        // Ignore sentinel entries (pending/hint)
-                        if definition == "__pending__" || definition == "__hint__" {
-                            return Command::none();
-                        }
-                        let def = definition.to_string();
-                        eprintln!(
-                            "[launcher] dict copy: {}...",
-                            def.chars().take(40).collect::<String>()
-                        );
-                        let _ = std::process::Command::new("wl-copy").arg(&def).spawn();
-                        let _ = std::process::Command::new("notify-send")
-                            .args(["-a", "Dictionary", "Copied", &def])
-                            .spawn();
-                        if self.is_standalone {
-                            std::process::exit(0);
-                        }
-                        self.active_overlay = None;
-                        return Command::none();
-                    }
-
-                    if let Some(key) = cmd.strip_prefix("pass:") {
-                        eprintln!("[launcher] pass copy: {}", key);
-                        // Detached: `pass -c` may block on GPG pinentry, so we
-                        // spawn it as its own process and exit immediately.
-                        // The `sh -c '... "$1"' -- <key>` pattern prevents shell
-                        // injection when the key has special chars.
-                        let _ = std::process::Command::new("sh")
-                            .arg("-c")
-                            .arg(r#"pass -c "$1" 2>&1 && notify-send -a 'Password Store' 'Copied' "$1""#)
-                            .arg("--")
-                            .arg(key)
-                            .spawn();
-                        if self.is_standalone {
-                            std::process::exit(0);
-                        }
-                        self.active_overlay = None;
-                        return Command::none();
-                    }
-
-                    if let Some(target_str) = cmd.strip_prefix("internal:") {
-                        if let Some(target) = OverlayTarget::from_str(target_str) {
-                            if self.is_standalone {
-                                self.spawn_standalone(target);
-                                std::process::exit(0);
-                            } else {
-                                self.active_overlay = Some(target);
-                                return Command::none();
-                            }
-                        }
-                    }
-                    if self.is_standalone {
-                        tokio::spawn(async move {
-                            AppLauncher::launch(&cmd).await;
-                        });
-                        std::process::exit(0);
-                    }
-                    self.active_overlay = None;
-                    return Command::perform(
-                        async move {
-                            AppLauncher::launch(&cmd).await;
-                        },
-                        |_| Message::DismissActiveOverlay,
-                    );
-                }
-                _ => return self.launcher.update(msg).map(Message::Launcher),
-            },
+            Message::Launcher(msg) => return self.handle_launcher(msg),
             Message::Calc(msg) => return self.handle_calc(msg),
             Message::Clipboard(msg) => return self.handle_clipboard(msg),
             Message::Notes(msg) => return self.handle_notes(msg),

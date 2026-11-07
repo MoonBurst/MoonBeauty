@@ -45,12 +45,11 @@ impl MoonBeautyShellApp {
                     Command::done(Message::Email(EmailMessage::SetLoading)),
                     Command::perform(
                         async move {
-                            moonbeauty::libraries::backend::email::client::fetch_envelopes(&f_fetch).await
+                            moonbeauty::libraries::backend::email::client::fetch_envelopes(&f_fetch)
+                                .await
                         },
                         move |res| match res {
-                            Ok(envs) => {
-                                Message::Email(EmailMessage::EnvelopesLoaded(f_resp, envs))
-                            }
+                            Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(f_resp, envs)),
                             Err(e) => Message::Email(EmailMessage::Error(e)),
                         },
                     ),
@@ -60,11 +59,10 @@ impl MoonBeautyShellApp {
                 let folder = self.email.active_folder.clone();
                 // If we're in a local folder, the email actually lives
                 // in the Gmail folder it was assigned from (usually INBOX).
-                let source =
-                    moonbeauty::libraries::backend::email::local_sort::source_folder_for(
-                        &id, &folder,
-                    )
-                    .unwrap_or_else(|| folder.clone());
+                let source = moonbeauty::libraries::backend::email::local_sort::source_folder_for(
+                    &id, &folder,
+                )
+                .unwrap_or_else(|| folder.clone());
                 self.email.update(EmailMessage::SelectMail(id.clone()));
                 // Cache hit in email.rs::update -> parsed_email is Some,
                 // no need to spawn an async re-fetch.
@@ -75,10 +73,8 @@ impl MoonBeautyShellApp {
                 }
                 return Command::perform(
                     async move {
-                        moonbeauty::libraries::backend::email::client::read_message(
-                            &id, &source,
-                        )
-                        .await
+                        moonbeauty::libraries::backend::email::client::read_message(&id, &source)
+                            .await
                     },
                     |body| Message::Email(EmailMessage::MessageLoaded(body)),
                 );
@@ -184,7 +180,10 @@ impl MoonBeautyShellApp {
                 }
                 return Command::perform(
                     async move {
-                        moonbeauty::libraries::backend::email::client::sync_bodies_background(folder).await
+                        moonbeauty::libraries::backend::email::client::sync_bodies_background(
+                            folder,
+                        )
+                        .await
                     },
                     |_| Message::Email(EmailMessage::SyncDone),
                 );
@@ -194,8 +193,7 @@ impl MoonBeautyShellApp {
                 if self.email.fullscreen_read {
                     return Command::none();
                 }
-                if self.email.is_composing && !self.email.get_autocomplete_matches().is_empty()
-                {
+                if self.email.is_composing && !self.email.get_autocomplete_matches().is_empty() {
                     let target = match msg {
                         EmailMessage::SelectMailNext => EmailMessage::SelectAutocompleteNext,
                         _ => EmailMessage::SelectAutocompletePrev,
@@ -221,16 +219,14 @@ impl MoonBeautyShellApp {
                         let row_h = fs_main * 1.2 + fs_sub * 1.2 + 24.0;
                         let idx = self.email.selected_index as f32;
                         let scroll_y = (idx * row_h - 200.0).max(0.0);
-                        let scroll_cmd: Command<Message> =
-                            iced::widget::operation::scroll_to(
-                                iced::widget::Id::new("email_mail_list"),
-                                iced::widget::scrollable::AbsoluteOffset {
-                                    x: 0.0,
-                                    y: scroll_y,
-                                },
-                            );
-                        let fetch_cmd =
-                            self.update(Message::Email(EmailMessage::SelectMail(id)));
+                        let scroll_cmd: Command<Message> = iced::widget::operation::scroll_to(
+                            iced::widget::Id::new("email_mail_list"),
+                            iced::widget::scrollable::AbsoluteOffset {
+                                x: 0.0,
+                                y: scroll_y,
+                            },
+                        );
+                        let fetch_cmd = self.update(Message::Email(EmailMessage::SelectMail(id)));
                         return Command::batch(vec![fetch_cmd, scroll_cmd]);
                     }
                 }
@@ -247,12 +243,15 @@ impl MoonBeautyShellApp {
                             Command::done(Message::Email(EmailMessage::SetLoading)),
                             Command::perform(
                                 async move {
-                                    moonbeauty::libraries::backend::email::client::fetch_envelopes(&f_fetch).await
+                                    moonbeauty::libraries::backend::email::client::fetch_envelopes(
+                                        &f_fetch,
+                                    )
+                                    .await
                                 },
                                 move |res| match res {
-                                    Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(
-                                        f_resp, envs,
-                                    )),
+                                    Ok(envs) => {
+                                        Message::Email(EmailMessage::EnvelopesLoaded(f_resp, envs))
+                                    }
                                     Err(e) => Message::Email(EmailMessage::Error(e)),
                                 },
                             ),
@@ -287,9 +286,7 @@ impl MoonBeautyShellApp {
                         // the header couldn't be parsed into a bare address.
                         let to_addr = if !env.sender_email.trim().is_empty() {
                             env.sender_email.clone()
-                        } else if !env.sender.trim().is_empty()
-                            && env.sender.trim() != "Unknown"
-                        {
+                        } else if !env.sender.trim().is_empty() && env.sender.trim() != "Unknown" {
                             env.sender.clone()
                         } else {
                             String::new()
@@ -313,9 +310,7 @@ impl MoonBeautyShellApp {
                             .unwrap_or_default();
                         let mut reply_body = String::new();
                         reply_body.push_str("\n\n--- Original message ---\n");
-                        if !env.sender_email.trim().is_empty()
-                            && env.sender_email != env.sender
-                        {
+                        if !env.sender_email.trim().is_empty() && env.sender_email != env.sender {
                             reply_body.push_str(&format!(
                                 "From: {} <{}>\n",
                                 env.sender, env.sender_email
@@ -351,11 +346,9 @@ impl MoonBeautyShellApp {
                         self.email.compose_attachments.clear();
                         self.email.fullscreen_read = false;
                         self.email.reply_from_fullview = true;
-                        return iced::widget::operation::focus(
-                            iced::widget::Id::new(
-                                moonbeauty::overlays::email::COMPOSE_BODY_ID,
-                            ),
-                        )
+                        return iced::widget::operation::focus(iced::widget::Id::new(
+                            moonbeauty::overlays::email::COMPOSE_BODY_ID,
+                        ))
                         .map(Message::Email);
                     }
                     // No loaded envelope to reply to; just exit.
@@ -375,7 +368,10 @@ impl MoonBeautyShellApp {
                         self.email.update(EmailMessage::SelectMail(id.clone()));
                         return Command::perform(
                             async move {
-                                moonbeauty::libraries::backend::email::client::read_message(&id, &folder).await
+                                moonbeauty::libraries::backend::email::client::read_message(
+                                    &id, &folder,
+                                )
+                                .await
                             },
                             |body| Message::Email(EmailMessage::MessageLoaded(body)),
                         );
@@ -430,9 +426,7 @@ impl MoonBeautyShellApp {
 
                         if !is_trash {
                             let mut trash_envs =
-                                moonbeauty::libraries::backend::email::client::load_index(
-                                    "Trash",
-                                );
+                                moonbeauty::libraries::backend::email::client::load_index("Trash");
                             trash_envs.insert(0, mail_clone);
                             moonbeauty::libraries::backend::email::client::save_index(
                                 "Trash",
@@ -443,9 +437,15 @@ impl MoonBeautyShellApp {
                         return Command::perform(
                             async move {
                                 if is_trash {
-                                    moonbeauty::libraries::backend::email::client::delete_message(&id, &folder).await
+                                    moonbeauty::libraries::backend::email::client::delete_message(
+                                        &id, &folder,
+                                    )
+                                    .await
                                 } else {
-                                    moonbeauty::libraries::backend::email::client::move_to_trash(&id, &folder).await
+                                    moonbeauty::libraries::backend::email::client::move_to_trash(
+                                        &id, &folder,
+                                    )
+                                    .await
                                 }
                             },
                             |res| match res {
@@ -545,10 +545,7 @@ impl MoonBeautyShellApp {
                     );
                     return Command::perform(
                         async move {
-                            moonbeauty::libraries::backend::email::client::mark_not_spam(
-                                &id,
-                            )
-                            .await
+                            moonbeauty::libraries::backend::email::client::mark_not_spam(&id).await
                         },
                         |res| match res {
                             Ok(_) => Message::Email(EmailMessage::SyncDone),
@@ -563,7 +560,8 @@ impl MoonBeautyShellApp {
                     if !email.is_empty() {
                         return Command::perform(
                             async move {
-                                moonbeauty::libraries::backend::email::client::save_contact(&email).await
+                                moonbeauty::libraries::backend::email::client::save_contact(&email)
+                                    .await
                             },
                             |res| match res {
                                 Ok(_) => Message::Email(EmailMessage::DraftSaved),
@@ -613,10 +611,8 @@ impl MoonBeautyShellApp {
                 self.email.fullscreen_read = false;
                 self.email.reply_from_fullview = false;
                 self.email.update(msg);
-                return iced::widget::operation::focus(
-                    moonbeauty::overlays::email::COMPOSE_TO_ID,
-                )
-                .map(Message::Email);
+                return iced::widget::operation::focus(moonbeauty::overlays::email::COMPOSE_TO_ID)
+                    .map(Message::Email);
             }
             EmailMessage::SaveLogin => {
                 let cfg = moonbeauty::libraries::backend::email::client::EmailConfig {
@@ -634,9 +630,7 @@ impl MoonBeautyShellApp {
                     },
                 };
                 let use_sops = self.email.use_sops;
-                match moonbeauty::libraries::backend::email::client::save_config(
-                    &cfg, use_sops,
-                ) {
+                match moonbeauty::libraries::backend::email::client::save_config(&cfg, use_sops) {
                     Ok(_) => {
                         self.email.is_logging_in = false;
                         self.email.login_error = None;
@@ -644,7 +638,10 @@ impl MoonBeautyShellApp {
                             Command::done(Message::Email(EmailMessage::SetLoading)),
                             Command::perform(
                                 async move {
-                                    moonbeauty::libraries::backend::email::client::fetch_envelopes("INBOX").await
+                                    moonbeauty::libraries::backend::email::client::fetch_envelopes(
+                                        "INBOX",
+                                    )
+                                    .await
                                 },
                                 |res| match res {
                                     Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(
@@ -662,7 +659,6 @@ impl MoonBeautyShellApp {
                 }
             }
             _ => self.email.update(msg),
-        
         }
         Command::none()
     }

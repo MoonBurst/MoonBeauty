@@ -13,7 +13,7 @@ use crate::libraries::config::ShellSettings;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
 use crate::libraries::style::TextExt;
 
-use crate::overlays::tooltip_common::{slanted_row, octagon_row, KillButtonShape};
+use crate::overlays::tooltip_common::{octagon_row, slanted_row, KillButtonShape};
 
 const W_START: f32 = 130.0;
 const AUTO_MS: u128 = 15_000;
@@ -397,8 +397,16 @@ impl App {
                 }
             }
             Message::MusicPlaySelected => {
-                if self.music_search_results.get(self.music_selected_idx).is_some() {
-                    let urls: Vec<String> = self.music_search_results.iter().map(|(_, u)| u.clone()).collect();
+                if self
+                    .music_search_results
+                    .get(self.music_selected_idx)
+                    .is_some()
+                {
+                    let urls: Vec<String> = self
+                        .music_search_results
+                        .iter()
+                        .map(|(_, u)| u.clone())
+                        .collect();
                     let idx = self.music_selected_idx;
                     return Task::perform(
                         async move {
@@ -410,9 +418,17 @@ impl App {
                     );
                 }
             }
-Message::MusicPlaySong(url) => {
-                if let Some(idx) = self.music_search_results.iter().position(|(_, u)| u == &url) {
-                    let urls: Vec<String> = self.music_search_results.iter().map(|(_, u)| u.clone()).collect();
+            Message::MusicPlaySong(url) => {
+                if let Some(idx) = self
+                    .music_search_results
+                    .iter()
+                    .position(|(_, u)| u == &url)
+                {
+                    let urls: Vec<String> = self
+                        .music_search_results
+                        .iter()
+                        .map(|(_, u)| u.clone())
+                        .collect();
                     return Task::perform(
                         async move {
                             crate::libraries::backend::MpdBackend::play_queue(&urls, idx).await;
@@ -423,7 +439,7 @@ Message::MusicPlaySong(url) => {
                     );
                 }
             }
-Message::MusicTrashConfirm => {
+            Message::MusicTrashConfirm => {
                 self.trash_confirm = true;
             }
             Message::MusicTrashExecute(url) => {
@@ -1813,13 +1829,10 @@ impl App {
     }
 }
 
-
 /// Octagon-aware row insets: content hugs the middle columns of a widened
 /// octagon, but the top and bottom rows are pulled inward proportionally
 /// to how far they sit inside the diagonal corner cut. Mirrors slanted_row,
 /// but for a 4-cut octagon instead of a 2-cut parallelogram.
-
-
 
 fn render_net_proc_row<'a>(
     p: &'a ProcessItem,

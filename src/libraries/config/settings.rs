@@ -85,7 +85,8 @@ pub fn find_friend_profiles_path() -> PathBuf {
                     if let Some(parent) = target.parent() {
                         let _ = fs::create_dir_all(parent);
                     }
-                    let _ = crate::libraries::process::private_write_file(&target, content.as_bytes());
+                    let _ =
+                        crate::libraries::process::private_write_file(&target, content.as_bytes());
                 }
             }
         }
@@ -124,7 +125,9 @@ pub enum ScreenshotSaveFormat {
 }
 
 impl Default for ScreenshotSaveFormat {
-    fn default() -> Self { Self::Png }
+    fn default() -> Self {
+        Self::Png
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,7 +228,10 @@ pub struct ShellSettings {
     pub global_padding: u16,
     #[serde(default = "default_capsule_spacing", alias = "capsuleSpacing")]
     pub capsule_spacing: i32,
-    #[serde(default = "default_capsule_internal_padding", alias = "capsuleInternalPadding")]
+    #[serde(
+        default = "default_capsule_internal_padding",
+        alias = "capsuleInternalPadding"
+    )]
     pub capsule_internal_padding: u32,
     #[serde(default = "default_cpu_temp_warn", alias = "cpuTempWarn")]
     pub cpu_temp_warn: u32,
@@ -247,7 +253,10 @@ pub struct ShellSettings {
     pub tray_icon_size: u32,
     #[serde(default = "default_launcher_icon_size", alias = "launcherIconSize")]
     pub launcher_icon_size: u32,
-    #[serde(default = "default_clipboard_thumbnail_size", alias = "clipboardThumbnailSize")]
+    #[serde(
+        default = "default_clipboard_thumbnail_size",
+        alias = "clipboardThumbnailSize"
+    )]
     pub clipboard_thumbnail_size: u32,
     #[serde(
         default = "default_poll_interval",
@@ -370,7 +379,6 @@ pub struct ShellSettings {
 
     #[serde(default, alias = "screenshotSaveFormat")]
     pub screenshot_save_format: ScreenshotSaveFormat,
-
 
     /// Emails from a single sender that trigger automatic folder creation.
     /// 0 disables auto-sort entirely.

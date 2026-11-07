@@ -24,9 +24,7 @@ impl MoonBeautyShellApp {
                 {
                     let _ = std::fs::remove_file(&json_path);
                     std::process::exit(
-                        match moonbeauty::bar::tray::context::run(
-                            items, bus, menu_path, w, h,
-                        ) {
+                        match moonbeauty::bar::tray::context::run(items, bus, menu_path, w, h) {
                             Ok(_) => 0,
                             Err(_) => 1,
                         },
@@ -125,10 +123,7 @@ impl MoonBeautyShellApp {
                         return;
                     }
                 };
-                eprintln!(
-                    "[bar] TTY watcher active (desktop_tty={:?})",
-                    desktop_tty
-                );
+                eprintln!("[bar] TTY watcher active (desktop_tty={:?})", desktop_tty);
                 let mut last_tty = Some(desktop_tty.clone());
                 loop {
                     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -139,8 +134,7 @@ impl MoonBeautyShellApp {
                     if now_tty.as_deref() == Some(desktop_tty.as_str())
                         && last_tty.as_deref() != Some(desktop_tty.as_str())
                     {
-                        let is_systemd =
-                            std::env::var_os("INVOCATION_ID").is_some();
+                        let is_systemd = std::env::var_os("INVOCATION_ID").is_some();
                         eprintln!(
                             "[bar] TTY return to desktop (from {:?}), \
                              is_systemd={}",
@@ -149,11 +143,9 @@ impl MoonBeautyShellApp {
                         if is_systemd {
                             std::process::exit(0);
                         } else {
-                            let _ = std::process::Command::new(
-                                crate::resolve_exe(),
-                            )
-                            .arg("--restart-bar")
-                            .spawn();
+                            let _ = std::process::Command::new(crate::resolve_exe())
+                                .arg("--restart-bar")
+                                .spawn();
                             std::process::exit(0);
                         }
                     }
@@ -220,9 +212,7 @@ impl MoonBeautyShellApp {
             active_overlay: standalone_target.clone(),
             weather_tooltip_child: None,
             is_standalone,
-            system_collector: std::sync::Arc::new(std::sync::Mutex::new(
-                SystemCollector::new(),
-            )),
+            system_collector: std::sync::Arc::new(std::sync::Mutex::new(SystemCollector::new())),
             standalone_child: None,
             is_notif_surface,
             notif_rx,
@@ -360,11 +350,7 @@ impl MoonBeautyShellApp {
             init_tasks.push(Command::done(Message::FetchTrayItems));
             init_tasks.push(Command::done(Message::TickHardware));
             init_tasks.push(Command::perform(
-                async {
-                    moonbeauty::bar::weather::WeatherBackend::fetch()
-                        .await
-                        .ok()
-                },
+                async { moonbeauty::bar::weather::WeatherBackend::fetch().await.ok() },
                 Message::WeatherLoaded,
             ));
         }
@@ -404,10 +390,8 @@ impl MoonBeautyShellApp {
             ));
         } else if matches!(app.active_overlay, Some(OverlayTarget::Dictionary)) {
             init_tasks.push(
-                iced::widget::operation::focus(
-                    moonbeauty::overlays::dictionary::DICT_SEARCH_ID,
-                )
-                .map(Message::Dict),
+                iced::widget::operation::focus(moonbeauty::overlays::dictionary::DICT_SEARCH_ID)
+                    .map(Message::Dict),
             );
             init_tasks.push(Command::perform(
                 async {
@@ -453,10 +437,8 @@ impl MoonBeautyShellApp {
 
         if matches!(app.active_overlay, Some(OverlayTarget::Unicode)) {
             init_tasks.push(
-                iced::widget::operation::focus(
-                    moonbeauty::overlays::unicode::UNICODE_INPUT_ID,
-                )
-                .map(Message::Unicode),
+                iced::widget::operation::focus(moonbeauty::overlays::unicode::UNICODE_INPUT_ID)
+                    .map(Message::Unicode),
             );
             init_tasks.push(Command::perform(
                 async {
@@ -469,9 +451,7 @@ impl MoonBeautyShellApp {
         if matches!(app.active_overlay, Some(OverlayTarget::Email)) {
             init_tasks.push(Command::done(Message::Email(EmailMessage::SetLoading)));
             init_tasks.push(Command::perform(
-                async {
-                    moonbeauty::libraries::backend::email::client::fetch_folder_list().await
-                },
+                async { moonbeauty::libraries::backend::email::client::fetch_folder_list().await },
                 |res| match res {
                     Ok(folders) => Message::Email(EmailMessage::FoldersLoaded(folders)),
                     Err(_) => Message::Email(EmailMessage::SyncDone),
@@ -479,8 +459,7 @@ impl MoonBeautyShellApp {
             ));
             init_tasks.push(Command::perform(
                 async {
-                    moonbeauty::libraries::backend::email::client::fetch_envelopes("INBOX")
-                        .await
+                    moonbeauty::libraries::backend::email::client::fetch_envelopes("INBOX").await
                 },
                 |res| match res {
                     Ok(envs) => {
@@ -493,10 +472,8 @@ impl MoonBeautyShellApp {
 
         if matches!(app.active_overlay, Some(OverlayTarget::Reminders)) {
             init_tasks.push(
-                iced::widget::operation::focus(
-                    moonbeauty::overlays::reminders::REMINDER_TASK_ID,
-                )
-                .map(Message::Reminders),
+                iced::widget::operation::focus(moonbeauty::overlays::reminders::REMINDER_TASK_ID)
+                    .map(Message::Reminders),
             );
             init_tasks.push(Command::perform(
                 async {
@@ -518,9 +495,12 @@ impl MoonBeautyShellApp {
             // Using f32::MAX is the standard iced idiom to pin to the end.
             init_tasks.push(iced::widget::operation::scroll_to(
                 iced::widget::Id::new("history_list"),
-                iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: f32::MAX },
+                iced::widget::scrollable::AbsoluteOffset {
+                    x: 0.0,
+                    y: f32::MAX,
+                },
             ));
-            
+
             init_tasks.push(Command::perform(
                 async move {
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;

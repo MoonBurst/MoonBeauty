@@ -41,7 +41,10 @@ pub(crate) fn secure_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Res
     f.write_all(bytes)
 }
 
-pub(crate) async fn secure_write_async(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) async fn secure_write_async(
+    path: &std::path::Path,
+    bytes: &[u8],
+) -> std::io::Result<()> {
     use tokio::io::AsyncWriteExt as _;
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;

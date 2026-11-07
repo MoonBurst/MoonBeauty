@@ -983,9 +983,6 @@ impl App {
     }
 }
 
-
-
-
 pub fn run() -> Result<(), iced_layershell::Error> {
     let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
     let s = ShellSettings::load();

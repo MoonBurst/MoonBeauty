@@ -219,7 +219,9 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             // JPEG XL: either the 12-byte container signature or a bare
             // codestream (starts with 0xFF 0x0A).
             let is_jxl = bytes.starts_with(&[0xFF, 0x0A])
-                || bytes.starts_with(&[0x00, 0x00, 0x00, 0x0C, 0x4A, 0x58, 0x4C, 0x20, 0x0D, 0x0A, 0x87, 0x0A]);
+                || bytes.starts_with(&[
+                    0x00, 0x00, 0x00, 0x0C, 0x4A, 0x58, 0x4C, 0x20, 0x0D, 0x0A, 0x87, 0x0A,
+                ]);
             let is_image = is_jxl
                 || bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47])
                 || bytes.starts_with(&[0xFF, 0xD8, 0xFF])
@@ -242,7 +244,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             };
             let path = dir.join(format!("{}.{}", id, ext));
             let _ = moonbeauty::libraries::process::private_write_file(&path, &bytes);
-            
+
             // Pre-generate the 512x512 preview so the long-running UI
             // process never has to decode the full 4K image later.
             if is_image {
@@ -255,11 +257,17 @@ pub fn main() -> Result<(), iced_layershell::Error> {
                 let mut ingested = 0usize;
                 for line in text.lines() {
                     let line = line.trim();
-                    if line.is_empty() || line.starts_with('#') { continue; }
+                    if line.is_empty() || line.starts_with('#') {
+                        continue;
+                    }
                     let path_str = line.strip_prefix("file://").unwrap_or(line);
                     let path = std::path::PathBuf::from(path_str);
-                    if !path.is_file() { continue; }
-                    if moonbeauty::overlays::clipboard::ClipboardOverlay::add_entry(&path, None).is_some() {
+                    if !path.is_file() {
+                        continue;
+                    }
+                    if moonbeauty::overlays::clipboard::ClipboardOverlay::add_entry(&path, None)
+                        .is_some()
+                    {
                         ingested += 1;
                         eprintln!("[clipboard-ingest] URI: {}", path.display());
                     }
@@ -305,7 +313,11 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             // for rows written before this patch).
             if let Some(top) = items.first_mut() {
                 if top.content_hash.is_none() {
-                    if let Some(p) = moonbeauty::overlays::clipboard::ClipboardOverlay::get_file_path(&dir, top.id) {
+                    if let Some(p) =
+                        moonbeauty::overlays::clipboard::ClipboardOverlay::get_file_path(
+                            &dir, top.id,
+                        )
+                    {
                         if let Ok(b) = std::fs::read(&p) {
                             use sha2::Digest as _;
                             top.content_hash = Some(format!("{:x}", sha2::Sha256::digest(&b)));
@@ -314,8 +326,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
                 }
             }
 
-            if items.first().and_then(|t| t.content_hash.as_deref())
-                == Some(incoming_hash.as_str())
+            if items.first().and_then(|t| t.content_hash.as_deref()) == Some(incoming_hash.as_str())
             {
                 eprintln!("[clipboard-ingest] duplicate content, skipping insert");
                 // The mbs-last-clip-name.txt we may have read from the
@@ -338,15 +349,13 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
             if let Ok(json) = serde_json::to_string(&items) {
                 let tmp = dir.join("index.json.tmp");
-                if moonbeauty::libraries::process::private_write_file(&tmp, json.as_bytes()).is_ok() {
+                if moonbeauty::libraries::process::private_write_file(&tmp, json.as_bytes()).is_ok()
+                {
                     let _ = std::fs::rename(&tmp, &index_path);
                     // Purge AFTER successful write: if the write fails,
                     // the old index still references files we would
                     // have deleted.
-                    moonbeauty::overlays::clipboard::ClipboardOverlay::purge_orphans(
-                        &dir,
-                        &items,
-                    );
+                    moonbeauty::overlays::clipboard::ClipboardOverlay::purge_orphans(&dir, &items);
                     eprintln!(
                         "[clipboard-ingest] Saved {} items, is_image={}",
                         items.len(),
@@ -416,12 +425,9 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     // Notification CLI actions
     if args.iter().any(|a| a == "--activate-latest-notif") {
-        let cmd_path = moonbeauty::libraries::process::mbs_runtime_dir()
-            .join("moonbeauty-notif-cmd");
-        match moonbeauty::libraries::process::private_write_file(
-            &cmd_path,
-            b"activate-latest",
-        ) {
+        let cmd_path =
+            moonbeauty::libraries::process::mbs_runtime_dir().join("moonbeauty-notif-cmd");
+        match moonbeauty::libraries::process::private_write_file(&cmd_path, b"activate-latest") {
             Ok(_) => std::process::exit(0),
             Err(e) => {
                 eprintln!("[activate-latest] write {:?}: {e}", cmd_path);
@@ -430,8 +436,8 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         }
     }
     if args.iter().any(|a| a == "--dismiss-notif") {
-        let cmd_path = moonbeauty::libraries::process::mbs_runtime_dir()
-            .join("moonbeauty-notif-cmd");
+        let cmd_path =
+            moonbeauty::libraries::process::mbs_runtime_dir().join("moonbeauty-notif-cmd");
         match moonbeauty::libraries::process::private_write_file(&cmd_path, b"dismiss") {
             Ok(_) => std::process::exit(0),
             Err(e) => {
@@ -516,9 +522,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
                     }
                 }
             }
-            eprintln!(
-                "[restart-bar] delegating to systemctl --user restart moonbeauty.service"
-            );
+            eprintln!("[restart-bar] delegating to systemctl --user restart moonbeauty.service");
             let _ = std::process::Command::new("systemctl")
                 .args(["--user", "restart", "moonbeauty.service"])
                 .status();
@@ -652,8 +656,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         let min_x = outputs.iter().map(|(_, x, _, _, _)| *x).min().unwrap_or(0);
         let min_y = outputs.iter().map(|(_, _, y, _, _)| *y).min().unwrap_or(0);
 
-        let state_file =
-            moonbeauty::libraries::process::mbs_unique_tmp("mbs-freeze-state", "txt");
+        let state_file = moonbeauty::libraries::process::mbs_unique_tmp("mbs-freeze-state", "txt");
         screenshot::fragment::write_state_file(&state_file, "idle", 0, 0, 0, 0);
 
         let exe = resolve_exe();
@@ -671,19 +674,18 @@ pub fn main() -> Result<(), iced_layershell::Error> {
                 &format!("mbs-freeze-{}", name),
                 "png",
             );
-            let write_ok =
-                match moonbeauty::libraries::process::private_create_new(&local_png) {
-                    Ok(mut f) => {
-                        let ok = image::DynamicImage::ImageRgba8(crop)
-                            .write_to(&mut f, image::ImageFormat::Png)
-                            .is_ok();
-                        if !ok {
-                            let _ = std::fs::remove_file(&local_png);
-                        }
-                        ok
+            let write_ok = match moonbeauty::libraries::process::private_create_new(&local_png) {
+                Ok(mut f) => {
+                    let ok = image::DynamicImage::ImageRgba8(crop)
+                        .write_to(&mut f, image::ImageFormat::Png)
+                        .is_ok();
+                    if !ok {
+                        let _ = std::fs::remove_file(&local_png);
                     }
-                    Err(_) => false,
-                };
+                    ok
+                }
+                Err(_) => false,
+            };
             if !write_ok {
                 eprintln!("[screenshot] crop write failed: {}", local_png.display());
                 continue;
@@ -763,8 +765,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         }
 
         let cropped = image::imageops::crop_imm(&full_img, rx, ry, rw, rh).to_image();
-        let out_path =
-            moonbeauty::libraries::process::mbs_unique_tmp("mbs-freeze-out", "png");
+        let out_path = moonbeauty::libraries::process::mbs_unique_tmp("mbs-freeze-out", "png");
         let save_ok = match moonbeauty::libraries::process::private_create_new(&out_path) {
             Ok(mut f) => {
                 let ok = image::DynamicImage::ImageRgba8(cropped)
@@ -901,7 +902,11 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     if !is_notif_surface && standalone_target.is_none() {
         let _ = std::process::Command::new("pkill")
-            .args(["-f", "--", "(^|/)(moonbeauty|moon-beauty-shell) --notif-surface$"])
+            .args([
+                "-f",
+                "--",
+                "(^|/)(moonbeauty|moon-beauty-shell) --notif-surface$",
+            ])
             .status();
         std::thread::sleep(std::time::Duration::from_millis(300));
         let exe = resolve_exe();
@@ -1278,5 +1283,3 @@ fn handle_annotator_text_input(
 
     None
 }
-
-

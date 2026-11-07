@@ -19,10 +19,8 @@ impl MoonBeautyShellApp {
                 self.active_overlay = None;
             }
             CalcMessage::Refocus => {
-                return iced::widget::operation::focus(
-                    moonbeauty::overlays::calc::CALC_INPUT_ID,
-                )
-                .map(Message::Calc);
+                return iced::widget::operation::focus(moonbeauty::overlays::calc::CALC_INPUT_ID)
+                    .map(Message::Calc);
             }
             CalcMessage::CopyResult(val) => {
                 if self.is_standalone {
@@ -42,7 +40,6 @@ impl MoonBeautyShellApp {
                 );
             }
             _ => self.calc.update(msg),
-        
         }
         Command::none()
     }
@@ -56,13 +53,10 @@ impl MoonBeautyShellApp {
                 self.active_overlay = None;
             }
             NotesMessage::Refocus => {
-                return iced::widget::operation::focus(
-                    moonbeauty::overlays::notes::NOTES_INPUT_ID,
-                )
-                .map(Message::Notes);
+                return iced::widget::operation::focus(moonbeauty::overlays::notes::NOTES_INPUT_ID)
+                    .map(Message::Notes);
             }
             _ => self.notes.update(msg),
-        
         }
         Command::none()
     }
@@ -76,19 +70,15 @@ impl MoonBeautyShellApp {
                 self.active_overlay = None;
             }
             TodoMessage::Refocus => {
-                return iced::widget::operation::focus(
-                    moonbeauty::overlays::todo::TODO_INPUT_ID,
-                )
-                .map(Message::Todo);
+                return iced::widget::operation::focus(moonbeauty::overlays::todo::TODO_INPUT_ID)
+                    .map(Message::Todo);
             }
             TodoMessage::EditSelected | TodoMessage::EditTask(_) => {
                 self.todo.update(msg);
                 // Refocus the input so the user can type immediately
                 // after clicking ✎ or pressing F2.
-                return iced::widget::operation::focus(
-                    moonbeauty::overlays::todo::TODO_INPUT_ID,
-                )
-                .map(Message::Todo);
+                return iced::widget::operation::focus(moonbeauty::overlays::todo::TODO_INPUT_ID)
+                    .map(Message::Todo);
             }
             TodoMessage::TaskSelectPrev | TodoMessage::TaskSelectNext => {
                 self.todo.update(msg);
@@ -102,12 +92,8 @@ impl MoonBeautyShellApp {
                         .filter(|t| t.category == self.todo.active_category)
                         .filter(|t| match self.todo.filter {
                             moonbeauty::overlays::todo::TodoFilter::All => true,
-                            moonbeauty::overlays::todo::TodoFilter::Active => {
-                                !t.completed
-                            }
-                            moonbeauty::overlays::todo::TodoFilter::Completed => {
-                                t.completed
-                            }
+                            moonbeauty::overlays::todo::TodoFilter::Active => !t.completed,
+                            moonbeauty::overlays::todo::TodoFilter::Completed => t.completed,
                         })
                         .map(|t| t.id)
                         .collect();
@@ -122,7 +108,6 @@ impl MoonBeautyShellApp {
                 }
             }
             _ => self.todo.update(msg),
-        
         }
         Command::none()
     }
@@ -174,7 +159,6 @@ impl MoonBeautyShellApp {
                 );
             }
             _ => self.dict.update(msg),
-        
         }
         Command::none()
     }
@@ -236,7 +220,6 @@ impl MoonBeautyShellApp {
                 self.active_overlay = None;
             }
             _ => self.unicode.update(msg),
-        
         }
         Command::none()
     }
@@ -257,9 +240,7 @@ impl MoonBeautyShellApp {
                         // exit(0) raced: the spawned task could be killed
                         // before it forked xdg-open, so Enter sometimes
                         // did nothing.
-                        let _ = std::process::Command::new("xdg-open")
-                            .arg(&url)
-                            .spawn();
+                        let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
                         std::process::exit(0);
                     }
                     self.active_overlay = None;
@@ -272,7 +253,6 @@ impl MoonBeautyShellApp {
                 }
             }
             _ => self.web.update(msg),
-        
         }
         Command::none()
     }
@@ -292,7 +272,6 @@ impl MoonBeautyShellApp {
                 }
                 self.active_overlay = None;
             }
-        
         }
         Command::none()
     }
@@ -312,7 +291,6 @@ impl MoonBeautyShellApp {
                 });
             }
             _ => self.amogus.update(msg),
-        
         }
         Command::none()
     }
@@ -326,7 +304,6 @@ impl MoonBeautyShellApp {
                 self.active_overlay = None;
             }
             _ => self.rng.update(msg),
-        
         }
         Command::none()
     }
@@ -340,10 +317,8 @@ impl MoonBeautyShellApp {
                 self.active_overlay = None;
             }
             PassMessage::Refocus => {
-                return iced::widget::operation::focus(
-                    moonbeauty::overlays::pass::PASS_SEARCH_ID,
-                )
-                .map(Message::Pass);
+                return iced::widget::operation::focus(moonbeauty::overlays::pass::PASS_SEARCH_ID)
+                    .map(Message::Pass);
             }
             PassMessage::CopyKey(k) => {
                 if self.is_standalone {
@@ -362,9 +337,7 @@ impl MoonBeautyShellApp {
                 );
             }
             _ => self.pass.update(msg),
-        
         }
         Command::none()
     }
-
 }

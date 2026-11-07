@@ -328,8 +328,7 @@ impl EmailOverlay {
                 // Real bodies start with whatever the sender wrote;
                 // SendMail confirmations start with ✓ or ✗.
                 let trimmed = b.text.trim_start();
-                let is_synthetic = trimmed.starts_with('✓')
-                    || trimmed.starts_with('✗');
+                let is_synthetic = trimmed.starts_with('✓') || trimmed.starts_with('✗');
                 if !is_synthetic {
                     if let Some(id) = self.active_mail_id.clone() {
                         // Cap the cache at 5 entries to prevent memory leaks.
@@ -1025,7 +1024,8 @@ impl EmailOverlay {
 
         let mail_pane = Stack::new().push(mail_bg.view()).push(
             container(
-                scrollable(mail_col).id(iced::widget::Id::new("email_mail_list"))
+                scrollable(mail_col)
+                    .id(iced::widget::Id::new("email_mail_list"))
                     .width(Length::Fill)
                     .height(Length::Fill),
             )
@@ -1343,47 +1343,38 @@ impl EmailOverlay {
                 .find(|e| Some(&e.id) == self.active_mail_id.as_ref())
                 .map(|e| (e.subject.clone(), e.sender.clone()))
                 .unwrap_or_default();
-            let back_btn = button(
-                text("\u{2190} Back (Esc)").size(fs_sub).color(theme.text),
-            )
-            .on_press(EmailMessage::ExitFullscreen)
-            .padding([6, 12])
-            .style(move |_t, _s| button::Style {
-                background: Some(iced::Background::Color(theme.surface_alt)),
-                border: iced::Border {
-                    color: theme.border,
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            });
+            let back_btn = button(text("\u{2190} Back (Esc)").size(fs_sub).color(theme.text))
+                .on_press(EmailMessage::ExitFullscreen)
+                .padding([6, 12])
+                .style(move |_t, _s| button::Style {
+                    background: Some(iced::Background::Color(theme.surface_alt)),
+                    border: iced::Border {
+                        color: theme.border,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                });
             let fullscreen_header = container(
                 row![
                     back_btn,
                     iced::widget::space::horizontal(),
-                    text(cur_subject)
-                        .size(fs_head)
-                        .bold()
-                        .color(theme.text),
+                    text(cur_subject).size(fs_head).bold().color(theme.text),
                     iced::widget::space::horizontal(),
                     text(cur_sender).size(fs_sub).color(theme.muted),
-                    text("· Enter to reply ·")
-                        .size(fs_sub)
-                        .color(theme.muted),
-                    button(
-                        text("↩ Reply").size(fs_sub).color(theme.text),
-                    )
-                    .on_press(EmailMessage::OpenSelected)
-                    .padding([4, 8])
-                    .style(move |_t, _s| button::Style {
-                        background: Some(iced::Background::Color(theme.surface_alt)),
-                        border: iced::Border {
-                            color: theme.border,
-                            width: 1.0,
-                            radius: 4.0.into(),
-                        },
-                        ..Default::default()
-                    }),
+                    text("· Enter to reply ·").size(fs_sub).color(theme.muted),
+                    button(text("↩ Reply").size(fs_sub).color(theme.text),)
+                        .on_press(EmailMessage::OpenSelected)
+                        .padding([4, 8])
+                        .style(move |_t, _s| button::Style {
+                            background: Some(iced::Background::Color(theme.surface_alt)),
+                            border: iced::Border {
+                                color: theme.border,
+                                width: 1.0,
+                                radius: 4.0.into(),
+                            },
+                            ..Default::default()
+                        }),
                 ]
                 .spacing(16)
                 .align_y(iced::alignment::Vertical::Center)
@@ -1471,26 +1462,19 @@ impl EmailOverlay {
                     },
                     ..Default::default()
                 }),
-            if self.parsed_email.is_some()
-                && !self.is_composing
-                && !self.fullscreen_read
-            {
-                button(
-                    text("⛶ Full View (Enter)")
-                        .size(fs_sub)
-                        .color(theme.text),
-                )
-                .on_press(EmailMessage::ToggleFullscreen)
-                .padding([4, 8])
-                .style(move |_t, _s| button::Style {
-                    background: Some(iced::Background::Color(theme.surface_alt)),
-                    border: iced::Border {
-                        color: theme.border,
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                })
+            if self.parsed_email.is_some() && !self.is_composing && !self.fullscreen_read {
+                button(text("⛶ Full View (Enter)").size(fs_sub).color(theme.text))
+                    .on_press(EmailMessage::ToggleFullscreen)
+                    .padding([4, 8])
+                    .style(move |_t, _s| button::Style {
+                        background: Some(iced::Background::Color(theme.surface_alt)),
+                        border: iced::Border {
+                            color: theme.border,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
+                    })
             } else {
                 button(text("")).padding(0).style(|_t, _s| button::Style {
                     background: None,

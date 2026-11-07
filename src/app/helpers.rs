@@ -76,8 +76,7 @@ impl MoonBeautyShellApp {
         let id = id.to_string();
         // Recent click => use cursor position for dynamic placement.
         // Fallback to capsule_center_x if no click in last 5s (e.g. IPC trigger).
-        let recent_click =
-            self.last_cursor_time.elapsed() < std::time::Duration::from_secs(5);
+        let recent_click = self.last_cursor_time.elapsed() < std::time::Duration::from_secs(5);
         // Toggle off if already open
         let running = self
             .weather_tooltip_child
@@ -120,38 +119,37 @@ impl MoonBeautyShellApp {
         } else {
             capsule_center_x(&self.settings, sw, &id)
         };
-        let (slant_l, slant_r): (&str, &str) =
-            match self.settings.slant_mode.as_str() {
-                "left" => ("L", "L"),
-                "right" => ("R", "R"),
-                _ => {
-                    if in_center {
-                        let vis: Vec<&String> = self
-                            .settings
-                            .bar_center
-                            .iter()
-                            .filter(|x| {
-                                self.settings
-                                    .visible_capsules
-                                    .get(*x)
-                                    .copied()
-                                    .unwrap_or(true)
-                            })
-                            .collect();
-                        let k = vis.len() / 2;
-                        match vis.iter().position(|x| **x == id) {
-                            Some(i) if i == k => ("L", "R"),
-                            Some(i) if i < k => ("L", "L"),
-                            Some(_) => ("R", "R"),
-                            None => ("L", "R"),
-                        }
-                    } else if in_right {
-                        ("R", "R")
-                    } else {
-                        ("L", "L")
+        let (slant_l, slant_r): (&str, &str) = match self.settings.slant_mode.as_str() {
+            "left" => ("L", "L"),
+            "right" => ("R", "R"),
+            _ => {
+                if in_center {
+                    let vis: Vec<&String> = self
+                        .settings
+                        .bar_center
+                        .iter()
+                        .filter(|x| {
+                            self.settings
+                                .visible_capsules
+                                .get(*x)
+                                .copied()
+                                .unwrap_or(true)
+                        })
+                        .collect();
+                    let k = vis.len() / 2;
+                    match vis.iter().position(|x| **x == id) {
+                        Some(i) if i == k => ("L", "R"),
+                        Some(i) if i < k => ("L", "L"),
+                        Some(_) => ("R", "R"),
+                        None => ("L", "R"),
                     }
+                } else if in_right {
+                    ("R", "R")
+                } else {
+                    ("L", "L")
                 }
-            };
+            }
+        };
         let cap_w = capsule_actual_width(&id);
         let grow_right = if in_left {
             true
@@ -161,34 +159,28 @@ impl MoonBeautyShellApp {
             cx < (sw as i32) / 2
         };
         let (tip_w, _tip_h) = self.settings.tooltip_size(&id);
-        let tip_output = if self.settings.bar_monitor != "All"
-            && !self.settings.bar_monitor.is_empty()
-        {
-            Some(self.settings.bar_monitor.clone())
-        } else {
-            std::env::var("MBS_OUTPUT")
-                .ok()
-                .filter(|s| !s.is_empty())
-                .or_else(resolve_primary_output)
-        };
+        let tip_output =
+            if self.settings.bar_monitor != "All" && !self.settings.bar_monitor.is_empty() {
+                Some(self.settings.bar_monitor.clone())
+            } else {
+                std::env::var("MBS_OUTPUT")
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .or_else(resolve_primary_output)
+            };
 
         // Finding 76: per-capsule tooltip bias.
-        let (bias_l, bias_r) =
-            moonbeauty::bar::capsules::tooltip_bias(
-                &id,
-                &self.theme,
-            );
+        let (bias_l, bias_r) = moonbeauty::bar::capsules::tooltip_bias(&id, &self.theme);
         let req = moonbeauty::bar::tooltip_spawn::SpawnRequest {
             id: &id,
             exe: resolve_exe(),
             output: tip_output.as_deref(),
             tooltip_w: tip_w,
-            tooltip_h:
-                moonbeauty::bar::tooltip_spawn::compute_height(
-                    &id,
-                    &self.settings,
-                    &self.telemetry,
-                ),
+            tooltip_h: moonbeauty::bar::tooltip_spawn::compute_height(
+                &id,
+                &self.settings,
+                &self.telemetry,
+            ),
             drop_ms: self.settings.tooltip_drop_ms,
             expand_ms: self.settings.tooltip_expand_ms,
             capsule_cx: cx,
@@ -220,10 +212,7 @@ impl MoonBeautyShellApp {
     /// DND, tooltip cancel, tray expand/activate/context-menu, GPU
     /// cycle. Arms that mutate state without returning a Command
     /// fall through to `Command::none()`.
-    pub fn handle_capsule_action(
-        &mut self,
-        act: CapsuleAction,
-    ) -> Command<Message> {
+    pub fn handle_capsule_action(&mut self, act: CapsuleAction) -> Command<Message> {
         match act {
             CapsuleAction::OpenOverlay(id) => {
                 eprintln!("[topbar-action] OpenOverlay: id = {:?}", id);
@@ -325,7 +314,8 @@ impl MoonBeautyShellApp {
                     self.tray_anim_start_width = self.tray_anim_width;
                     self.tray_anim_started_at = std::time::Instant::now();
                     let expanded_w = moonbeauty::bar::capsules::compute_expanded_visible_width(
-                        &self.settings, self.tray_items.len()
+                        &self.settings,
+                        self.tray_items.len(),
                     );
                     self.tray_target_width = expanded_w;
                     self.tray_anim_duration_ms = 220;
@@ -347,11 +337,10 @@ impl MoonBeautyShellApp {
                 self.close_tray();
                 return Command::perform(
                     async move {
-                        let _ =
-                            moonbeauty::bar::tray::watcher::activate_tray_item(
-                                &item.bus, &item.path,
-                            )
-                            .await;
+                        let _ = moonbeauty::bar::tray::watcher::activate_tray_item(
+                            &item.bus, &item.path,
+                        )
+                        .await;
                     },
                     |_| Message::TopBar(TopBarMessage::Noop),
                 );
@@ -368,17 +357,14 @@ impl MoonBeautyShellApp {
                             .await
                         {
                             let json = serde_json::to_string(&items).unwrap();
-                            let tmp_path =
-                                moonbeauty::libraries::process::mbs_unique_tmp(
-                                    "mbs-tray-menu",
-                                    "json",
-                                );
-                            if let Err(e) =
-                                moonbeauty::libraries::process::private_write_new(
-                                    &tmp_path,
-                                    json.as_bytes(),
-                                )
-                            {
+                            let tmp_path = moonbeauty::libraries::process::mbs_unique_tmp(
+                                "mbs-tray-menu",
+                                "json",
+                            );
+                            if let Err(e) = moonbeauty::libraries::process::private_write_new(
+                                &tmp_path,
+                                json.as_bytes(),
+                            ) {
                                 eprintln!("[tray-menu] write failed: {e}");
                                 return;
                             }
@@ -427,8 +413,7 @@ impl MoonBeautyShellApp {
         moonbeauty::libraries::process::prune_standalone_logs();
         let exe = resolve_exe();
         let tag = target.as_arg();
-        let log_path =
-            moonbeauty::libraries::process::mbs_unique_tmp("mbs-standalone", "log");
+        let log_path = moonbeauty::libraries::process::mbs_unique_tmp("mbs-standalone", "log");
         let stderr_file = moonbeauty::libraries::process::private_create_new(&log_path).ok();
         let stdout_file = stderr_file.as_ref().and_then(|f| f.try_clone().ok());
 

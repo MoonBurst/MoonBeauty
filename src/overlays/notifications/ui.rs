@@ -395,7 +395,6 @@ use std::sync::Mutex;
 /// log spam (view_history is called on every Tick message, ~1/sec).
 static LOGGED_ICONS: Mutex<Option<HashSet<u32>>> = Mutex::new(None);
 
-
 /// $XDG_DATA_HOME/moonbeauty/avatars (created if missing).
 /// The pre-fix code resolved `resources/{name}/{name}.png` relative to
 /// process cwd, which is `/` or `~` under systemd — never the repo.
@@ -416,18 +415,27 @@ fn avatars_dir() -> std::path::PathBuf {
 /// skips when XDG target already exists.
 fn migrate_resources_to_xdg(name: &str) {
     let xdg = avatars_dir().join(name).join(format!("{}.png", name));
-    if xdg.exists() { return; }
+    if xdg.exists() {
+        return;
+    }
     let mut candidates: Vec<std::path::PathBuf> = Vec::new();
     candidates.push(
-        std::path::Path::new("resources").join(name).join(format!("{}.png", name))
+        std::path::Path::new("resources")
+            .join(name)
+            .join(format!("{}.png", name)),
     );
     if let Some(m) = option_env!("CARGO_MANIFEST_DIR") {
         candidates.push(
-            std::path::Path::new(m).join("resources").join(name).join(format!("{}.png", name))
+            std::path::Path::new(m)
+                .join("resources")
+                .join(name)
+                .join(format!("{}.png", name)),
         );
     }
     for legacy in candidates {
-        if !legacy.exists() { continue; }
+        if !legacy.exists() {
+            continue;
+        }
         if let Some(parent) = xdg.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -456,7 +464,8 @@ fn avatar_path_for(name: &str) -> Option<String> {
         return Some(fallback.to_string_lossy().into_owned());
     }
     let legacy_specific = std::path::Path::new("resources")
-        .join(name).join(format!("{}.png", name));
+        .join(name)
+        .join(format!("{}.png", name));
     if legacy_specific.exists() {
         return Some(legacy_specific.to_string_lossy().into_owned());
     }
@@ -826,9 +835,7 @@ impl NotificationOverlay {
         let avatar_path: Option<String> = match matched_profile {
             Some(p) => avatar_path_for(&p.name)
                 .or_else(|| desktop_entry.and_then(resolve_desktop_icon))
-                .or_else(|| {
-                    resolve_icon_name(&app_name.to_lowercase().replace(' ', "-"))
-                }),
+                .or_else(|| resolve_icon_name(&app_name.to_lowercase().replace(' ', "-"))),
             None => {
                 if let Some(p) = desktop_entry.and_then(resolve_desktop_icon) {
                     Some(p)
@@ -840,7 +847,9 @@ impl NotificationOverlay {
                         lower.replace(' ', "_"),
                         lower.split_whitespace().next().unwrap_or("").to_string(),
                     ];
-                    variants.iter().filter(|v| !v.is_empty())
+                    variants
+                        .iter()
+                        .filter(|v| !v.is_empty())
                         .find_map(|v| resolve_icon_name(v))
                 }
             }
@@ -1058,7 +1067,8 @@ impl NotificationOverlay {
             if !sender.is_empty() && looks_like_action(&sender) {
                 crate::dbg_log!(
                     "[tts-sanitize] rejecting action-phrase sender={:?}, using app={:?}",
-                    sender, a
+                    sender,
+                    a
                 );
                 sender = a.clone();
             }
@@ -1067,20 +1077,21 @@ impl NotificationOverlay {
             // the summary. Runs after the primary extraction so we can
             // also improve cases where the original path fell back to
             // the app name or used an action phrase as the "name".
-            let needs_better_sender = sender.is_empty()
-                || sender == a
-                || looks_like_action(&sender);
+            let needs_better_sender =
+                sender.is_empty() || sender == a || looks_like_action(&sender);
             if needs_better_sender {
                 if let Some(name) = extract_name_from_summary(&s) {
                     crate::dbg_log!(
                         "[tts-rescue] summary-extract name={:?} from summary={:?}",
-                        name, s
+                        name,
+                        s
                     );
                     sender = name;
                 } else if let Some(name) = extract_from_phrase(&s) {
                     crate::dbg_log!(
                         "[tts-rescue] from-phrase name={:?} from summary={:?}",
-                        name, s
+                        name,
+                        s
                     );
                     sender = name;
                 } else if sender.is_empty() || looks_like_action(&sender) {
@@ -1092,9 +1103,7 @@ impl NotificationOverlay {
             // an empty sender, or an action phrase, try to pull a
             // clean person name out of the summary. Horizon puts
             // the sender name directly in summary with no separator.
-            let needs_tts_rescue = sender.is_empty()
-                || sender == a
-                || looks_like_action(&sender);
+            let needs_tts_rescue = sender.is_empty() || sender == a || looks_like_action(&sender);
             if needs_tts_rescue {
                 let sender_before = sender.clone();
                 let mut rescued: Option<String> = None;
@@ -1109,7 +1118,9 @@ impl NotificationOverlay {
                     Some(n) => {
                         crate::dbg_log!(
                             "[tts-rescue2] summary={:?} sender {:?} -> {:?}",
-                            s, sender_before, n
+                            s,
+                            sender_before,
+                            n
                         );
                         sender = n;
                     }
@@ -1117,7 +1128,8 @@ impl NotificationOverlay {
                         if looks_like_action(&sender) || sender == a {
                             crate::dbg_log!(
                                 "[tts-rescue2] no name in summary={:?}, using app={:?}",
-                                s, a
+                                s,
+                                a
                             );
                             sender = a.clone();
                         }
@@ -1355,7 +1367,7 @@ impl NotificationOverlay {
                 self.pending_toasts.clear();
                 self.selected_history_id = None;
                 self.mark_history_dirty();
-            self.save_history_immediate();
+                self.save_history_immediate();
                 if let Ok(mut g) = LOGGED_ICONS.lock() {
                     if let Some(set) = g.as_mut() {
                         set.clear();
@@ -1368,7 +1380,7 @@ impl NotificationOverlay {
                     self.selected_history_id = None;
                 }
                 self.mark_history_dirty();
-            self.save_history_immediate();
+                self.save_history_immediate();
             }
             NotifMessage::HistorySelectNext => {
                 if self.history.is_empty() {
@@ -1402,7 +1414,7 @@ impl NotificationOverlay {
                     let pos = self.history.iter().position(|t| t.id == id);
                     self.history.retain(|t| t.id != id);
                     self.mark_history_dirty();
-            self.save_history_immediate();
+                    self.save_history_immediate();
 
                     self.selected_history_id = if self.history.is_empty() {
                         None
@@ -1522,8 +1534,7 @@ impl NotificationOverlay {
             let toast_text_color = hex_to_color(&toast.text_color);
             let avatar: Element<'_, NotifMessage> = if let Some(ref path) = toast.avatar_path {
                 let icon_size = (settings.notif_icon_size as f32).clamp(16.0, 128.0);
-                let (box_shape, box_size) =
-                    notif_icon_box_shape(&settings.notif_shape, icon_size);
+                let (box_shape, box_size) = notif_icon_box_shape(&settings.notif_shape, icon_size);
                 let icon_element: Element<'_, NotifMessage> = if path.ends_with(".svg") {
                     iced::widget::svg(iced::widget::svg::Handle::from_path(path.clone()))
                         .width(Length::Fixed(icon_size))
@@ -1565,50 +1576,53 @@ impl NotificationOverlay {
             // on click. No vertical centering gap.
             let toast_body = MouseArea::new(
                 container(
-                    row![
-                        avatar,
-                        {
-                            // Security: render app_name on the toast body.
-                            // Without this, any same-user process can send a
-                            // notification with app_name="Signal" and
-                            // summary="Alice" and trigger Alice's friend
-                            // profile match (color, sound path, TTS
-                            // template, avatar) with no visual tell. The
-                            // history panel already shows app_name; the
-                            // toast did not. Attribution here at least
-                            // surfaces the mismatch — the user sees
-                            // "via Signal" and can notice that the ping
-                            // claimed to be from Signal, not Alice.
-                            // Security attribution: show app_name inline with
-                            // the summary so a spoofed toast (app_name="Signal"
-                            // with summary="Alice") reveals the mismatch
-                            // immediately.
-                            let summary_row = if toast.app_name.is_empty() {
-                                row![text(&toast.summary)
+                    row![avatar, {
+                        // Security: render app_name on the toast body.
+                        // Without this, any same-user process can send a
+                        // notification with app_name="Signal" and
+                        // summary="Alice" and trigger Alice's friend
+                        // profile match (color, sound path, TTS
+                        // template, avatar) with no visual tell. The
+                        // history panel already shows app_name; the
+                        // toast did not. Attribution here at least
+                        // surfaces the mismatch — the user sees
+                        // "via Signal" and can notice that the ping
+                        // claimed to be from Signal, not Alice.
+                        // Security attribution: show app_name inline with
+                        // the summary so a spoofed toast (app_name="Signal"
+                        // with summary="Alice") reveals the mismatch
+                        // immediately.
+                        let summary_row = if toast.app_name.is_empty() {
+                            row![text(&toast.summary)
+                                .size((settings.notif_summary_size) as f32)
+                                .bold()
+                                .color(toast_text_color)
+                                .width(Length::Fill)
+                                .wrapping(iced::widget::text::Wrapping::Glyph)]
+                        } else {
+                            row![
+                                text(&toast.summary)
                                     .size((settings.notif_summary_size) as f32)
                                     .bold()
-                                    .color(toast_text_color)]
-                            } else {
-                                row![
-                                    text(&toast.summary)
-                                        .size((settings.notif_summary_size) as f32)
-                                        .bold()
-                                        .color(toast_text_color),
-                                    text(format!(" via {}", toast.app_name))
-                                        .size((settings.notif_summary_size.saturating_sub(2)) as f32)
-                                        .color(theme.focus),
-                                ]
-                            };
-                            let mut text_col = column![
-                                summary_row.width(Length::Fill),
-                                text(&toast.body)
-                                    .size((settings.notif_body_size) as f32)
                                     .color(toast_text_color)
-                                    .width(Length::Fill),
-                            ];
-                            text_col.width(Length::Fill).spacing(2)
-                        },
-                    ]
+                                    .width(Length::Fill)
+                                    .wrapping(iced::widget::text::Wrapping::Glyph),
+                                text(format!(" via {}", toast.app_name))
+                                    .size((settings.notif_summary_size.saturating_sub(2)) as f32)
+                                    .color(theme.focus)
+                                    .wrapping(iced::widget::text::Wrapping::Glyph),
+                            ]
+                        };
+                        let text_col = column![
+                            summary_row.width(Length::Fill),
+                            text(&toast.body)
+                                .size((settings.notif_body_size) as f32)
+                                .color(toast_text_color)
+                                .width(Length::Fill)
+                                .wrapping(iced::widget::text::Wrapping::Glyph),
+                        ];
+                        text_col.width(Length::Fill).spacing(2)
+                    },]
                     .spacing(12)
                     .align_y(Alignment::Center)
                     .width(Length::Fill)
@@ -1976,7 +1990,6 @@ impl NotificationOverlay {
     }
 }
 
-
 /// Heuristic: does this text describe an *action* (spoke, sent, started,
 /// joined, …) rather than a person? Used to prevent phrases like
 /// "spoke in room" from being misidentified as a sender name.
@@ -2005,12 +2018,48 @@ fn looks_like_clean_name(text: &str) -> bool {
         return false;
     }
     const GENERIC: &[&str] = &[
-        "new", "message", "messages", "voice", "activity", "notification",
-        "notifications", "alert", "alerts", "system", "test", "app",
-        "you", "have", "a", "an", "the", "this", "that", "incoming",
-        "audio", "video", "call", "missed", "recent", "update", "updates",
-        "reminder", "warning", "info", "success", "error", "received",
-        "unread", "from", "to", "in", "on", "at", "by", "here", "there",
+        "new",
+        "message",
+        "messages",
+        "voice",
+        "activity",
+        "notification",
+        "notifications",
+        "alert",
+        "alerts",
+        "system",
+        "test",
+        "app",
+        "you",
+        "have",
+        "a",
+        "an",
+        "the",
+        "this",
+        "that",
+        "incoming",
+        "audio",
+        "video",
+        "call",
+        "missed",
+        "recent",
+        "update",
+        "updates",
+        "reminder",
+        "warning",
+        "info",
+        "success",
+        "error",
+        "received",
+        "unread",
+        "from",
+        "to",
+        "in",
+        "on",
+        "at",
+        "by",
+        "here",
+        "there",
     ];
     words.iter().all(|w| {
         let starts_upper = w.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
@@ -2021,17 +2070,42 @@ fn looks_like_clean_name(text: &str) -> bool {
 
 fn looks_like_action(text: &str) -> bool {
     const VERBS: &[&str] = &[
-        "spoke", "speaks", "said", "says", "sent", "sends",
-        "started", "starts", "called", "calls", "joined", "joins",
-        "left", "leaves", "replied", "replies", "mentioned", "mentions",
-        "pinged", "pings", "posted", "posts", "reacted", "reacts",
-        "uploaded", "uploads", "shared", "shares",
-        "playing", "paused", "changed", "updated",
+        "spoke",
+        "speaks",
+        "said",
+        "says",
+        "sent",
+        "sends",
+        "started",
+        "starts",
+        "called",
+        "calls",
+        "joined",
+        "joins",
+        "left",
+        "leaves",
+        "replied",
+        "replies",
+        "mentioned",
+        "mentions",
+        "pinged",
+        "pings",
+        "posted",
+        "posts",
+        "reacted",
+        "reacts",
+        "uploaded",
+        "uploads",
+        "shared",
+        "shares",
+        "playing",
+        "paused",
+        "changed",
+        "updated",
     ];
-    VERBS.iter().any(|v| {
-        text.split_whitespace()
-            .any(|w| w.eq_ignore_ascii_case(v))
-    })
+    VERBS
+        .iter()
+        .any(|v| text.split_whitespace().any(|w| w.eq_ignore_ascii_case(v)))
 }
 
 /// Extract a leading name from "Alice spoke in room" -> "Alice".
@@ -2040,9 +2114,21 @@ fn looks_like_action(text: &str) -> bool {
 /// Activity".
 fn extract_leading_name(text: &str) -> Option<String> {
     const GENERIC_PREFIX: &[&str] = &[
-        "new", "a", "an", "the", "this", "that",
-        "voice", "audio", "video", "incoming", "notification",
-        "system", "app", "activity", "alert",
+        "new",
+        "a",
+        "an",
+        "the",
+        "this",
+        "that",
+        "voice",
+        "audio",
+        "video",
+        "incoming",
+        "notification",
+        "system",
+        "app",
+        "activity",
+        "alert",
     ];
     let words: Vec<&str> = text.split_whitespace().collect();
     if words.is_empty() {
@@ -2056,7 +2142,8 @@ fn extract_leading_name(text: &str) -> Option<String> {
     }
     let is_name_word = |w: &str| -> bool {
         !w.is_empty()
-            && w.chars().all(|c| c.is_alphabetic() || c == '-' || c == '_' || c == '.')
+            && w.chars()
+                .all(|c| c.is_alphabetic() || c == '-' || c == '_' || c == '.')
             && w.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
     };
     let mut name_parts = Vec::new();
@@ -2128,9 +2215,7 @@ fn extract_from_phrase(text: &str) -> Option<String> {
         .take(3)
         .collect::<Vec<_>>()
         .join(" ");
-    let trimmed = name.trim_end_matches(|c: char| {
-        !c.is_alphanumeric() && c != '.' && c != '-'
-    });
+    let trimmed = name.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '-');
     if trimmed.is_empty() {
         None
     } else {

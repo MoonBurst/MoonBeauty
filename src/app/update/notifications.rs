@@ -63,9 +63,7 @@ impl MoonBeautyShellApp {
                     let nid = t.id;
                     self.notifs.update(NotifMessage::DismissToast(id));
                     std::thread::spawn(move || {
-                        moonbeauty::overlays::notifications::emit_action_invoked(
-                            nid, "default",
-                        );
+                        moonbeauty::overlays::notifications::emit_action_invoked(nid, "default");
                         std::thread::sleep(std::time::Duration::from_millis(200));
                         let matches = notification_candidates(&app, entry.as_deref());
                         if !is_app_focused(&matches) {
@@ -137,8 +135,7 @@ impl MoonBeautyShellApp {
         if self.is_notif_surface {
             let runtime = std::env::var("XDG_RUNTIME_DIR")
                 .unwrap_or_else(|_| format!("/tmp/user-{}", std::process::id()));
-            let cmd_path =
-                std::path::PathBuf::from(&runtime).join("moonbeauty-notif-cmd");
+            let cmd_path = std::path::PathBuf::from(&runtime).join("moonbeauty-notif-cmd");
             if let Ok(cmd) = std::fs::read_to_string(&cmd_path) {
                 let _ = std::fs::remove_file(&cmd_path);
                 match cmd.trim() {
@@ -163,7 +160,9 @@ impl MoonBeautyShellApp {
                                     let ok = focus_notification_app(&app, entry.as_deref());
                                     moonbeauty::dbg_log!(
                                         "[activate-latest] fallback app={:?} entry={:?} ok={}",
-                                        app, entry, ok
+                                        app,
+                                        entry,
+                                        ok
                                     );
                                 } else {
                                     moonbeauty::dbg_log!(
@@ -181,8 +180,7 @@ impl MoonBeautyShellApp {
             }
 
             if !moonbeauty::overlays::notifications::dnd_active() {
-                let held =
-                    moonbeauty::overlays::notifications::take_held_notifs();
+                let held = moonbeauty::overlays::notifications::take_held_notifs();
                 if !held.is_empty() {
                     eprintln!(
                         "[dnd] unpaused! releasing {} held toast(s) to screen",
@@ -201,10 +199,9 @@ impl MoonBeautyShellApp {
                     }
                 }
             }
-            let big_w = (self.settings.notif_card_width as i32
-                + 2 * self.settings.notif_margin_x
-                + 100)
-                .max(200) as u32;
+            let big_w =
+                (self.settings.notif_card_width as i32 + 2 * self.settings.notif_margin_x + 100)
+                    .max(200) as u32;
             let big_h = (3 * self.settings.notif_card_height as i32
                 + 2 * self.settings.notif_margin_x
                 + 100)
@@ -217,18 +214,13 @@ impl MoonBeautyShellApp {
             let toast_count = self.notifs.active_toasts.len();
             let count_changed = toast_count != self.last_toast_count;
 
-            let active_pending =
-                self.notifs.active_toasts.len() + self.notifs.pending_toasts.len();
+            let active_pending = self.notifs.active_toasts.len() + self.notifs.pending_toasts.len();
             let should_write = match self.last_active_pending_written {
                 None => true,
-                Some((prev, at)) => {
-                    prev != active_pending || at.elapsed().as_secs() >= 3
-                }
+                Some((prev, at)) => prev != active_pending || at.elapsed().as_secs() >= 3,
             };
             if should_write {
-                moonbeauty::overlays::notifications::write_active_count(
-                    active_pending,
-                );
+                moonbeauty::overlays::notifications::write_active_count(active_pending);
                 self.last_active_pending_written =
                     Some((active_pending, std::time::Instant::now()));
             }
@@ -256,8 +248,8 @@ impl MoonBeautyShellApp {
     }
 
     pub(crate) fn dismiss_latest_notif(&self) -> Command<Message> {
-        let cmd_path = moonbeauty::libraries::process::mbs_runtime_dir()
-            .join("moonbeauty-notif-cmd");
+        let cmd_path =
+            moonbeauty::libraries::process::mbs_runtime_dir().join("moonbeauty-notif-cmd");
         match std::fs::write(&cmd_path, b"dismiss") {
             Ok(_) => eprintln!("[ipc] DismissLatestNotif -> notif-surface"),
             Err(e) => eprintln!("[ipc] DismissLatestNotif write failed: {e}"),
@@ -292,7 +284,11 @@ impl MoonBeautyShellApp {
         ] {
             let _ = moonbeauty::libraries::process::spawn_and_reap(
                 std::process::Command::new("notify-send").args([
-                    "-a", "Diagnostics", "--", title, body,
+                    "-a",
+                    "Diagnostics",
+                    "--",
+                    title,
+                    body,
                 ]),
             );
         }

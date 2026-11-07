@@ -221,7 +221,7 @@ impl MoonBeautyShellApp {
                     .join(format!("mbs-ocr-{}.png", id));
 
                 // Do OCR synchronously — it's fast (~1s) and we're about to close anyway
-                                // Read directly from our own clipboard store instead of cliphist.
+                // Read directly from our own clipboard store instead of cliphist.
                 let ocr_ready = if let Some(src) = ClipboardOverlay::resolve_path(id) {
                     let ext = src
                         .extension()
@@ -247,10 +247,9 @@ impl MoonBeautyShellApp {
                         .args([tmp_path.to_str().unwrap(), "stdout"])
                         .env_remove("LD_LIBRARY_PATH")
                         .output();
-                
+
                     if let Ok(tess_out) = tess_out {
-                        let text =
-                            String::from_utf8_lossy(&tess_out.stdout).trim().to_string();
+                        let text = String::from_utf8_lossy(&tess_out.stdout).trim().to_string();
                         if !text.is_empty() {
                             eprintln!("[ocr] {} chars extracted", text.len());
                             if let Ok(mut child) = std::process::Command::new("wl-copy")
@@ -314,18 +313,25 @@ impl MoonBeautyShellApp {
                 return Command::perform(
                     ClipboardOverlay::load_preview(id),
                     move |(text, image_data)| {
-                        Message::Clipboard(ClipboardMessage::PreviewLoaded { id, text, image_data })
+                        Message::Clipboard(ClipboardMessage::PreviewLoaded {
+                            id,
+                            text,
+                            image_data,
+                        })
                     },
                 );
             }
-            ClipboardMessage::PreviewLoaded { id, text, image_data } => {
+            ClipboardMessage::PreviewLoaded {
+                id,
+                text,
+                image_data,
+            } => {
                 // Ignore stale async results from older clicks
                 if Some(id) == self.clipboard.selected_id {
                     self.clipboard.preview_text = text;
                     self.clipboard.preview_image_data = image_data;
                 }
             }
-        
         }
         Command::none()
     }

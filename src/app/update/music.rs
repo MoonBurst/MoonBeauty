@@ -15,7 +15,7 @@ use iced::Task as Command;
 
 use moonbeauty::bar::TopBarMessage;
 use moonbeauty::libraries::backend::music::{
-    MusicCycleState, MpdBackend, MprisBackend, TrackSource, poll_track,
+    poll_track, MpdBackend, MprisBackend, MusicCycleState, TrackSource,
 };
 
 impl MoonBeautyShellApp {

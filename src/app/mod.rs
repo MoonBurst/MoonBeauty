@@ -55,7 +55,8 @@ pub enum Message {
     EmailSyncedWithDiff(
         Vec<moonbeauty::libraries::backend::email::client::NativeEnvelope>,
         Vec<moonbeauty::libraries::backend::email::client::NativeEnvelope>,
-    ),    ComposeTabPressed(bool),
+    ),
+    ComposeTabPressed(bool),
     WeatherLoaded(Option<moonbeauty::bar::weather::WeatherData>),
     TickClock,
     IdleTick,
@@ -101,7 +102,8 @@ pub enum Message {
     FetchTrayItems,
     TrayItemsLoaded(Vec<moonbeauty::bar::tray::TrayItem>),
     TrayAnimTick,
-    TrayWatchdogTick,    /// Pre-computed toast rectangles (surface-local coords). Emitted
+    TrayWatchdogTick,
+    /// Pre-computed toast rectangles (surface-local coords). Emitted
     /// whenever the toast count changes; `try_into` converts it to
     /// `LayershellCustomAction::SetInputRegion` so the layer surface's
     /// click target shrinks to just the visible toasts. Everything else

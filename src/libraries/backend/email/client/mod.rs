@@ -7,12 +7,12 @@
 //! Everything else is still in this file.  See docs/REFACTOR.md for
 //! remaining split targets.
 
-mod types;
 mod secure_fs;
+mod types;
 mod validation;
 
-pub use types::*;
 use secure_fs::*;
+pub use types::*;
 pub use validation::*;
 
 use async_imap::types::Fetch as AsyncFetch;
@@ -181,10 +181,7 @@ pub fn save_config(cfg: &EmailConfig, use_sops: bool) -> Result<(), String> {
         // predictable filename in ~/.config. mbs_unique_tmp gives tmpfs
         // storage (RAM, wiped on reboot) with an unpredictable name,
         // shrinking the crash window between write and sops invocation.
-        let tmp = crate::libraries::process::mbs_unique_tmp(
-            "mbs-email-plain",
-            "json",
-        );
+        let tmp = crate::libraries::process::mbs_unique_tmp("mbs-email-plain", "json");
         crate::libraries::process::private_write_new(&tmp, json.as_bytes())
             .map_err(|e| e.to_string())?;
 
@@ -325,10 +322,6 @@ pub fn save_config(cfg: &EmailConfig, use_sops: bool) -> Result<(), String> {
     }
 }
 
-
-
-
-
 pub fn config_exists() -> bool {
     let path = config_path();
     let enc_path = path.with_extension("enc.json");
@@ -401,10 +394,6 @@ pub fn load_config() -> EmailConfig {
     }
     def
 }
-
-
-
-
 
 // ── Secure filesystem helpers (finding 03) ────────────────────────
 //
@@ -685,7 +674,9 @@ pub async fn sync_bodies_background(folder: String) {
             Ok(f) => f,
             Err(_) => {
                 if std::env::var_os("MBS_DEBUG").is_some() {
-                    eprintln!("[sync] another process is already syncing, skipping duplicate spawn.");
+                    eprintln!(
+                        "[sync] another process is already syncing, skipping duplicate spawn."
+                    );
                 }
                 return;
             }
@@ -1379,8 +1370,6 @@ pub async fn save_draft(to: &str, subject: &str, body: &str) -> Result<(), Strin
     Ok(())
 }
 
-
-
 fn map_gmail_folder(folder: &str) -> String {
     match folder {
         "Unread" => "INBOX",
@@ -1393,8 +1382,6 @@ fn map_gmail_folder(folder: &str) -> String {
     }
     .to_string()
 }
-
-
 
 #[cfg(test)]
 mod cache_dir_tests {

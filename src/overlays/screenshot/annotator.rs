@@ -6,12 +6,12 @@
 //!   per recipient, writes `annotated_STAMP_{name}.png`.
 //! - Enter: save (annotated+watermarked) then close. Always.
 
+use super::magick_or_convert;
+use crate::libraries::config::settings::ScreenshotSaveFormat;
 use iced::widget::canvas::{self, Canvas, Frame, Geometry};
 use iced::widget::{button, container, text, text_input, Column, Row, Stack};
 use iced::{mouse, Alignment, Color, Element, Length, Point, Rectangle, Size};
 use std::path::{Path, PathBuf};
-use super::magick_or_convert;
-use crate::libraries::config::settings::ScreenshotSaveFormat;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
@@ -171,7 +171,8 @@ impl AnnotatorOverlay {
         if bytes.len() > MAX_RAW {
             self.status = format!(
                 "image too large to load ({} MB exceeds {} MB cap)",
-                bytes.len() / (1024 * 1024), MAX_RAW / (1024 * 1024)
+                bytes.len() / (1024 * 1024),
+                MAX_RAW / (1024 * 1024)
             );
             return;
         }
@@ -1155,11 +1156,7 @@ pub fn register_jxl_decoder() {
 /// Higher effort = smaller file, slower encode:
 ///   -e 3 → ~2-4s for 4K, ~4MB
 ///   -e 7 → ~15-30s for 4K, ~3MB
-pub fn png_to_jxl_with_effort(
-    input: &Path,
-    output: &Path,
-    effort: u8,
-) -> Result<(), String> {
+pub fn png_to_jxl_with_effort(input: &Path, output: &Path, effort: u8) -> Result<(), String> {
     let effort_str = effort.to_string();
     if let Ok(status) = std::process::Command::new("cjxl")
         .args(["-d", "0", "-e", &effort_str])
@@ -1167,7 +1164,9 @@ pub fn png_to_jxl_with_effort(
         .arg(output)
         .status()
     {
-        if status.success() { return Ok(()); }
+        if status.success() {
+            return Ok(());
+        }
         eprintln!("[jxl] cjxl -e{} failed; trying magick (lossless)", effort);
     } else {
         eprintln!("[jxl] cjxl not installed; trying magick (lossless)");
@@ -1175,18 +1174,24 @@ pub fn png_to_jxl_with_effort(
     if let Some(bin) = magick_or_convert() {
         let status = std::process::Command::new(bin)
             .args([
-                "-limit", "memory", "512MiB",
-                "-limit", "map", "1GiB",
-                "-limit", "disk", "2GiB",
-                "-limit", "width", "16384",
-                "-limit", "height", "16384",
+                "-limit", "memory", "512MiB", "-limit", "map", "1GiB", "-limit", "disk", "2GiB",
+                "-limit", "width", "16384", "-limit", "height", "16384",
             ])
-            .args(["-quality", "100", "-define", "jxl:lossless=true", "-define", "jxl:effort=7"])
+            .args([
+                "-quality",
+                "100",
+                "-define",
+                "jxl:lossless=true",
+                "-define",
+                "jxl:effort=7",
+            ])
             .arg(input)
             .arg(output)
             .status()
             .map_err(|e| format!("spawn {bin}: {e}"))?;
-        if status.success() { return Ok(()); }
+        if status.success() {
+            return Ok(());
+        }
     }
     Err("JXL encode failed (cjxl and magick both failed)".into())
 }
@@ -1405,11 +1410,8 @@ pub fn compose_annotations(
     // a crafted PNG can encode decompression bombs that exhaust memory.
     let ok = std::process::Command::new(bin)
         .args([
-            "-limit", "memory", "512MiB",
-            "-limit", "map", "1GiB",
-            "-limit", "disk", "2GiB",
-            "-limit", "width", "16384",
-            "-limit", "height", "16384",
+            "-limit", "memory", "512MiB", "-limit", "map", "1GiB", "-limit", "disk", "2GiB",
+            "-limit", "width", "16384", "-limit", "height", "16384",
         ])
         .args(&args)
         .status()
@@ -1493,7 +1495,10 @@ pub fn save_annotated_image(
             ScreenshotSaveFormat::JxlFast => ("jxl", true, 3u8),
             ScreenshotSaveFormat::JxlBest => ("jxl", true, 7u8),
         };
-        let out = save_dir.join(format!("{} {} {}.{}", safe_name, date_str, time_str, out_ext));
+        let out = save_dir.join(format!(
+            "{} {} {}.{}",
+            safe_name, date_str, time_str, out_ext
+        ));
 
         match crate::overlays::screenshot::watermark::add_plate_watermark(&composed_bytes, name) {
             Ok(wm_bytes) => {
@@ -1504,8 +1509,7 @@ pub fn save_annotated_image(
                     std::fs::write(&tmp_png, &wm_bytes)
                         .map_err(|e| format!("write tmp png: {e}"))?;
                     png_to_jxl_with_effort(&tmp_png, &out, effort)?;
-                    let jxl_bytes = std::fs::read(&out)
-                        .map_err(|e| format!("read jxl: {e}"))?;
+                    let jxl_bytes = std::fs::read(&out).map_err(|e| format!("read jxl: {e}"))?;
                     let _ = std::fs::remove_file(&tmp_png);
                     eprintln!(
                         "[save] plate OK: {} bytes PNG -> {} bytes JXL (e{}) -> {:?}",
@@ -1515,13 +1519,8 @@ pub fn save_annotated_image(
                         out
                     );
                 } else {
-                    std::fs::write(&out, &wm_bytes)
-                        .map_err(|e| format!("write png: {e}"))?;
-                    eprintln!(
-                        "[save] plate OK: {} bytes PNG -> {:?}",
-                        wm_bytes.len(),
-                        out
-                    );
+                    std::fs::write(&out, &wm_bytes).map_err(|e| format!("write png: {e}"))?;
+                    eprintln!("[save] plate OK: {} bytes PNG -> {:?}", wm_bytes.len(), out);
                 }
 
                 let filename = out
@@ -1548,7 +1547,8 @@ pub fn save_annotated_image(
                 // Index by reference; URI-list is served once at the end of the loop.
                 let display_name = format!("📸 {}", filename);
                 let _ = crate::overlays::clipboard::ClipboardOverlay::add_entry(
-                    &out, Some(display_name),
+                    &out,
+                    Some(display_name),
                 );
                 eprintln!("[save] indexed {}", out.display());
                 produced.push(out);

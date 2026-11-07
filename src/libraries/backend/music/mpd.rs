@@ -228,7 +228,10 @@ impl MpdBackend {
             return Vec::new();
         };
         let q = query.to_lowercase();
-        let all_songs = match client.command(mpd_client::commands::ListAllIn::root()).await {
+        let all_songs = match client
+            .command(mpd_client::commands::ListAllIn::root())
+            .await
+        {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[mpd] listallinfo failed: {:?}", e);
@@ -248,8 +251,6 @@ impl MpdBackend {
             })
             .collect()
     }
-
-
 
     pub async fn next() {
         if let Some(client) = Self::connect().await {
@@ -305,12 +306,18 @@ impl MpdBackend {
     }
 
     pub async fn play_queue(urls: &[String], start_index: usize) {
-        if urls.is_empty() { return; }
+        if urls.is_empty() {
+            return;
+        }
         let Some(client) = Self::connect().await else {
             eprintln!("[mpd] play_queue: connection failed");
             return;
         };
-        eprintln!("[mpd] play_queue: appending {} tracks, starting at {}", urls.len(), start_index);
+        eprintln!(
+            "[mpd] play_queue: appending {} tracks, starting at {}",
+            urls.len(),
+            start_index
+        );
 
         let current_len = match client.command(mpd_client::commands::Queue).await {
             Ok(q) => q.len(),
@@ -321,7 +328,10 @@ impl MpdBackend {
         };
 
         for url in urls {
-            if let Err(e) = client.command(mpd_client::commands::Add::uri(url.as_str())).await {
+            if let Err(e) = client
+                .command(mpd_client::commands::Add::uri(url.as_str()))
+                .await
+            {
                 eprintln!("[mpd] add failed for {}: {:?}", url, e);
             }
         }

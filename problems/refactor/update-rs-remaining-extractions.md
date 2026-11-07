@@ -13,25 +13,24 @@ clipboard, settings, overlays).
 
 Still inline:
 - `Message::TopBar(msg)` — ~600 lines (see topbar-sub-extraction.md)
-- `Message::Launcher(msg)` — ~100 lines
+- ~~`Message::Launcher(msg)`~~ — *Extracted to `app/update/launcher.rs`*
 - `Message::Annotator(msg)` — ~150 lines (has an `is_text_press`
   post-match check that MUST be preserved verbatim)
 - `Message::DismissActiveOverlay` — ~50 lines (cross-overlay router)
 - ~~Tray family~~ — *Extracted to `app/update/tray.rs`*
 - Email sync — `TickEmailSync`, `EmailSyncedWithDiff` (~90 lines)
-- Background ticks — `TickHardware`, `MetricsCollected`, `TickWeather`,
-  `WeatherLoaded`, `IdleTick` (~30 lines)
+- ~~Background ticks~~ — *Extracted to `app/update/hardware.rs`*
 - Remaining `IpcReceived` arms (~120 lines)
 
 ## Desired state
 
 Extract in this order (each independently mergeable, each a commit):
 
-1. `Message::Launcher` → `app/update/launcher.rs`
+1. ~~`Message::Launcher` → `app/update/launcher.rs`~~ *(Done)*
 2. `Message::Annotator` → `app/update/annotator.rs`
 3. ~~Tray family → `app/update/tray.rs`~~ *(Done)*
 4. Email sync → `app/update/email_sync.rs`
-5. Background ticks → `app/update/hardware.rs`
+5. ~~Background ticks → `app/update/hardware.rs`~~ *(Done)*
 6. Remaining IPC arms → `app/update/ipc.rs`
 7. `Message::DismissActiveOverlay` → `app/update/dismiss.rs`
 8. `Message::TopBar` — separate, see topbar-sub-extraction.md

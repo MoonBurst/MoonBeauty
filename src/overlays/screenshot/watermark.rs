@@ -11,8 +11,8 @@
 //! Reveal via B−G channel differencing (since the plate is purple, blue
 //! minus green is the strongest signal).
 
-use std::path::PathBuf;
 use super::magick_or_convert;
+use std::path::PathBuf;
 
 fn private_dir() -> PathBuf {
     let rt = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
@@ -157,7 +157,9 @@ pub fn reveal(bytes: &[u8]) -> Result<Vec<u8>, String> {
     // 0 while creating a directory at the output path, which then makes
     // std::fs::read fail with EISDIR — silently breaking reveal.
     let is_jxl = bytes.starts_with(&[0xFF, 0x0A])
-        || bytes.starts_with(&[0x00, 0x00, 0x00, 0x0C, 0x4A, 0x58, 0x4C, 0x20, 0x0D, 0x0A, 0x87, 0x0A]);
+        || bytes.starts_with(&[
+            0x00, 0x00, 0x00, 0x0C, 0x4A, 0x58, 0x4C, 0x20, 0x0D, 0x0A, 0x87, 0x0A,
+        ]);
     if is_jxl {
         let tmp_raw = dir.join(format!("reveal-raw-{}.jxl", stamp));
         std::fs::write(&tmp_raw, bytes).map_err(|e| format!("write: {e}"))?;
@@ -212,7 +214,9 @@ pub fn reveal(bytes: &[u8]) -> Result<Vec<u8>, String> {
     // caller sees a clear error instead of EISDIR from std::fs::read.
     if std::path::Path::new(&tmp_out).is_dir() {
         let _ = std::fs::remove_dir_all(&tmp_out);
-        return Err(format!("{bin} produced a directory at {tmp_out:?} — decoder delegate missing"));
+        return Err(format!(
+            "{bin} produced a directory at {tmp_out:?} — decoder delegate missing"
+        ));
     }
 
     let result = std::fs::read(&tmp_out).map_err(|e| format!("read: {e}"))?;

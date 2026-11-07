@@ -68,7 +68,6 @@ pub struct ProcessItem {
     pub is_highlight: bool,
 }
 
-
 fn read_cpu_temp() -> u32 {
     // Thermal zones first
     for i in 0..10 {
