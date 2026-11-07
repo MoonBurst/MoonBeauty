@@ -5,6 +5,7 @@ pub mod dictionary;
 pub mod email;
 pub mod info_tooltip;
 pub mod launcher;
+pub mod launcher_conversions;
 pub mod lockscreen;
 pub mod notes;
 pub mod notifications;
