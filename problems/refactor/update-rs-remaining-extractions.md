@@ -27,7 +27,7 @@ Still inline:
 Extract in this order (each independently mergeable, each a commit):
 
 1. ~~`Message::Launcher` → `app/update/launcher.rs`~~ *(Done)*
-2. `Message::Annotator` → `app/update/annotator.rs`
+2. ~~`Message::Annotator` → `app/update/annotator.rs`~~ *(Done)*
 3. ~~Tray family → `app/update/tray.rs`~~ *(Done)*
 4. ~~Email sync → `app/update/email_sync.rs`~~ *(Done)*
 5. ~~Background ticks → `app/update/hardware.rs`~~ *(Done)*
