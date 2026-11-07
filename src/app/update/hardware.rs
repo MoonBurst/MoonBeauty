@@ -20,6 +20,7 @@ impl MoonBeautyShellApp {
         self.telemetry.mic = mic;
         self.telemetry.mpris = mpris;
         self.telemetry.net = net;
+        Command::none()
     }
 
     pub(crate) fn handle_tick_hardware(&mut self) -> Command<Message> {
@@ -70,6 +71,7 @@ impl MoonBeautyShellApp {
         w: Option<moonbeauty::bar::weather::WeatherData>,
     ) -> Command<Message> {
         self.telemetry.weather = w;
+        Command::none()
     }
 
     pub(crate) fn handle_tick_weather(&mut self) -> Command<Message> {

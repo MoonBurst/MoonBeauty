@@ -20,7 +20,7 @@ Still inline:
 - ~~Tray family~~ — *Extracted to `app/update/tray.rs`*
 - Email sync — `TickEmailSync`, `EmailSyncedWithDiff` (~90 lines)
 - ~~Background ticks~~ — *Extracted to `app/update/hardware.rs`*
-- Remaining `IpcReceived` arms (~120 lines)
+- ~~Remaining `IpcReceived` arms~~ — *Extracted to `app/update/ipc.rs`*
 
 ## Desired state
 
@@ -31,7 +31,7 @@ Extract in this order (each independently mergeable, each a commit):
 3. ~~Tray family → `app/update/tray.rs`~~ *(Done)*
 4. Email sync → `app/update/email_sync.rs`
 5. ~~Background ticks → `app/update/hardware.rs`~~ *(Done)*
-6. Remaining IPC arms → `app/update/ipc.rs`
+6. ~~Remaining IPC arms → `app/update/ipc.rs`~~ *(Done)*
 7. `Message::DismissActiveOverlay` → `app/update/dismiss.rs`
 8. `Message::TopBar` — separate, see topbar-sub-extraction.md
 
