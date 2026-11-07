@@ -20,8 +20,14 @@ isn't done. Everything else is independent.
 
 ## Bugs / gaps
 
+- [icon-resolver-dedup.md](icon-resolver-dedup.md) — 30m — unify 3 icon resolvers, fix missing symlink check in notifications
 - [try-into-pattern.md](try-into-pattern.md) — 2-4h — `TryInto<LayershellCustomActionWithId>` is opaque
 - [lockscreen-integration-tests.md](lockscreen-integration-tests.md) — 2-3h — no automated coverage for coordinator pure fns and shutdown
+
+
+## Memory / Performance
+
+- [notif-surface-lazy-load.md](notif-surface-lazy-load.md) — 30-45m — stop eager-spawning notif-surface, save ~20 MB RAM when idle
 
 ## File splits
 
@@ -41,9 +47,6 @@ Sizes are current line counts.
 - [process-rs-split.md](process-rs-split.md) — 2h — 801 lines
 - [tray-watcher-split.md](tray-watcher-split.md) — 2h — 790 lines
 
-## Extraction
-
-- [update-rs-remaining-extractions.md](update-rs-remaining-extractions.md) — 4-6h — remaining ~1,085 lines in `app/update.rs`
 
 ## How to pick one
 
@@ -57,9 +60,7 @@ Sizes are current line counts.
 
 ## See also
 
-- [../README.md](../README.md) — maintainer bug notes
-- [../../docs/REFACTOR.md](../../docs/REFACTOR.md) — prose on known
-  sharp edges (still partly stale; refactor/ supersedes it)
+- `problems/refactor/` supersedes all previous tracking documents.
 
 ## Recently fixed
 - `topbar-sub-extraction` — three patches landed: (1) `toggle_tooltip(&mut self, id: &str)` extracted to `app/helpers.rs`; (2) `handle_capsule_action(&mut self, act: CapsuleAction)` extracted to `app/helpers.rs`; (3) `handle_top_bar(&mut self, msg: TopBarMessage)` in new `app/update/top_bar.rs`. `Message::TopBar` arm is now a one-line dispatch. `app/update.rs` lost ~800 lines total (the arm plus the match body). The tracker draft signature (13 params) was wrong — every field reads from `self`.
