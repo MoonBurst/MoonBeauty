@@ -1,5 +1,4 @@
 use super::*;
-use moonbeauty::bar::weather::WeatherData;
 use moonbeauty::libraries::backend::*;
 
 impl MoonBeautyShellApp {
