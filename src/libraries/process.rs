@@ -893,3 +893,100 @@ pub fn tighten_user_state_files() {
         chmod(&base.join("quickshell_reminders.json"), 0o600);
     }
 }
+
+/// Unified icon resolution across launcher, tray, and notifications.
+/// Enforces the `safe_icon_candidate` symlink check on every path.
+pub fn resolve_icon_path(icon_name: &str) -> Option<std::path::PathBuf> {
+    if icon_name.is_empty() {
+        return None;
+    }
+
+    // 1. Absolute path handling (with whitelist)
+    if icon_name.starts_with('/') {
+        let known = [
+            "/usr/share/icons/",
+            "/usr/share/pixmaps/",
+            "/usr/local/share/icons/",
+            "/usr/local/share/pixmaps/",
+            "/run/current-system/sw/share/icons/",
+            "/run/current-system/sw/share/pixmaps/",
+            "/var/lib/flatpak/exports/share/icons/",
+            "/var/lib/flatpak/exports/share/pixmaps/",
+            "/var/lib/snapd/desktop/icons/",
+        ];
+        let mut ok = known.iter().any(|p| icon_name.starts_with(p));
+        if !ok {
+            if let Some(home) = dirs::home_dir() {
+                let h = home.to_string_lossy();
+                ok = icon_name.starts_with(&format!("{}/.local/share/icons/", h))
+                    || icon_name.starts_with(&format!("{}/.nix-profile/share/icons/", h))
+                    || icon_name.starts_with(&format!("{}/.local/share/flatpak/exports/share/icons/", h));
+            }
+        }
+        if !ok {
+            return None;
+        }
+        return if std::path::Path::new(icon_name).exists() {
+            Some(std::path::PathBuf::from(icon_name))
+        } else {
+            None
+        };
+    }
+
+    // 2. Relative name validation
+    if icon_name.contains("..") || icon_name.contains('/') || icon_name.contains('\\') {
+        return None;
+    }
+    if !icon_name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')) {
+        return None;
+    }
+
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+    let user = std::env::var("USER").unwrap_or_else(|_| "user".into());
+
+    let theme_roots = [
+        std::path::PathBuf::from("/etc/profiles/per-user").join(&user).join("share/icons"),
+        std::path::PathBuf::from("/run/current-system/sw/share/icons"),
+        std::path::PathBuf::from("/usr/share/icons"),
+        home.join(".local/share/icons"),
+        home.join(".nix-profile/share/icons"),
+        std::path::PathBuf::from("/var/lib/flatpak/exports/share/icons"),
+        home.join(".local/share/flatpak/exports/share/icons"),
+    ];
+    let themes = ["hicolor", "Adwaita", "breeze", "Papirus", "Papirus-Dark", "Yaru", "Numix"];
+    let sizes = ["256x256", "128x128", "512x512", "64x64", "48x48", "32x32", "scalable", "symbolic"];
+    let exts = ["png", "svg", "xpm"];
+
+    for root in &theme_roots {
+        for theme in &themes {
+            for size in &sizes {
+                for ext in &exts {
+                    let p = root.join(theme).join(size).join("apps").join(format!("{}.{}", icon_name, ext));
+                    if p.exists() {
+                        if let Some(canon) = safe_icon_candidate(&p, root) {
+                            return Some(canon);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let flat_dirs = vec![
+        std::path::PathBuf::from("/run/current-system/sw/share/pixmaps"),
+        std::path::PathBuf::from("/usr/share/pixmaps"),
+        std::path::PathBuf::from("/etc/profiles/per-user").join(&user).join("share/pixmaps"),
+        home.join(".nix-profile/share/pixmaps"),
+    ];
+    for dir in &flat_dirs {
+        for ext in &exts {
+            let p = dir.join(format!("{}.{}", icon_name, ext));
+            if p.exists() {
+                if let Some(canon) = safe_icon_candidate(&p, dir) {
+                    return Some(canon);
+                }
+            }
+        }
+    }
+    None
+}
