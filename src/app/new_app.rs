@@ -143,7 +143,7 @@ impl MoonBeautyShellApp {
                         if is_systemd {
                             std::process::exit(0);
                         } else {
-                            let _ = std::process::Command::new(crate::resolve_exe())
+                            let _ = std::process::Command::new(resolve_exe())
                                 .arg("--restart-bar")
                                 .spawn();
                             std::process::exit(0);
@@ -164,7 +164,7 @@ impl MoonBeautyShellApp {
                 .args(["-f", "wl-paste --watch.*(moonbeauty|moon-beauty-shell)"])
                 .status();
             std::thread::sleep(std::time::Duration::from_millis(50));
-            let exe = crate::resolve_exe();
+            let exe = resolve_exe();
             let exe_str = exe.to_string_lossy().to_string();
             let mut paste_cmd = std::process::Command::new("wl-paste");
             paste_cmd.args(["--watch", &exe_str, "--clipboard-ingest"]);

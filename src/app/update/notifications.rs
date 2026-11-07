@@ -117,8 +117,10 @@ impl MoonBeautyShellApp {
             }
             let _ = moonbeauty::libraries::process::spawn_and_reap(&mut cmd);
         }
+        let mut had_new = false;
         if let Some(rx) = self.notif_rx.as_ref() {
             while let Ok(n) = rx.try_recv() {
+                had_new = true;
                 let is_test = n.app_name == "Diagnostics";
                 self.notifs.push_notification(
                     &n.app_name,
@@ -176,6 +178,26 @@ impl MoonBeautyShellApp {
                         }
                     }
                     _ => {}
+                }
+            }
+
+            static IDLE_SINCE: std::sync::Mutex<Option<std::time::Instant>> =
+                std::sync::Mutex::new(None);
+            let idle_secs: u64 = std::env::var("MBS_NOTIF_IDLE_SECS")
+                .ok().and_then(|s| s.parse().ok()).unwrap_or(300);
+            let has_visible = !self.notifs.active_toasts.is_empty()
+                || !self.notifs.pending_toasts.is_empty();
+            let busy = had_new || has_visible;
+            {
+                let mut idle = IDLE_SINCE.lock().unwrap();
+                if busy {
+                    *idle = None;
+                } else {
+                    let started = idle.get_or_insert_with(std::time::Instant::now);
+                    if started.elapsed() > std::time::Duration::from_secs(idle_secs) {
+                        eprintln!("[notif-surface] idle {}s, exiting (D-Bus reactivates on next Notify)", idle_secs);
+                        std::process::exit(0);
+                    }
                 }
             }
 
