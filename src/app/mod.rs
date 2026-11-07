@@ -26,10 +26,10 @@ pub mod view;
 // to reach parent-module items without them being `pub` (child modules
 // see the parent's private namespace). Plain `use` — not `pub use` —
 // because we don't need to re-export them outside `app`.
-use crate::{
-    detect_notif_surface, detect_standalone_overlay, focus_notification_app,
-    handle_annotator_text_input, handle_email_keypress, handle_lock_keypress, is_app_focused,
-    notification_candidates, resolve_exe,
+use crate::{detect_notif_surface, detect_standalone_overlay, resolve_exe};
+use crate::cli::keys::{
+    focus_notification_app, handle_annotator_text_input, handle_email_keypress,
+    handle_lock_keypress, is_app_focused, notification_candidates,
 };
 
 use iced::widget::{container, Stack};
