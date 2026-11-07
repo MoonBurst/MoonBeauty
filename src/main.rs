@@ -80,38 +80,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     cli::lockscreen_coordinator::run(&args);
 
-    // Notification CLI actions
-    if args.iter().any(|a| a == "--activate-latest-notif") {
-        let cmd_path =
-            moonbeauty::libraries::process::mbs_runtime_dir().join("moonbeauty-notif-cmd");
-        match moonbeauty::libraries::process::private_write_file(&cmd_path, b"activate-latest") {
-            Ok(_) => std::process::exit(0),
-            Err(e) => {
-                eprintln!("[activate-latest] write {:?}: {e}", cmd_path);
-                std::process::exit(1);
-            }
-        }
-    }
-    if args.iter().any(|a| a == "--dismiss-notif") {
-        let cmd_path =
-            moonbeauty::libraries::process::mbs_runtime_dir().join("moonbeauty-notif-cmd");
-        match moonbeauty::libraries::process::private_write_file(&cmd_path, b"dismiss") {
-            Ok(_) => std::process::exit(0),
-            Err(e) => {
-                eprintln!("[dismiss-notif] write {:?}: {e}", cmd_path);
-                std::process::exit(1);
-            }
-        }
-    }
-    if args.iter().any(|a| a == "--notif-history") {
-        match send_ipc_sync(&IpcCommand::ToggleHistory) {
-            Ok(_) => std::process::exit(0),
-            Err(e) => {
-                eprintln!("[notif-history] IPC failed: {e}");
-                std::process::exit(1);
-            }
-        }
-    }
+    cli::notify::run(&args);
 
     // Music CLI flags — fired from the tooltip's Cycle/Prev/Play/Next
     // buttons and bindable to sway keybinds.
@@ -258,25 +227,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     cli::screenshot::run_orchestrator(&args);
 
-    // CLI Notification Push: moonbeauty --notify "LusterDawn" "Message"
-    if args.len() >= 3
-        && (args[1] == "--notify" || (args.len() >= 4 && args[1] == "--ipc" && args[2] == "notify"))
-    {
-        let summary = if args[1] == "--notify" {
-            &args[2]
-        } else {
-            &args[3]
-        };
-        let body = if args[1] == "--notify" {
-            args.get(3).map(|s| s.as_str()).unwrap_or("")
-        } else {
-            args.get(4).map(|s| s.as_str()).unwrap_or("")
-        };
-        let _ = std::process::Command::new("notify-send")
-            .args(["-a", "Desktop", "--", summary, body])
-            .spawn();
-        std::process::exit(0);
-    }
+    // (--notify push moved to cli::notify::run above)
 
     if let Some(idx) = args.iter().position(|a| a == "--tray-context-menu") {
         let json_path = args.get(idx + 1).cloned().unwrap_or_default();
@@ -561,5 +512,4 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     });
     _app.run()
 }
-
 
