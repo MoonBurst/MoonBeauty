@@ -4,24 +4,6 @@ use moonbeauty::overlays::screenshot;
 
 use crate::send_ipc_sync;
 
-pub fn run_quickshot_deprecation(args: &[String]) {
-    // --quickshot was replaced by --screenshot --annotate.
-    if args.iter().any(|a| a == "--quickshot" || a == "quickshot") {
-        // Guarded rather than removed: without this, `moonbeauty --quickshot`
-        // falls through every flag check and boots a duplicate bar. Correct
-        // long-term cleanup: catch-all unknown-flag handler in main() + remove
-        // this guard once no keybind references it.
-        // TODO: delete this block when `grep -r quickshot ~/.config/sway/`
-        // returns nothing.
-        eprintln!("[error] --quickshot is gone. Screenshot workflows now:");
-        eprintln!("        --screenshot              capture region and save");
-        eprintln!("        --screenshot --annotate   capture, annotate, watermark");
-        eprintln!();
-        eprintln!("        Update your keybinds accordingly.");
-        std::process::exit(2);
-    }
-}
-
 pub fn run_fragment(args: &[String]) {
     // Temporary: verify freeze-frame capture works before UI build
     // Child: render freeze-frame selector, write crop to disk
@@ -55,8 +37,6 @@ pub fn run_fragment(args: &[String]) {
 pub fn run_orchestrator(args: &[String]) {
     // Orchestrator: capture focused output → spawn child → report crop
     if args.iter().any(|a| a == "--screenshot") {
-        let quick = args.iter().any(|a| a == "--quick" || a == "--no-annotate");
-        let annotate = !quick;
         // Multi-monitor: capture the entire desktop once, then spawn one fragment
         // per monitor with a local crop. Fragments coordinate drags via a shared state file.
         let outputs = screenshot::output::list_all_outputs();
@@ -212,35 +192,15 @@ pub fn run_orchestrator(args: &[String]) {
         }
         eprintln!("[screenshot] cropped → {}", out_path.display());
 
-        if annotate {
-            let cmd = IpcCommand::Open(
-                OverlayTarget::Annotator,
-                Some(out_path.to_string_lossy().into_owned()),
-            );
-            match send_ipc_sync(&cmd) {
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!("[screenshot] annotator IPC failed: {e}");
-                    std::process::exit(1);
-                }
-            }
-        } else {
-            let home = std::env::var("HOME").unwrap_or_default();
-            let dir = std::path::PathBuf::from(home)
-                .join("Pictures")
-                .join("Screenshots");
-            let _ = std::fs::create_dir_all(&dir);
-            let ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let dest = dir.join(format!("shot_{}.jxl", ts));
-            match screenshot::annotator::png_to_jxl(&out_path, &dest) {
-                Ok(()) => eprintln!("[screenshot] saved → {}", dest.display()),
-                Err(e) => {
-                    eprintln!("[screenshot] JXL encode failed: {e}");
-                    std::process::exit(1);
-                }
+        let cmd = IpcCommand::Open(
+            OverlayTarget::Annotator,
+            Some(out_path.to_string_lossy().into_owned()),
+        );
+        match send_ipc_sync(&cmd) {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("[screenshot] annotator IPC failed: {e}");
+                std::process::exit(1);
             }
         }
         std::process::exit(0);

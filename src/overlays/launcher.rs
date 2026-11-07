@@ -123,8 +123,8 @@ impl AppLauncher {
                 icon_path: None,
             },
             AppEntry {
-                name: "Screenshot (Quickshot)".into(),
-                exec: "moonbeauty --screenshot --annotate".into(),
+                name: "Screenshot".into(),
+                exec: "moonbeauty --screenshot".into(),
                 icon: "📷".into(),
                 icon_path: None,
             },
@@ -561,8 +561,8 @@ impl AppLauncher {
             // Amogus
             "amogus" | "amongus" | "among us" | "sus" => ("Among Us", "internal:amogus"),
             // Screenshot
-            "shot" | "screenshot" | "capture" | "screenshot (quickshot)" => {
-                ("Screenshot", "moonbeauty --screenshot --annotate")
+            "shot" | "screenshot" | "capture" => {
+                ("Screenshot", "moonbeauty --screenshot")
             }
             _ => return None,
         };

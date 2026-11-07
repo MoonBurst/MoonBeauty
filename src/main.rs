@@ -5,7 +5,6 @@ use moonbeauty::libraries::ipc::{IpcCommand, OverlayTarget};
 use moonbeauty::libraries::process::resolve_exe;
 use moonbeauty::overlays::*;
 
-
 mod app;
 mod cli;
 
@@ -200,8 +199,6 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     cli::test_email::run(&args);
 
     cli::lockscreen_coordinator::run(&args);
-
-    cli::screenshot::run_quickshot_deprecation(&args);
 
     // Notification CLI actions
     if args.iter().any(|a| a == "--activate-latest-notif") {
