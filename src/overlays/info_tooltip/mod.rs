@@ -4,6 +4,7 @@ mod music;
 mod unified;
 mod net;
 mod clock;
+mod custom;
 mod net_proc;
 use buttons::*;
 use net_proc::*;
@@ -661,41 +662,7 @@ impl App {
                     col = self.render_clock(cols, col, &mut y, t, settings, total_h, slant_h, slant_right, safe, w_f, alpha);
                 }
                 InfoData::Custom => {
-                    let header = row![
-                        text("CUSTOM MODULE")
-                            .size((fs) as f32)
-                            .bold()
-                            .color(text_col),
-                        iced::widget::space::horizontal(),
-                        mk_close(),
-                    ]
-                    .align_y(Alignment::Center)
-                    .width(Length::Fill);
-                    col = col.push(slanted_row(
-                        header.into(),
-                        y + 16.0,
-                        total_h,
-                        slant_h,
-                        slant_right,
-                        safe,
-                        w_f,
-                        32.0,
-                    ));
-                    y += 32.0 + gap;
-                    let msg = text("Configure in Settings → Bar Layout")
-                        .size((fs) as f32)
-                        .color(muted)
-                        .into();
-                    col = col.push(slanted_row(
-                        msg,
-                        y + 10.0,
-                        total_h,
-                        slant_h,
-                        slant_right,
-                        safe,
-                        w_f,
-                        20.0,
-                    ));
+                    col = self.render_custom(col, &mut y, t, settings, total_h, slant_h, slant_right, safe, w_f, alpha);
                 }
             }
         } else {
