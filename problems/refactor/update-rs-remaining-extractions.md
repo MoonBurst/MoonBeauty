@@ -18,7 +18,7 @@ Still inline:
   post-match check that MUST be preserved verbatim)
 - ~~`Message::DismissActiveOverlay`~~ — *Extracted to `app/update/dismiss.rs`*
 - ~~Tray family~~ — *Extracted to `app/update/tray.rs`*
-- Email sync — `TickEmailSync`, `EmailSyncedWithDiff` (~90 lines)
+- ~~Email sync~~ — *Extracted to `app/update/email_sync.rs`*
 - ~~Background ticks~~ — *Extracted to `app/update/hardware.rs`*
 - ~~Remaining `IpcReceived` arms~~ — *Extracted to `app/update/ipc.rs`*
 
@@ -29,7 +29,7 @@ Extract in this order (each independently mergeable, each a commit):
 1. ~~`Message::Launcher` → `app/update/launcher.rs`~~ *(Done)*
 2. `Message::Annotator` → `app/update/annotator.rs`
 3. ~~Tray family → `app/update/tray.rs`~~ *(Done)*
-4. Email sync → `app/update/email_sync.rs`
+4. ~~Email sync → `app/update/email_sync.rs`~~ *(Done)*
 5. ~~Background ticks → `app/update/hardware.rs`~~ *(Done)*
 6. ~~Remaining IPC arms → `app/update/ipc.rs`~~ *(Done)*
 7. ~~`Message::DismissActiveOverlay` → `app/update/dismiss.rs`~~ *(Done)*
