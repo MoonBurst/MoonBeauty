@@ -7,7 +7,6 @@ mod clock;
 mod custom;
 mod net_proc;
 use buttons::*;
-use net_proc::*;
 
 use iced::widget::canvas::Canvas;
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Stack};
@@ -24,7 +23,7 @@ use crate::libraries::config::ShellSettings;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
 use crate::libraries::style::TextExt;
 
-use crate::overlays::tooltip_common::{octagon_row, slanted_row, KillButtonShape};
+use crate::overlays::tooltip_common::{slanted_row, KillButtonShape};
 
 const W_START: f32 = 130.0;
 const AUTO_MS: u128 = 15_000;
@@ -616,12 +615,8 @@ impl App {
             a: c.a * alpha,
             ..c
         };
-        let text_col = a(t.text);
         let muted = a(t.muted);
-        let danger = a(t.danger);
-        let warning = a(t.warning);
         let half_tt = settings.control_border_width * 0.5;
-        let success = a(t.success);
 
         let fs = settings.tooltip_font_size;
         let bar_h = settings.bar_height.max(1) as f32;
@@ -659,7 +654,7 @@ impl App {
                     col = self.render_net(net, col, &mut y, t, settings, total_h, slant_h, slant_right, safe, w_f, alpha, tooltip_slope);
                 }
                 InfoData::Clock(cols) => {
-                    col = self.render_clock(cols, col, &mut y, t, settings, total_h, slant_h, slant_right, safe, w_f, alpha);
+                    col = self.render_clock(cols, col, &mut y, t, settings, total_h, safe, w_f, alpha);
                 }
                 InfoData::Custom => {
                     col = self.render_custom(col, &mut y, t, settings, total_h, slant_h, slant_right, safe, w_f, alpha);

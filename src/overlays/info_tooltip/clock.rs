@@ -11,8 +11,6 @@ impl App {
         t: &ShellTheme,
         settings: &ShellSettings,
         total_h: f32,
-        slant_h: f32,
-        slant_right: bool,
         safe: f32,
         w_f: f32,
         alpha: f32,
