@@ -1340,7 +1340,7 @@ impl AppLauncher {
                             text(copy_val)
                                 .size((theme.font_size_overlay + 1) as f32)
                                 .bold()
-                                .color(theme.text_strong)
+                                .color(theme.text)
                                 .align_x(Alignment::Center)
                                 .wrapping(iced::widget::text::Wrapping::None),
                             text(input_part)
@@ -1454,7 +1454,7 @@ impl AppLauncher {
                             .into()
                     }
                 } else {
-                    container(text(&app.icon).size(64))
+                    container(text(&app.icon).size(64).color(theme.text))
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))
                         .center_x(Length::Fill)
@@ -1559,6 +1559,7 @@ impl AppLauncher {
 
         let list_container = container(
             scrollable(content_col)
+                .id(iced::widget::Id::new("launcher_scroll"))
                 .height(Length::Fill)
                 .width(Length::Fill),
         )

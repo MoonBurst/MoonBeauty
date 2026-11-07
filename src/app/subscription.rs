@@ -291,14 +291,8 @@ impl MoonBeautyShellApp {
                 };
                 let shift = modifiers.shift();
 
-                // Debug: log arrow keys with their capture status
-                if matches!(
-                    key,
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft)
-                        | iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight)
-                ) {
-                    eprintln!("[launcher-key] arrow status={:?}", status);
-                }
+                // Debug: log all key presses while launcher is open
+                eprintln!("[launcher-key] key={:?} status={:?}", key, status);
 
                 match key {
                     iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
