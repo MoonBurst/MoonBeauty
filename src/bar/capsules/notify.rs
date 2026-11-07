@@ -1,5 +1,5 @@
 use super::{label, CapsuleAction};
-use crate::libraries::config::theme::{hex_to_color, ShellTheme};
+use crate::libraries::config::theme::ShellTheme;
 use iced::{Color, Element};
 
 pub(super) fn render<'a, Message: 'a>(
@@ -9,7 +9,9 @@ pub(super) fn render<'a, Message: 'a>(
     let held_count = crate::overlays::notifications::held_notifs_count();
     let active_count = crate::overlays::notifications::read_active_count();
     let total_count = held_count + active_count;
-    let base08_col = hex_to_color(&theme.palette.base08);
+    // Fix 5: theme.danger is already hex_to_color(&palette.base08) —
+    // no need to re-parse the hex string per frame.
+    let base08_col = theme.danger;
     let text_col = if paused { base08_col } else { theme.text };
     let border_col = if paused { base08_col } else { theme.border };
 

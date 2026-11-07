@@ -819,9 +819,13 @@ impl NotificationOverlay {
         // Route to active if there's room, else to the pending queue.
         // 4 concurrent toasts is the visible limit; the 5th+ wait their
         // turn and are pulled in by `tick_toasts` when a slot frees.
+        const MAX_PENDING_TOASTS: usize = 50;
         if self.active_toasts.len() < 4 {
             self.active_toasts.push(item.clone());
         } else {
+            if self.pending_toasts.len() >= MAX_PENDING_TOASTS {
+                self.pending_toasts.pop_front();
+            }
             self.pending_toasts.push_back(item.clone());
             eprintln!(
                 "[queue] overflow: {:?} queued (pending={})",
@@ -2135,8 +2139,31 @@ pub fn dnd_flag_path() -> PathBuf {
     crate::libraries::process::mbs_runtime_dir().join("moonbeauty-dnd")
 }
 
+struct DndCache {
+    active: bool,
+    fetched_at: Instant,
+}
+
+static DND_CACHE: std::sync::OnceLock<std::sync::Mutex<DndCache>> = std::sync::OnceLock::new();
+
+fn dnd_cache() -> &'static std::sync::Mutex<DndCache> {
+    DND_CACHE.get_or_init(|| {
+        std::sync::Mutex::new(DndCache {
+            active: false,
+            fetched_at: Instant::now() - std::time::Duration::from_secs(60),
+        })
+    })
+}
+
 pub fn dnd_active() -> bool {
-    dnd_flag_path().exists()
+    // Fix 4: 250 ms stat cache. Called at 2-5 Hz from bar capsules
+    // and both the unified and net tooltips.
+    let mut g = dnd_cache().lock().unwrap();
+    if g.fetched_at.elapsed() > std::time::Duration::from_millis(250) {
+        g.active = dnd_flag_path().exists();
+        g.fetched_at = Instant::now();
+    }
+    g.active
 }
 
 pub fn toggle_dnd() -> bool {
@@ -2150,6 +2177,11 @@ pub fn toggle_dnd() -> bool {
         eprintln!("[dnd] flag file created: {:?}", p);
         true
     };
+    // Fix 4: propagate immediately, don't wait for the 250 ms cache TTL.
+    if let Ok(mut g) = dnd_cache().lock() {
+        g.active = state;
+        g.fetched_at = Instant::now();
+    }
     state
 }
 
@@ -2175,17 +2207,20 @@ pub fn save_held_notifs(toasts: &[NotificationToast]) {
     } else if let Ok(json) = serde_json::to_string(toasts) {
         let tmp = p.with_extension("tmp");
         if crate::libraries::process::private_write_file(&tmp, json.as_bytes()).is_ok() {
-            let _ = fs::rename(tmp, p);
+            let _ = fs::rename(&tmp, &p);
         }
     }
+    let mtime = std::fs::metadata(&p).ok().and_then(|m| m.modified().ok());
     let mut g = held_cache().lock().unwrap();
     g.count = toasts.len();
     g.fetched_at = Instant::now();
+    g.mtime = mtime;
 }
 
 struct HeldCache {
     count: usize,
     fetched_at: Instant,
+    mtime: Option<std::time::SystemTime>,
 }
 static HELD_CACHE: std::sync::OnceLock<std::sync::Mutex<HeldCache>> = std::sync::OnceLock::new();
 
@@ -2194,15 +2229,23 @@ fn held_cache() -> &'static std::sync::Mutex<HeldCache> {
         std::sync::Mutex::new(HeldCache {
             count: 0,
             fetched_at: Instant::now() - std::time::Duration::from_secs(60),
+            mtime: None,
         })
     })
 }
 
 pub fn held_notifs_count() -> usize {
+    // Fix 3: only re-parse when the file's mtime changed. load_held_notifs
+    // can parse up to 16 MB; called at 2-5 Hz from the bar, this was
+    // re-parsing once per second during sustained DND. Now: one stat()
+    // per call, parse only on mtime change (or 60 s safety net).
+    let path = held_notifs_path();
+    let mtime = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok());
     let mut g = held_cache().lock().unwrap();
-    if g.fetched_at.elapsed() > std::time::Duration::from_secs(1) {
+    if g.mtime != mtime || g.fetched_at.elapsed() > std::time::Duration::from_secs(60) {
         g.count = load_held_notifs().len();
         g.fetched_at = Instant::now();
+        g.mtime = mtime;
     }
     g.count
 }
@@ -2213,6 +2256,7 @@ pub fn take_held_notifs() -> Vec<NotificationToast> {
     let mut g = held_cache().lock().unwrap();
     g.count = 0;
     g.fetched_at = Instant::now();
+    g.mtime = None;
     list
 }
 

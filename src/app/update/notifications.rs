@@ -191,9 +191,13 @@ impl MoonBeautyShellApp {
                         item.hold_reset_at = Some(std::time::Instant::now());
                         item.exit_started_at = None;
                         item.slot_shift_start = None;
+                        const MAX_PENDING_TOASTS: usize = 50;
                         if self.notifs.active_toasts.len() < 4 {
                             self.notifs.active_toasts.push(item);
                         } else {
+                            if self.notifs.pending_toasts.len() >= MAX_PENDING_TOASTS {
+                                self.notifs.pending_toasts.pop_front();
+                            }
                             self.notifs.pending_toasts.push_back(item);
                         }
                     }
