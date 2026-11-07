@@ -232,17 +232,32 @@ impl SystemCollector {
                                             if let Some(rss_str) = statm.split_whitespace().nth(1) {
                                                 if let Ok(rss_pages) = rss_str.parse::<u64>() {
                                                     let rss_bytes = rss_pages * 4096; // Assuming 4KB pages
-                                                    let base_name = name
-                                                        .split(" #")
-                                                        .next()
-                                                        .unwrap_or("")
-                                                        .to_string();
-                                                    if seen_ram.insert(base_name) {
+                                                    // Only dedupe Firefox/Chrome-style
+                                                    // renderer subprocesses (name has
+                                                    // " #N" suffix). Ordinary processes
+                                                    // like "moonbeauty" can legitimately
+                                                    // run as multiple PIDs (bar +
+                                                    // notif-surface) and should all
+                                                    // appear in the tooltip.
+                                                    if !name.contains(" #") {
                                                         procs_ram_raw.push((
                                                             pid,
                                                             name.to_string(),
                                                             rss_bytes,
                                                         ));
+                                                    } else {
+                                                        let base_name = name
+                                                            .split(" #")
+                                                            .next()
+                                                            .unwrap_or("")
+                                                            .to_string();
+                                                        if seen_ram.insert(base_name) {
+                                                            procs_ram_raw.push((
+                                                                pid,
+                                                                name.to_string(),
+                                                                rss_bytes,
+                                                            ));
+                                                        }
                                                     }
                                                 }
                                             }

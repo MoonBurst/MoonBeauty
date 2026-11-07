@@ -95,6 +95,15 @@ impl MoonBeautyShellApp {
         // try_wait also clears the handle so the next toggle
         // starts from a clean slate rather than take()-ing a
         // dead child.
+        // Reap zombie standalone overlays. spawn_standalone stores a
+        // Child handle; without polling try_wait, self-exiting overlays
+        // (std::process::exit(0)) leave defunct processes until the next
+        // spawn of the same target. try_wait() reaps + drops the handle.
+        if let Some((_, c)) = self.standalone_child.as_mut() {
+            if matches!(c.try_wait(), Ok(Some(_))) {
+                self.standalone_child = None;
+            }
+        }
         if let Some(c) = self.weather_tooltip_child.as_mut() {
             if matches!(c.try_wait(), Ok(Some(_))) {
                 self.weather_tooltip_child = None;

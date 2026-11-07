@@ -4,9 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use tokio::process::Command;
 
-use super::calc::CalculatorOverlay;
 use super::dictionary::{DictionaryOverlay, MeaningEntry};
-use super::pass::PassOverlay;
 use crate::libraries::config::settings::ShellSettings;
 use crate::libraries::config::theme::ShellTheme;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
