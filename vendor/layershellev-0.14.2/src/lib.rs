@@ -1179,6 +1179,23 @@ impl rwh_06::HasDisplayHandle for WindowWrapper {
     }
 }
 
+
+// Phase 1a probe: verify ext-session-lock-v1 bindings from wayland-protocols
+// are available after enabling the "stable" feature. Removed in Phase 1b.
+#[allow(dead_code)]
+mod _session_lock_bindings_probe {
+    use wayland_protocols::ext::session_lock::v1::client::{
+        ext_session_lock_manager_v1::ExtSessionLockManagerV1,
+        ext_session_lock_surface_v1::ExtSessionLockSurfaceV1,
+        ext_session_lock_v1::ExtSessionLockV1,
+    };
+    fn _probe(
+        _a: Option<&ExtSessionLockManagerV1>,
+        _b: Option<&ExtSessionLockV1>,
+        _c: Option<&ExtSessionLockSurfaceV1>,
+    ) {}
+}
+
 impl<T> WindowState<T> {
     /// create a WindowState, you need to pass a namespace in
     pub fn new(namespace: &str) -> Self {
