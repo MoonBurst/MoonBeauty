@@ -109,6 +109,7 @@
 //!
 pub use events::NewInputPanelSettings;
 pub use events::NewLayerShellSettings;
+pub use events::NewSessionLockSettings;
 pub use events::NewPopUpSettings;
 pub use events::NewXdgWindowSettings;
 pub use events::OutputOption;
@@ -3429,6 +3430,91 @@ impl<T: 'static> WindowState<T> {
                                         .size((width, height))
                                         .viewport(viewport)
                                         .fractional_scale(fractional_scale)
+                                        .binding(info)
+                                        .becreated(true)
+                                        .build(),
+                                    );
+                                },
+                                ReturnData::NewSessionLock((
+                                    NewSessionLockSettings { size, output: output_option },
+                                    id,
+                                    info,
+                                )) => {
+                                    // Create a session-lock surface bound to one output.
+                                    // Protocol requires Locked event first — child
+                                    // gates this via is_session_lock_ready().
+                                    let output = match output_option {
+                                        OutputOption::Output(output) => Some(output),
+                                        _ => {
+                                            let pos = window_state.surface_pos();
+                                            let mut output = pos.and_then(|p| {
+                                                window_state.units[p].wl_output.as_ref()
+                                            });
+                                            if window_state.last_wloutput.is_none()
+                                                && window_state.outputs.len()
+                                                    > window_state.last_unit_index
+                                            {
+                                                window_state.last_wloutput = Some(
+                                                    window_state.outputs
+                                                        [window_state.last_unit_index]
+                                                        .1
+                                                        .clone(),
+                                                );
+                                            }
+                                            if matches!(
+                                                output_option,
+                                                events::OutputOption::LastOutput
+                                            ) {
+                                                output = window_state.last_wloutput.as_ref();
+                                            }
+                                            output.cloned()
+                                        }
+                                    };
+                                    let Some(output) = output else {
+                                        log::warn!(
+                                            "[session-lock] cannot create surface without a resolved output"
+                                        );
+                                        continue;
+                                    };
+                                    let Some(lock) = window_state.session_lock.as_ref() else {
+                                        log::warn!(
+                                            "[session-lock] NewSessionLock requested but no lock held; skipping"
+                                        );
+                                        continue;
+                                    };
+
+                                    let wl_surface = wmcompositer.create_surface(&qh, ());
+                                    let lock_surface =
+                                        lock.get_lock_surface(&wl_surface, &output, &qh, ());
+
+                                    let mut fractional_scale = None;
+                                    if let Some(ref fractional_scale_manager) =
+                                        fractional_scale_manager
+                                    {
+                                        fractional_scale =
+                                            Some(fractional_scale_manager.get_fractional_scale(
+                                                &wl_surface,
+                                                &qh,
+                                                (),
+                                            ));
+                                    }
+                                    let viewport = viewporter.as_ref().map(|viewport| {
+                                        viewport.get_viewport(&wl_surface, &qh, ())
+                                    });
+                                    wl_surface.commit();
+
+                                    window_state.push_window(
+                                        WindowStateUnitBuilder::new(
+                                            id,
+                                            qh.clone(),
+                                            connection.display(),
+                                            wl_surface,
+                                            Shell::SessionLock(lock_surface),
+                                        )
+                                        .size(size.unwrap_or((0, 0)))
+                                        .viewport(viewport)
+                                        .fractional_scale(fractional_scale)
+                                        .wl_output(Some(output))
                                         .binding(info)
                                         .becreated(true)
                                         .build(),
