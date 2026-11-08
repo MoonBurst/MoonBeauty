@@ -51,6 +51,23 @@ fn safe_mpris_file_path(url: &str) -> Option<std::path::PathBuf> {
         crate::dbg_log!("[mpris] rejected unsafe track url: {:?}", clean);
         return None;
     }
+    // Finding 33 (corrected): restrict to media extensions. The earlier
+    // comment claimed is_absolute + !contains("..") blocked
+    // file:///home/u/.ssh/id_rsa, but /home/u/.ssh/id_rsa passes both
+    // checks. A hostile MPRIS bridge presenting itself as a music player
+    // could trigger `gio trash ~/.ssh/id_rsa` via the tooltip's Trash
+    // button. Extension allowlist is the real fix.
+    const MEDIA_EXT: &[&str] = &[
+        "mp3", "flac", "ogg", "opus", "m4a", "wav", "aac", "wma", "alac",
+        "aiff", "aif", "mka", "mp4", "m4v", "mkv", "webm", "mov",
+    ];
+    let ext = std::path::Path::new(clean)
+        .extension()
+        .and_then(|s| s.to_str())?;
+    if !MEDIA_EXT.iter().any(|x| ext.eq_ignore_ascii_case(x)) {
+        crate::dbg_log!("[mpris] rejected non-media extension: {:?} ({})", clean, ext);
+        return None;
+    }
     Some(std::path::PathBuf::from(clean))
 }
 
@@ -522,5 +539,26 @@ mod safe_mpris_tests {
         assert!(safe_mpris_file_path("https://example.com/track.mp3").is_none());
         assert!(safe_mpris_file_path("spotify:track:abc123").is_none());
         assert!(safe_mpris_file_path("").is_none());
+    }
+
+    #[test]
+    fn non_media_extension_rejected() {
+        // Finding 33 (corrected): the previous guard allowed any absolute
+        // path, so file:///home/u/.ssh/id_rsa passed and 'Trash' would
+        // run `gio trash ~/.ssh/id_rsa`. Media-extension allowlist now
+        // blocks non-media extensions.
+        assert!(safe_mpris_file_path("file:///home/u/.ssh/id_rsa").is_none());
+        assert!(safe_mpris_file_path("file:///home/u/Documents/thesis.pdf").is_none());
+        assert!(safe_mpris_file_path("file:///tmp/notes.txt").is_none());
+        assert!(safe_mpris_file_path("file:///home/u/no_extension").is_none());
+    }
+
+    #[test]
+    fn media_extensions_accepted() {
+        for ext in &["mp3", "flac", "ogg", "opus", "m4a", "wav", "aac", "m4v", "mkv", "webm"] {
+            let url = format!("file:///home/u/Music/track.{}", ext);
+            assert!(safe_mpris_file_path(&url).is_some(), "{} rejected", ext);
+        }
+        assert!(safe_mpris_file_path("file:///home/u/Music/TRACK.MP3").is_some());
     }
 }

@@ -941,6 +941,20 @@ pub async fn read_message(id: &str, folder: &str) -> ParsedEmail {
             }
         }
 
+        // Finding 25 (extended): cap body text. A hostile email with
+        // 100 MB of plaintext (or 100 MB after html2text expansion)
+        // would otherwise force iced to shape and lay out the whole
+        // thing inside the email overlay — 100+ MB RSS and multi-second
+        // freeze. 1 MB is ~200 pages of dense text.
+        const MAX_TEXT_BYTES: usize = 1_000_000;
+        if parsed_email.text.len() > MAX_TEXT_BYTES {
+            let mut cut = MAX_TEXT_BYTES;
+            while cut > 0 && !parsed_email.text.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            parsed_email.text.truncate(cut);
+            parsed_email.text.push_str("\n\n[... body truncated at 1 MB ...]");
+        }
         return parsed_email;
     }
     parsed_email.text = "Failed to parse message.".into();

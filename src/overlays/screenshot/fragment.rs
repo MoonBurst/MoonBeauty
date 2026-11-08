@@ -67,20 +67,19 @@ pub fn read_state_file(path: &std::path::Path) -> (String, i32, i32, i32, i32) {
 
 pub fn write_state_file(path: &std::path::Path, state: &str, sx: i32, sy: i32, cx: i32, cy: i32) {
     let tmp = path.with_extension("tmp");
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)
-        {
-            let _ = write!(f, "{}\n{}\n{}\n{}\n{}\n", state, sx, sy, cx, cy);
-            let _ = f.sync_all();
-        }
+    // Finding 33 (corrected): private_create_new uses O_EXCL, refusing
+    // to follow a symlink planted at `tmp`. remove_file first clears any
+    // stale file (or symlink) from a previous tick; if the attacker
+    // re-creates the symlink between the two calls, private_create_new
+    // returns EEXIST and we skip the write — the next 16ms poll tick
+    // retries. This closes the last unguarded `OpenOptions` in the tree.
+    let _ = std::fs::remove_file(&tmp);
+    if let Ok(mut f) = crate::libraries::process::private_create_new(&tmp) {
+        let _ = write!(f, "{}\n{}\n{}\n{}\n{}\n", state, sx, sy, cx, cy);
+        let _ = f.sync_all();
+        drop(f);
+        let _ = std::fs::rename(&tmp, path);
     }
-    let _ = std::fs::rename(&tmp, path);
 }
 
 pub struct FragmentApp {
