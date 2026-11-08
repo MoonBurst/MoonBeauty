@@ -17,6 +17,7 @@
 //! `added` → spawn child; `removed` → kill child.
 
 use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, Zeroizing};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -251,7 +252,9 @@ impl LockCoordinator {
             std::io::stderr().flush().ok();
             let mut input = String::new();
             stdin().lock().read_line(&mut input).ok();
-            let password = input.trim_end_matches(['\r', '\n']).to_string();
+            let mut password =
+                Zeroizing::new(input.trim_end_matches(['\r', '\n']).to_string());
+            input.zeroize();
             eprintln!(
                 "len={} first={:?} last={:?}",
                 password.chars().count(),
@@ -266,9 +269,11 @@ impl LockCoordinator {
             eprintln!();
             if ok {
                 eprintln!("RESULT: ✓ auth succeeded");
+                password.zeroize();
                 std::process::exit(0);
             } else {
                 eprintln!("RESULT: ✗ all strategies failed");
+                password.zeroize();
                 std::process::exit(1);
             }
         });
@@ -771,6 +776,10 @@ impl LockCoordinator {
                                         tokio::time::sleep(Duration::from_millis(200)).await;
                                         Self::kill_all(&children);
                                         let _ = std::fs::remove_file(&socket_path);
+                                        // std::process::exit skips Drop. Zeroize
+                                        // explicitly so the successful password
+                                        // isn't left in the process's freed heap.
+                                        buffer.zeroize();
                                         std::process::exit(0);
                                     } else {
                                         fail_streak = fail_streak.saturating_add(1);
@@ -779,6 +788,13 @@ impl LockCoordinator {
                                             "[lock-coord] auth failed (fail_streak={})",
                                             fail_streak
                                         );
+                                        // Zeroize before clear: String::clear
+                                        // only sets len=0, leaving the password
+                                        // bytes in the freed-but-not-overwritten
+                                        // capacity. A same-user process with
+                                        // ptrace access can recover the password
+                                        // from /proc/<pid>/mem otherwise.
+                                        buffer.zeroize();
                                         buffer.clear();
                                         Self::broadcast(&mut peers, &LockIpc::Reset).await;
                                     }
@@ -891,7 +907,10 @@ impl LockCoordinator {
             eprintln!("[lock-coord] auth attempt: len={}", clean.chars().count());
         }
 
-        let pass_line = format!("{}\n", clean);
+        // Zeroizing: overwrites the password bytes on drop, including
+        // through early returns and panics. Without this, the freshly
+        // formatted String sits in freed heap until overwritten.
+        let pass_line = Zeroizing::new(format!("{}\n", clean));
 
         // ── Strategy 0: pamtester ──
         // Talks to real PAM auth (the same stack login(1) uses). The only
