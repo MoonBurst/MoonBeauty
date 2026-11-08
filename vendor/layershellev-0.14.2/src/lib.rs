@@ -179,6 +179,12 @@ use wayland_protocols::{
     },
 };
 
+use wayland_protocols::ext::session_lock::v1::client::{
+    ext_session_lock_manager_v1::ExtSessionLockManagerV1,
+    ext_session_lock_surface_v1::ExtSessionLockSurfaceV1,
+    ext_session_lock_v1::ExtSessionLockV1,
+};
+
 use wayland_protocols::wp::input_method::zv1::client::{
     zwp_input_panel_surface_v1::{Position as ZwpInputPanelPosition, ZwpInputPanelSurfaceV1},
     zwp_input_panel_v1::ZwpInputPanelV1,
@@ -347,6 +353,9 @@ enum Shell {
     PopUp((XdgPopup, XdgSurface)),
     XdgTopLevel((XdgToplevel, XdgSurface, Option<ZxdgToplevelDecorationV1>)),
     InputPanel(#[allow(unused)] ZwpInputPanelSurfaceV1),
+    /// Phase 1b: variant constructed by Phase 1c/1d. Until then, unused.
+    #[allow(dead_code)]
+    SessionLock(ExtSessionLockSurfaceV1),
 }
 
 impl PartialEq<ZwlrLayerSurfaceV1> for Shell {
@@ -383,6 +392,15 @@ impl PartialEq<XdgToplevel> for Shell {
         }
     }
 }
+
+impl PartialEq<ExtSessionLockSurfaceV1> for Shell {
+    fn eq(&self, other: &ExtSessionLockSurfaceV1) -> bool {
+        match self {
+            Self::SessionLock(surface) => surface == other,
+            _ => false,
+        }
+    }
+}
 impl Shell {
     fn destroy(&self) {
         match self {
@@ -398,6 +416,7 @@ impl Shell {
                 xdg_surface.destroy();
             }
             Self::LayerShell(shell) => shell.destroy(),
+            Self::SessionLock(surface) => surface.destroy(),
             Self::InputPanel(_) => {}
         }
     }

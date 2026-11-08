@@ -109,6 +109,18 @@ pub struct NewPopUpSettings {
     /// It means where the popup is, on which surface. It is the id of that layershell
     pub id: id::Id,
 }
+
+/// Settings to create a new session-lock surface (one per output).
+/// Used with `ext-session-lock-v1`. The lock itself is per-client;
+/// this struct describes a single lock surface bound to one output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewSessionLockSettings {
+    /// Optional explicit size. `None` = compositor-chosen (typically
+    /// full output dimensions, per `ext_session_lock_surface_v1.configure`).
+    pub size: Option<(u32, u32)>,
+    /// Which output this lock surface belongs to.
+    pub output: OutputOption,
+}
 /// be used to create a new popup
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct NewXdgWindowSettings {
@@ -171,6 +183,9 @@ pub enum ReturnData<INFO> {
     NewPopUp((NewPopUpSettings, id::Id, Option<INFO>)),
     NewXdgBase((NewXdgWindowSettings, id::Id, Option<INFO>)),
     NewInputPanel((NewInputPanelSettings, id::Id, Option<INFO>)),
+    /// Request creation of a session-lock surface (ext-session-lock-v1).
+    /// Emitted by the shell child that owns the ExtSessionLockV1 lock.
+    NewSessionLock((NewSessionLockSettings, id::Id, Option<INFO>)),
     None,
 }
 
