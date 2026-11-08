@@ -332,6 +332,17 @@ pub fn run(
     local_png: PathBuf,
     state_file: PathBuf,
 ) -> Result<(), String> {
+    // Item 6: reject arbitrary read/write paths. Both must resolve
+    // under $XDG_RUNTIME_DIR/mbs-tmp/. Blocks `moonbeauty
+    // --freeze-fragment DP-1 0 0 /etc/passwd /etc/shadow` from
+    // reading attacker-picked files or truncating user files via
+    // write_state_file.
+    if !crate::libraries::process::path_is_under_mbs_tmp(&local_png) {
+        return Err(format!("local_png outside mbs-tmp: {:?}", local_png));
+    }
+    if !crate::libraries::process::path_is_under_mbs_tmp(&state_file) {
+        return Err(format!("state_file outside mbs-tmp: {:?}", state_file));
+    }
     let bytes = std::fs::read(&local_png).map_err(|e| format!("read: {e}"))?;
     let handle = iced::widget::image::Handle::from_bytes(bytes);
     let app = FragmentApp {

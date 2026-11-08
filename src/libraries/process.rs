@@ -197,6 +197,30 @@ pub fn mbs_unique_tmp(prefix: &str, ext: &str) -> std::path::PathBuf {
 /// directory) currently exists at `path`. This is the safe primitive for
 /// writes to attacker-predictable names: the syscall cannot be tricked
 /// into following a symlink or truncating a pre-placed file.
+/// True iff `path` resolves under `$XDG_RUNTIME_DIR/mbs-tmp/`.
+///
+/// Used by `--freeze-fragment` (item 6) and the annotator handoff
+/// (item 7) to reject attacker-controlled paths. Canonicalizes both
+/// sides so symlinks can't escape: a symlink inside mbs-tmp that
+/// points to `/etc/passwd` is rejected because the resolved target
+/// is outside. If `path` doesn't exist yet, canonicalizes its parent
+/// and appends the basename — handles `state_file`, which is created
+/// later by `write_state_file`.
+pub fn path_is_under_mbs_tmp(path: &std::path::Path) -> bool {
+    let root = mbs_tmp_dir();
+    let Ok(canon_root) = std::fs::canonicalize(&root) else {
+        return false;
+    };
+    let canon = if path.exists() {
+        std::fs::canonicalize(path).ok()
+    } else {
+        path.parent()
+            .and_then(|p| std::fs::canonicalize(p).ok())
+            .and_then(|canon_parent| path.file_name().map(|n| canon_parent.join(n)))
+    };
+    canon.is_some_and(|c| c.starts_with(&canon_root))
+}
+
 pub fn private_create_new(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt as _;
     std::fs::OpenOptions::new()

@@ -297,8 +297,19 @@ impl MoonBeautyShellApp {
                     // together bound the exposure.
                     let pb = std::path::PathBuf::from(&p);
                     let safe = pb.is_absolute() && !p.contains("..");
+                    // Item 7: also require mbs-tmp. `is_absolute` +
+                    // `!contains("..")` alone still permits e.g.
+                    // /home/user/.config/email.json. Narrowing to the
+                    // shell's own scratch dir closes the IPC-path-injection
+                    // surface.
+                    let in_tmp = moonbeauty::libraries::process::path_is_under_mbs_tmp(&pb);
                     if !safe {
                         eprintln!("[annotator] rejecting unsafe MBS_ANNOTATOR_PATH: {:?}", p);
+                    } else if !in_tmp {
+                        eprintln!(
+                            "[annotator] rejecting MBS_ANNOTATOR_PATH outside mbs-tmp: {:?}",
+                            p
+                        );
                     } else {
                         match std::fs::read(&pb) {
                             Ok(bytes) => {
