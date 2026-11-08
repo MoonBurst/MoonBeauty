@@ -924,6 +924,13 @@ pub struct WindowState<T> {
     /// Active ext-session-lock-v1 lock object, if any. One per client
     /// (compositor-enforced). All SessionLock surfaces share this lock.
     session_lock: Option<ExtSessionLockV1>,
+    /// ext-session-lock-v1 manager, bound in build() when available.
+    ext_session_lock_manager: Option<ExtSessionLockManagerV1>,
+    /// Builder opt-in: when true, build() calls lock() to acquire the lock.
+    session_lock_requested: bool,
+    /// Set to true when ExtSessionLockV1 emits Locked. Child checks via
+    /// is_session_lock_ready() before emitting ReturnData::NewSessionLock.
+    session_lock_ready: bool,
 
     ime_purpose: ImePurpose,
     ime_allowed: bool,
@@ -1067,6 +1074,17 @@ impl<T> WindowState<T> {
 
     pub fn is_background(&self) -> bool {
         self.start_mode.is_background()
+    }
+
+    /// True once the compositor has granted the session-lock (Locked event).
+    /// Child should emit ReturnData::NewSessionLock after this returns true.
+    pub fn is_session_lock_ready(&self) -> bool {
+        self.session_lock_ready
+    }
+
+    /// True if a lock object is held (may be pre-Locked).
+    pub fn session_lock_acquired(&self) -> bool {
+        self.session_lock.is_some()
     }
 
     pub fn is_allscreens(&self) -> bool {
@@ -1283,6 +1301,19 @@ impl<T> WindowState<T> {
         self
     }
 
+    /// Opt into ext-session-lock-v1 acquisition. When set, build() binds
+    /// ExtSessionLockManagerV1 and calls lock(). The lock fires Locked or
+    /// Finished asynchronously (during the event loop roundtrip). On
+    /// Finished (denied/revoked), the child receives a Closed message and
+    /// exits.
+    ///
+    /// After Locked, the child should emit ReturnData::NewSessionLock for
+    /// each output it wants locked. See is_session_lock_ready().
+    pub fn with_session_lock(mut self) -> Self {
+        self.session_lock_requested = true;
+        self
+    }
+
     /// keyboard_interacivity, please take look at [layer_shell](https://wayland.app/protocols/wlr-layer-shell-unstable-v1)
     pub fn with_keyboard_interacivity(
         mut self,
@@ -1409,6 +1440,9 @@ impl<T> Default for WindowState<T> {
 
             xdg_decoration_manager: None,
             session_lock: None,
+            ext_session_lock_manager: None,
+            session_lock_requested: false,
+            session_lock_ready: false,
         }
     }
 }
@@ -2475,17 +2509,22 @@ impl<T> Dispatch<ExtSessionLockV1, ()> for WindowState<T> {
     ) {
         match event {
             ext_session_lock_v1::Event::Locked => {
-                log::info!("[session-lock] Locked event received");
-                // Surface creation is deferred: child emits
-                // ReturnData::NewSessionLock for each output (Phase 1d).
+                log::info!("[session-lock] Locked — compositor granted lock");
+                state.session_lock_ready = true;
             }
             ext_session_lock_v1::Event::Finished => {
                 log::warn!(
-                    "[session-lock] Finished event — lock denied or revoked"
+                    "[session-lock] Finished — lock denied (another lock active) or revoked"
                 );
-                // Close every SessionLock-backed unit. Each yields a
-                // DispatchMessage::Closed to the event handler, which
-                // (for standalone lockscreen) exits the process.
+                state.session_lock_ready = false;
+                // Signal the child to exit. Push a Closed to the message
+                // queue; child's event_handler (lockscreen) will exit(0)
+                // on this message, same as layer-shell Closed.
+                state
+                    .message
+                    .push((None, DispatchMessageInner::Closed));
+                // Also close any existing SessionLock units if present
+                // (shouldn't be in Phase 1d, but defensive for later).
                 for unit in state.units.iter_mut() {
                     if matches!(unit.shell, Shell::SessionLock(_)) {
                         unit.request_close();
@@ -2595,6 +2634,26 @@ impl<T: 'static> WindowState<T> {
             .ok();
 
         self.xdg_decoration_manager = decoration_manager;
+
+        // ext-session-lock-v1: bind manager, then optionally acquire lock.
+        let session_lock_manager = globals
+            .bind::<ExtSessionLockManagerV1, _, _>(&qh, 1..=1, ())
+            .ok();
+        self.ext_session_lock_manager = session_lock_manager.clone();
+        if self.session_lock_requested {
+            match &session_lock_manager {
+                Some(mgr) => {
+                    let lock = mgr.lock(&qh, ());
+                    log::info!("[session-lock] acquired lock object, awaiting Locked");
+                    self.session_lock = Some(lock);
+                }
+                None => {
+                    log::warn!(
+                        "[session-lock] requested but ext-session-lock-v1 not advertised by compositor"
+                    );
+                }
+            }
+        }
 
         let fractional_scale_manager = globals
             .bind::<WpFractionalScaleManagerV1, _, _>(&qh, 1..=1, ())
