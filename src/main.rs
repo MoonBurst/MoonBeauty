@@ -79,9 +79,9 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     cli::lockscreen_coordinator::run(&args);
 
-    cli::notify::run(&args);
+    cli::notify_flags::run(&args);
 
-    cli::music::run(&args);
+    cli::music_flags::run(&args);
 
     // Restart bar (used by Settings when changing monitor)
     cli::restart::run(&args);
