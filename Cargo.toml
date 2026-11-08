@@ -8,6 +8,7 @@ description = "High-performance Wayland desktop shell and overlay matrix in Rust
 [dependencies]
 mpd_client = "1"
 sha2 = "0.10"
+libc = "0.2"
 zeroize = "1"
 iced_futures = "0.14"
 iced = { version = "0.14", default-features = false, features = ["advanced", "tokio", "canvas", "image", "svg", "tiny-skia"] }

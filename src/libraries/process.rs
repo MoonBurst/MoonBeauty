@@ -1,6 +1,29 @@
 //! Process utilities.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static SIGTERM_FLAG: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn sigterm_handler(_sig: libc::c_int) {
+    // Async-signal-safe: single atomic store.
+    SIGTERM_FLAG.store(true, Ordering::SeqCst);
+}
+
+/// Install a SIGTERM handler that sets a process-global flag. Idempotent.
+/// Call once at app startup. Must be followed by `was_sigterm_signaled()`
+/// polling in a tick loop; the handler itself cannot wake async timers.
+pub fn install_sigterm_handler() {
+    #[allow(unsafe_code)]
+    unsafe {
+        libc::signal(libc::SIGTERM, sigterm_handler as libc::sighandler_t);
+    }
+}
+
+/// True after SIGTERM was received. Poll from a Tick handler.
+pub fn was_sigterm_signaled() -> bool {
+    SIGTERM_FLAG.load(Ordering::SeqCst)
+}
 
 /// Resolve the current executable path, stripping the " (deleted)" suffix
 /// that `/proc/PID/exe` appends after `cargo build` replaces a running binary.

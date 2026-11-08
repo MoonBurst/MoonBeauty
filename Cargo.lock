@@ -3137,6 +3137,7 @@ dependencies = [
  "jxl",
  "jxl-image-rs-integration",
  "lettre",
+ "libc",
  "mail-parser",
  "mpd_client",
  "native-tls",

@@ -93,7 +93,7 @@ pub struct App {
     slant_l: SlantSide,
     #[allow(dead_code)]
     slant_r: SlantSide,
-    closing_at: Option<Instant>,
+    closing_at: Option<crate::overlays::tooltip_engine::ClosingState>,
     search_query: String,
     trash_confirm: bool,
     anim_frame: u64,
@@ -108,6 +108,7 @@ pub struct App {
 #[allow(dead_code)]
 impl App {
     fn new_app() -> (Self, Task<Message>) {
+        crate::libraries::process::install_sigterm_handler();
         let mode = std::env::var("MBS_INFO_MODE").unwrap_or_else(|_| "custom".into());
         let cx: i32 = std::env::var("MBS_CAPSULE_CX")
             .ok()
@@ -195,6 +196,25 @@ impl App {
         )
     }
 
+    fn snapshot_for_close(&self) -> crate::overlays::tooltip_engine::ClosingState {
+        let cur = crate::overlays::tooltip_engine::compute(
+            self.opened.elapsed().as_millis() as f32,
+            self.w_start,
+            self.w as f32,
+            self.h as f32,
+            if self.mode == "clock" { 0.0 } else { self.theme.slant_width },
+            self.settings.bar_height.max(1) as f32,
+            self.drop_ms,
+            self.expand_ms,
+        );
+        crate::overlays::tooltip_engine::ClosingState {
+            started: Instant::now(),
+            from_w: cur.w,
+            from_h: cur.h,
+            from_opacity: cur.opacity,
+        }
+    }
+
     fn namespace(&self) -> String {
         format!("mbs-info-tip-{}", self.mode)
     }
@@ -202,14 +222,20 @@ impl App {
     fn update(&mut self, m: Message) -> Task<Message> {
         match m {
             Message::Tick => {
+                if crate::libraries::process::was_sigterm_signaled()
+                    && self.closing_at.is_none()
+                {
+                    let snap = self.snapshot_for_close();
+                    self.closing_at = Some(snap);
+                }
                 self.anim_frame = self.anim_frame.wrapping_add(1);
                 let elapsed_ms = self.opened.elapsed().as_millis() as u64;
                 if std::env::var_os("MBS_TICK_DIAG").is_some() {
                     eprintln!("[tick] frame={} elapsed={}ms", self.anim_frame, elapsed_ms);
                 }
 
-                if let Some(t) = self.closing_at {
-                    if t.elapsed().as_millis() > (self.drop_ms * 1.9) as u128 {
+                if let Some(t) = &self.closing_at {
+                    if t.started.elapsed().as_millis() > (self.drop_ms * 3.0) as u128 {
                         std::process::exit(0);
                     }
                 } else if self.opened.elapsed().as_millis() > AUTO_MS {
@@ -223,7 +249,9 @@ impl App {
                         .filter(|n| *n >= 1 && *n <= 100)
                         .unwrap_or(4)
                 } else {
-                    500
+                    // 100ms (was 500) so SIGTERM-close is picked up within
+                    // ~100ms during idle.
+                    100
                 };
 
                 return Task::perform(
@@ -260,7 +288,10 @@ impl App {
                 self.data = Some(d);
             }
             Message::Dismiss => {
-                self.closing_at = Some(Instant::now());
+                if self.closing_at.is_none() {
+                    let snap = self.snapshot_for_close();
+                    self.closing_at = Some(snap);
+                }
             }
             Message::MusicPrev => {
                 // Finding 74: route through the bar's backend selector
@@ -494,12 +525,14 @@ impl App {
         // width by slant-coupling during drop like the parallelogram does).
         let slant_base = if is_clock { 0.0 } else { theme.slant_width };
 
-        let anim = if let Some(t) = self.closing_at {
-            crate::overlays::tooltip_engine::compute_close(
-                t.elapsed().as_millis() as f32,
+        let anim = if let Some(t) = &self.closing_at {
+            crate::overlays::tooltip_engine::compute_close_from(
+                t.started.elapsed().as_millis() as f32,
+                t.from_w,
+                t.from_h,
+                t.from_opacity,
                 self.w_start,
                 self.w as f32,
-                effective_h,
                 slant_base,
                 settings.bar_height as f32,
                 self.drop_ms,
@@ -764,7 +797,7 @@ pub fn run() -> Result<(), iced_layershell::Error> {
         exclusive_zone: -1,
         anchor,
         layer: Layer::Overlay,
-        keyboard_interactivity: KeyboardInteractivity::OnDemand,
+        keyboard_interactivity: KeyboardInteractivity::Exclusive,
         start_mode: output
             .map(iced_layershell::settings::StartMode::TargetScreen)
             .unwrap_or(iced_layershell::settings::StartMode::Active),

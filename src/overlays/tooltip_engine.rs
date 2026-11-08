@@ -9,6 +9,15 @@ pub struct Anim {
     pub opacity: f32,
 }
 
+/// Snapshot of animation state at the moment close was triggered.
+#[derive(Debug, Clone, Copy)]
+pub struct ClosingState {
+    pub started: std::time::Instant,
+    pub from_w: f32,
+    pub from_h: f32,
+    pub from_opacity: f32,
+}
+
 #[inline]
 fn smoothstep(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
@@ -48,6 +57,61 @@ pub fn compute(
     let cut = (w.min(h) * 0.15).max(0.0);
     Anim {
         w,
+        h,
+        slant: slant_h,
+        cut,
+        opacity,
+    }
+}
+
+/// Interrupt-safe close: same choreography as `compute_close`, but
+/// starts from the captured (from_w, from_h, from_opacity). Duration
+/// scales with how much width still needs to shrink, so a tooltip
+/// 30%-open closes proportionally faster than one at 100%.
+pub fn compute_close_from(
+    elapsed_ms: f32,
+    from_w: f32,
+    from_h: f32,
+    from_opacity: f32,
+    cap_w: f32,
+    final_w: f32,
+    slant_base: f32,
+    bar_h: f32,
+    base_ms: f32,
+) -> Anim {
+    let bar_h = bar_h.max(1.0);
+    let slant_at = |h: f32| slant_base * (h / bar_h);
+    let cap_core = (cap_w - slant_base).max(1.0);
+    let from_slant = slant_at(from_h);
+    let from_core = (from_w - from_slant).max(cap_core);
+
+    let full_width_range = (final_w - cap_w).max(1.0);
+    let remaining_width = (from_w - cap_w).max(0.0);
+    let frac = (remaining_width / full_width_range).clamp(0.0, 1.0);
+    // sqrt so a barely-open tooltip still gets a visible ~150ms close.
+    let scale = frac.sqrt().max(0.15);
+
+    let fade_ms = (base_ms * 0.4 * scale).max(1.0);
+    let width_ms = (base_ms * 0.7 * scale).max(1.0);
+    let height_ms = (base_ms * 0.8 * scale).max(1.0);
+
+    let o_t = (elapsed_ms / fade_ms).clamp(0.0, 1.0);
+    let opacity = from_opacity * (1.0 - o_t * o_t);
+
+    let w_elapsed = (elapsed_ms - fade_ms).max(0.0);
+    let w_t = (w_elapsed / width_ms).clamp(0.0, 1.0);
+    let core = from_core + (cap_core - from_core) * w_t * w_t * w_t;
+
+    let h_elapsed = (elapsed_ms - fade_ms - width_ms).max(0.0);
+    let h_t = (h_elapsed / height_ms).clamp(0.0, 1.0);
+    let h = from_h * (1.0 - h_t * h_t * h_t);
+
+    let slant_h = slant_at(h);
+    let w_final = core + slant_h;
+    let cut = (w_final.min(h) * 0.15).max(0.0);
+
+    Anim {
+        w: w_final,
         h,
         slant: slant_h,
         cut,

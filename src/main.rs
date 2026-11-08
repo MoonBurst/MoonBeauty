@@ -2,6 +2,7 @@ use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use moonbeauty::libraries::config::ShellSettings;
 use moonbeauty::libraries::ipc::{IpcCommand, OverlayTarget};
+use moonbeauty::libraries::process::resolve_exe;
 
 mod app;
 mod cli;
@@ -131,11 +132,32 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     moonbeauty::libraries::process::tighten_user_state_files();
 
     let settings = ShellSettings::load();
-
-    // Option A: notif-surface is D-Bus-activated on demand (see
-    // ~/.local/share/dbus-1/services/org.freedesktop.Notifications.service).
-    // It self-exits after 5 min idle (handle_poll_notifs).
-    let _ = &settings;
+    // Eager spawn. D-Bus activation cold-start is 800-1500ms, which is
+    // slower than the round-trip from the originating application in most
+    // cases — notifications arrive AFTER the user has read the message.
+    // 106 MB RSS is the cost of working notifications.
+    //
+    // Reverted from the lazy-activation experiment (2026-11-08). The
+    // D-Bus service file is kept as a crash fallback: if notif-surface
+    // crashes, D-Bus reactivates it on the next Notify() call.
+    if !is_notif_surface && standalone_target.is_none() {
+        let _ = std::process::Command::new("pkill")
+            .args([
+                "-f",
+                "--",
+                "(^|/)(moonbeauty|moon-beauty-shell) --notif-surface$",
+            ])
+            .status();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let exe = resolve_exe();
+        let mut cmd = std::process::Command::new(exe);
+        cmd.arg("--notif-surface");
+        let target = &settings.notif_screen_name;
+        if !target.is_empty() && target != "Auto" && target != "Auto (Primary)" {
+            cmd.env("MBS_OUTPUT", target);
+        }
+        let _ = moonbeauty::libraries::process::spawn_and_reap(&mut cmd);
+    }
 
     // Fast path: bar already set MBS_OUTPUT — child inherits it.
     let resolved_output: Option<String> = if std::env::var("MBS_OUTPUT").is_ok() {

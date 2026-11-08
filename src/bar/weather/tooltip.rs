@@ -45,7 +45,7 @@ pub struct App {
     slant_l: SlantSide,
     #[allow(dead_code)]
     slant_r: SlantSide,
-    closing_at: Option<Instant>,
+    closing_at: Option<crate::overlays::tooltip_engine::ClosingState>,
     anim_frame: u64,
     // Cached at boot so view() doesn't reload from disk at 60fps
     // during the drop/expand animation (~400ms of ~24 frames each).
@@ -56,6 +56,7 @@ pub struct App {
 #[allow(dead_code)]
 impl App {
     fn new_app() -> (Self, Task<Message>) {
+        crate::libraries::process::install_sigterm_handler();
         let cx: i32 = std::env::var("MBS_CAPSULE_CX")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -131,6 +132,25 @@ impl App {
         )
     }
 
+    fn snapshot_for_close(&self) -> crate::overlays::tooltip_engine::ClosingState {
+        let cur = crate::overlays::tooltip_engine::compute(
+            self.opened.elapsed().as_millis() as f32,
+            self.w_start,
+            self.w as f32,
+            self.h as f32,
+            self.theme.slant_width,
+            self.settings.bar_height.max(1) as f32,
+            self.drop_ms,
+            self.expand_ms,
+        );
+        crate::overlays::tooltip_engine::ClosingState {
+            started: Instant::now(),
+            from_w: cur.w,
+            from_h: cur.h,
+            from_opacity: cur.opacity,
+        }
+    }
+
     fn namespace(&self) -> String {
         "mbs-wx-tip".into()
     }
@@ -138,14 +158,20 @@ impl App {
     fn update(&mut self, m: Message) -> Task<Message> {
         match m {
             Message::Tick => {
+                if crate::libraries::process::was_sigterm_signaled()
+                    && self.closing_at.is_none()
+                {
+                    let snap = self.snapshot_for_close();
+                    self.closing_at = Some(snap);
+                }
                 self.anim_frame = self.anim_frame.wrapping_add(1);
                 let elapsed_ms = self.opened.elapsed().as_millis() as u64;
                 if std::env::var_os("MBS_TICK_DIAG").is_some() {
                     eprintln!("[tick] frame={} elapsed={}ms", self.anim_frame, elapsed_ms);
                 }
 
-                if let Some(t) = self.closing_at {
-                    if t.elapsed().as_millis() > (self.drop_ms * 1.9) as u128 {
+                if let Some(t) = &self.closing_at {
+                    if t.started.elapsed().as_millis() > (self.drop_ms * 3.0) as u128 {
                         std::process::exit(0);
                     }
                 } else if self.opened.elapsed().as_millis() > AUTO_MS {
@@ -159,7 +185,11 @@ impl App {
                         .filter(|n| *n >= 1 && *n <= 100)
                         .unwrap_or(4)
                 } else {
-                    500
+                    // 100ms (was 500) so SIGTERM-close is picked up within
+                    // ~100ms during idle; without this, the tooltip sits
+                    // visible for up to 500ms before the close animation
+                    // can start.
+                    100
                 };
 
                 return Task::perform(
@@ -172,7 +202,10 @@ impl App {
                 self.fetched = true;
             }
             Message::Dismiss => {
-                self.closing_at = Some(Instant::now());
+                if self.closing_at.is_none() {
+                    let snap = self.snapshot_for_close();
+                    self.closing_at = Some(snap);
+                }
             }
         }
         Task::none()
@@ -181,12 +214,14 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         let settings = &self.settings;
         let theme = &self.theme;
-        let anim = if let Some(t) = self.closing_at {
-            crate::overlays::tooltip_engine::compute_close(
-                t.elapsed().as_millis() as f32,
+        let anim = if let Some(t) = &self.closing_at {
+            crate::overlays::tooltip_engine::compute_close_from(
+                t.started.elapsed().as_millis() as f32,
+                t.from_w,
+                t.from_h,
+                t.from_opacity,
                 self.w_start,
                 self.w as f32,
-                self.h as f32,
                 theme.slant_width,
                 settings.bar_height as f32,
                 self.drop_ms,
@@ -239,17 +274,25 @@ impl App {
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
-        // Animation is driven by Command::perform recursion in update(),
-        // not by a subscription timer. Subscriptions here only handle ESC.
+        // ESC + blur + diagnostic event logging. The eprintlns are temporary
+        // while we diagnose why ESC isn't reaching the tooltip — removed
+        // once confirmed.
         iced::event::listen_with(|event, _status, _window| {
-            let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
-                ..
-            }) = event
-            else {
-                return None;
-            };
-            Some(Message::Dismiss)
+            match event {
+                iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                    key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+                    ..
+                }) => {
+                    Some(Message::Dismiss)
+                }
+                iced::Event::Window(iced::window::Event::Focused) => {
+                    None
+                }
+                iced::Event::Window(iced::window::Event::Unfocused) => {
+                    None
+                }
+                _ => None,
+            }
         })
     }
     fn theme(&self) -> Theme {
@@ -446,7 +489,7 @@ pub fn run() -> Result<(), iced_layershell::Error> {
         exclusive_zone: -1,
         anchor,
         layer: Layer::Overlay,
-        keyboard_interactivity: KeyboardInteractivity::OnDemand,
+        keyboard_interactivity: KeyboardInteractivity::Exclusive,
         start_mode: output
             .map(iced_layershell::settings::StartMode::TargetScreen)
             .unwrap_or(iced_layershell::settings::StartMode::Active),

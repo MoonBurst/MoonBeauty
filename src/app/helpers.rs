@@ -84,10 +84,14 @@ impl MoonBeautyShellApp {
             .and_then(|c| c.try_wait().ok())
             .is_some_and(|status| status.is_none());
         if running {
-            eprintln!("[tooltip] Already open; toggling off");
+            eprintln!("[tooltip] Already open; toggling off via SIGTERM (animate)");
             if let Some(mut c) = self.weather_tooltip_child.take() {
-                let _ = c.kill();
-                let _ = c.wait();
+                let pid = c.id() as libc::pid_t;
+                #[allow(unsafe_code)]
+                unsafe { libc::kill(pid, libc::SIGTERM); }
+                // Reap on a background thread; do NOT block the UI thread
+                // waiting for the ~340ms close animation.
+                std::thread::spawn(move || { let _ = c.wait(); });
             }
             return Command::none();
         }
@@ -225,8 +229,10 @@ impl MoonBeautyShellApp {
                 //       (which defaults unknown targets to RAM).
                 if id == "alarm" {
                     if let Some(mut c) = self.weather_tooltip_child.take() {
-                        let _ = c.kill();
-                        let _ = c.wait();
+                        let pid = c.id() as libc::pid_t;
+                        #[allow(unsafe_code)]
+                        unsafe { libc::kill(pid, libc::SIGTERM); }
+                        std::thread::spawn(move || { let _ = c.wait(); });
                     }
                     self.toggle_standalone(OverlayTarget::Reminders);
                     return Command::none();
@@ -289,8 +295,10 @@ impl MoonBeautyShellApp {
             CapsuleAction::CancelTooltip(id) => {
                 eprintln!("[topbar] CancelTooltip: {}", id);
                 if let Some(mut c) = self.weather_tooltip_child.take() {
-                    let _ = c.kill();
-                    let _ = c.wait();
+                    let pid = c.id() as libc::pid_t;
+                    #[allow(unsafe_code)]
+                    unsafe { libc::kill(pid, libc::SIGTERM); }
+                    std::thread::spawn(move || { let _ = c.wait(); });
                 }
                 // Right-click on alarm capsule: wipe active timers
                 if id == "alarm" {
