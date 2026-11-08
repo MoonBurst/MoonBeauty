@@ -1077,6 +1077,13 @@ pub async fn toggle_star(id: &str, folder: &str, star: bool) -> Result<(), Strin
     if !is_safe_imap_uid(id) {
         return Err(format!("unsafe message id: {:?}", id));
     }
+
+    // Finding 28 defense-in-depth: sink-level folder validation.
+    // fetch_from_network validates the same sink; these four
+    // mutation fns previously trusted their folder argument.
+    if !is_safe_imap_folder(folder) {
+        return Err(format!("unsafe folder name: {:?}", folder));
+    }
     let mut envs = load_index(folder);
     if let Some(env) = envs.iter_mut().find(|e| e.id == id) {
         env.is_starred = star;
@@ -1110,6 +1117,13 @@ pub async fn move_to_trash(id: &str, folder: &str) -> Result<(), String> {
     // Finding 29: numeric-uid gate before uid_copy/uid_store.
     if !is_safe_imap_uid(id) {
         return Err(format!("unsafe message id: {:?}", id));
+    }
+
+    // Finding 28 defense-in-depth: sink-level folder validation.
+    // fetch_from_network validates the same sink; these four
+    // mutation fns previously trusted their folder argument.
+    if !is_safe_imap_folder(folder) {
+        return Err(format!("unsafe folder name: {:?}", folder));
     }
     let cfg = load_config();
     let pass = resolve_password(&cfg);
@@ -1146,6 +1160,13 @@ pub async fn move_to_spam(id: &str, folder: &str) -> Result<(), String> {
     // Finding 29: numeric-uid gate before uid_copy/uid_store.
     if !is_safe_imap_uid(id) {
         return Err(format!("unsafe message id: {:?}", id));
+    }
+
+    // Finding 28 defense-in-depth: sink-level folder validation.
+    // fetch_from_network validates the same sink; these four
+    // mutation fns previously trusted their folder argument.
+    if !is_safe_imap_folder(folder) {
+        return Err(format!("unsafe folder name: {:?}", folder));
     }
     let cfg = load_config();
     let pass = resolve_password(&cfg);
@@ -1216,6 +1237,13 @@ pub async fn delete_message(id: &str, folder: &str) -> Result<(), String> {
     // Finding 29: numeric-uid gate before uid_store.
     if !is_safe_imap_uid(id) {
         return Err(format!("unsafe message id: {:?}", id));
+    }
+
+    // Finding 28 defense-in-depth: sink-level folder validation.
+    // fetch_from_network validates the same sink; these four
+    // mutation fns previously trusted their folder argument.
+    if !is_safe_imap_folder(folder) {
+        return Err(format!("unsafe folder name: {:?}", folder));
     }
     let mut envs = load_index(folder);
     envs.retain(|e| e.id != id);

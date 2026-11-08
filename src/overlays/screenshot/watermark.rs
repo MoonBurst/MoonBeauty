@@ -15,10 +15,10 @@ use super::magick_or_convert;
 use std::path::PathBuf;
 
 fn private_dir() -> PathBuf {
-    let rt = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-    let d = PathBuf::from(rt).join("mbs-watermark");
-    let _ = std::fs::create_dir_all(&d);
-    d
+    // mbs_subdir: panics if $XDG_RUNTIME_DIR unset (no /tmp fallback),
+    // creates the dir at 0700, and tightens pre-existing looser modes.
+    // Same guarantee every other temp path in the tree gets.
+    crate::libraries::process::mbs_subdir("mbs-watermark")
 }
 
 /// Build the watermark text that fills the 240x220 tile.

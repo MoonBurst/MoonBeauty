@@ -67,6 +67,12 @@ impl NotifServer {
             "[notif-raw] app={:?} summary={:?} body={:?}",
             app_name, summary, body
         );
+        // Hints HashMap is deserialized by zbus before this fn runs, and
+        // can hold up to the D-Bus message-size cap. We only read two
+        // keys; cap at ingress so a hostile sender can't pin a large map
+        // in the bounded channel.
+        let hints: HashMap<String, OwnedValue> = hints.into_iter().take(32).collect();
+
         let is_urgent = hints
             .get("urgency")
             .and_then(|v| u8::try_from(v).ok())

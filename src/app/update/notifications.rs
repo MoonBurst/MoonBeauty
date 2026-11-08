@@ -276,7 +276,9 @@ impl MoonBeautyShellApp {
     pub(crate) fn dismiss_latest_notif(&self) -> Command<Message> {
         let cmd_path =
             moonbeauty::libraries::process::mbs_runtime_dir().join("moonbeauty-notif-cmd");
-        match std::fs::write(&cmd_path, b"dismiss") {
+        // private_write_file: O_EXCL + 0600 + refuses pre-placed
+        // symlinks. std::fs::write followed symlinks and inherited umask.
+        match moonbeauty::libraries::process::private_write_file(&cmd_path, b"dismiss") {
             Ok(_) => eprintln!("[ipc] DismissLatestNotif -> notif-surface"),
             Err(e) => eprintln!("[ipc] DismissLatestNotif write failed: {e}"),
         }
