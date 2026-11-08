@@ -238,7 +238,8 @@ fn notif_icon_box_shape(notif_shape: &str, icon_size: f32) -> (ShapeType, f32) {
             // 1.28 adds a hair of margin for the border and antialiasing.
             // Previously 1.40 left a visible gap between icon and frame.
             let hex_size = s * 1.28;
-            let cut = ((hex_size * 0.10) as u16).max(6);
+            let min_cut = ((hex_size - s) as u16).saturating_add(1);
+            let cut = ((hex_size * 0.25) as u16).max(min_cut).max(6);
             (ShapeType::Hexagon { cut }, hex_size)
         }
         "slant" => (
@@ -1465,24 +1466,24 @@ impl NotificationOverlay {
                         // with summary="Alice") reveals the mismatch
                         // immediately.
                         let summary_row = if toast.app_name.is_empty() {
-                            row![text(&toast.summary)
+                            column![text(&toast.summary)
                                 .size((settings.notif_summary_size) as f32)
                                 .bold()
                                 .color(toast_text_color)
                                 .width(Length::Fill)
-                                .wrapping(iced::widget::text::Wrapping::Glyph)]
+                                .wrapping(iced::widget::text::Wrapping::WordOrGlyph)]
                         } else {
-                            row![
+                            column![
                                 text(&toast.summary)
                                     .size((settings.notif_summary_size) as f32)
                                     .bold()
                                     .color(toast_text_color)
                                     .width(Length::Fill)
-                                    .wrapping(iced::widget::text::Wrapping::Glyph),
-                                text(format!(" via {}", toast.app_name))
+                                    .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+                                text(format!("via {}", toast.app_name))
                                     .size((settings.notif_summary_size.saturating_sub(2)) as f32)
                                     .color(theme.focus)
-                                    .wrapping(iced::widget::text::Wrapping::Glyph),
+                                    .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
                             ]
                         };
                         let text_col = column![
@@ -1491,7 +1492,7 @@ impl NotificationOverlay {
                                 .size((settings.notif_body_size) as f32)
                                 .color(toast_text_color)
                                 .width(Length::Fill)
-                                .wrapping(iced::widget::text::Wrapping::Glyph),
+                                .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
                         ];
                         text_col.width(Length::Fill).spacing(2)
                     },]
@@ -1610,7 +1611,8 @@ impl NotificationOverlay {
                 // clip the icon's corners (see history_icon_hex_size).
                 let icon_size = settings.launcher_icon_size as f32;
                 let icon_hex_size = history_icon_hex_size(icon_size);
-                let icon_hex_cut: u16 = ((icon_hex_size * 0.10) as u16).max(8);
+                let hist_min_cut = ((icon_hex_size - icon_size) as u16).saturating_add(1);
+                let icon_hex_cut: u16 = ((icon_hex_size * 0.25) as u16).max(hist_min_cut).max(8);
 
                 let inner_icon: Element<'a, NotifMessage> = if let Some(ref path) =
                     toast.avatar_path
