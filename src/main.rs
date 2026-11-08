@@ -95,7 +95,6 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     cli::screenshot::run_orchestrator(&args);
 
-    // (--notify push moved to cli::notify::run above)
 
     cli::tray::run(&args);
 
