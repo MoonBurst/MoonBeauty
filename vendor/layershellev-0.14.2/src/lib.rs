@@ -181,8 +181,8 @@ use wayland_protocols::{
 
 use wayland_protocols::ext::session_lock::v1::client::{
     ext_session_lock_manager_v1::ExtSessionLockManagerV1,
-    ext_session_lock_surface_v1::ExtSessionLockSurfaceV1,
-    ext_session_lock_v1::ExtSessionLockV1,
+    ext_session_lock_surface_v1::{self, ExtSessionLockSurfaceV1},
+    ext_session_lock_v1::{self, ExtSessionLockV1},
 };
 
 use wayland_protocols::wp::input_method::zv1::client::{
@@ -921,6 +921,10 @@ pub struct WindowState<T> {
 
     xdg_decoration_manager: Option<ZxdgDecorationManagerV1>,
 
+    /// Active ext-session-lock-v1 lock object, if any. One per client
+    /// (compositor-enforced). All SessionLock surfaces share this lock.
+    session_lock: Option<ExtSessionLockV1>,
+
     ime_purpose: ImePurpose,
     ime_allowed: bool,
 }
@@ -1198,23 +1202,6 @@ impl rwh_06::HasDisplayHandle for WindowWrapper {
     }
 }
 
-
-// Phase 1a probe: verify ext-session-lock-v1 bindings from wayland-protocols
-// are available after enabling the "stable" feature. Removed in Phase 1b.
-#[allow(dead_code)]
-mod _session_lock_bindings_probe {
-    use wayland_protocols::ext::session_lock::v1::client::{
-        ext_session_lock_manager_v1::ExtSessionLockManagerV1,
-        ext_session_lock_surface_v1::ExtSessionLockSurfaceV1,
-        ext_session_lock_v1::ExtSessionLockV1,
-    };
-    fn _probe(
-        _a: Option<&ExtSessionLockManagerV1>,
-        _b: Option<&ExtSessionLockV1>,
-        _c: Option<&ExtSessionLockSurfaceV1>,
-    ) {}
-}
-
 impl<T> WindowState<T> {
     /// create a WindowState, you need to pass a namespace in
     pub fn new(namespace: &str) -> Self {
@@ -1421,6 +1408,7 @@ impl<T> Default for WindowState<T> {
             ime_allowed: false,
 
             xdg_decoration_manager: None,
+            session_lock: None,
         }
     }
 }
@@ -2462,6 +2450,79 @@ impl<T> Dispatch<WlCallback, (id::Id, PresentAvailableState)> for WindowState<T>
     }
 }
 
+// ── ext-session-lock-v1 lifecycle dispatch ──────────────────────────
+//
+// ExtSessionLockV1 (the lock object) is created in `build()` via
+// `ExtSessionLockManagerV1::lock()`, then `Locked` or `Finished` fires
+// immediately. On `Locked`, the client may create one
+// ExtSessionLockSurfaceV1 per output via `get_lock_surface`. On
+// `Finished`, the lock is either denied (another lock already active)
+// or revoked (unlock called) — both cases mean the surfaces are no
+// longer authoritative and must close.
+//
+// ExtSessionLockSurfaceV1 fires `Configure(serial, w, h)` when the
+// compositor is ready for a buffer, and `Finished` when the surface is
+// being withdrawn. Both patterns mirror ZwlrLayerSurfaceV1.
+
+impl<T> Dispatch<ExtSessionLockV1, ()> for WindowState<T> {
+    fn event(
+        state: &mut Self,
+        _proxy: &ExtSessionLockV1,
+        event: <ExtSessionLockV1 as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        match event {
+            ext_session_lock_v1::Event::Locked => {
+                log::info!("[session-lock] Locked event received");
+                // Surface creation is deferred: child emits
+                // ReturnData::NewSessionLock for each output (Phase 1d).
+            }
+            ext_session_lock_v1::Event::Finished => {
+                log::warn!(
+                    "[session-lock] Finished event — lock denied or revoked"
+                );
+                // Close every SessionLock-backed unit. Each yields a
+                // DispatchMessage::Closed to the event handler, which
+                // (for standalone lockscreen) exits the process.
+                for unit in state.units.iter_mut() {
+                    if matches!(unit.shell, Shell::SessionLock(_)) {
+                        unit.request_close();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+impl<T> Dispatch<ExtSessionLockSurfaceV1, ()> for WindowState<T> {
+    fn event(
+        state: &mut Self,
+        surface: &ExtSessionLockSurfaceV1,
+        event: <ExtSessionLockSurfaceV1 as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qhandle: &QueueHandle<Self>,
+    ) {
+        let unit_index = state
+            .units
+            .iter()
+            .position(|unit| unit.shell == *surface);
+        match event {
+            ext_session_lock_surface_v1::Event::Configure { serial, width, height } => {
+                surface.ack_configure(serial);
+                if let Some(i) = unit_index {
+                    state.units[i].size = (width, height);
+                    state.units[i].request_refresh(RefreshRequest::NextFrame);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 delegate_noop!(@<T> WindowState<T>: ignore WlCompositor); // WlCompositor is need to create a surface
 delegate_noop!(@<T> WindowState<T>: ignore WlSurface); // surface is the base needed to show buffer
 delegate_noop!(@<T> WindowState<T>: ignore WlOutput); // output is need to place layer_shell, although here
@@ -2493,6 +2554,7 @@ delegate_noop!(@<T> WindowState<T>: ignore ZwpInputPanelV1);
 
 delegate_noop!(@<T> WindowState<T>: ignore ZxdgDecorationManagerV1);
 delegate_noop!(@<T> WindowState<T>: ignore ZxdgToplevelDecorationV1);
+delegate_noop!(@<T> WindowState<T>: ignore ExtSessionLockManagerV1);
 
 impl<T: 'static> WindowState<T> {
     /// build a new WindowState
