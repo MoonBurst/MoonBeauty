@@ -9,6 +9,17 @@ pub struct IcedXdgWindowSettings {
     pub size: Option<(u32, u32)>,
 }
 
+/// Settings for a session-lock surface (ext-session-lock-v1).
+///
+/// Emitted by the child (which holds the ExtSessionLockV1 lock) via
+/// `LayershellCustomAction::NewSessionLock`. One call per output. This
+/// is the dynamic-surface path; the initial per-output surfaces are
+/// created by `build()`'s AllScreens branch.
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
+pub struct IcedNewSessionLockSettings {
+    pub size: Option<(u32, u32)>,
+}
+
 impl From<IcedXdgWindowSettings> for NewXdgWindowSettings {
     fn from(val: IcedXdgWindowSettings) -> Self {
         NewXdgWindowSettings {
@@ -91,6 +102,10 @@ pub enum LayershellCustomAction {
     },
     NewInputPanel {
         settings: NewInputPanelSettings,
+        id: IcedId,
+    },
+    NewSessionLock {
+        settings: IcedNewSessionLockSettings,
         id: IcedId,
     },
     /// is same with WindowAction::Close(id)

@@ -96,7 +96,7 @@ where
         runtime.enter(|| application.subscription().map(Action::Output)),
     ));
 
-    let ev: WindowState<iced::window::Id> = layershellev::WindowState::new(namespace)
+    let mut builder = layershellev::WindowState::new(namespace)
         .with_start_mode(settings.layer_settings.start_mode)
         .with_use_display_handle(true)
         .with_events_transparent(settings.layer_settings.events_transparent)
@@ -106,7 +106,11 @@ where
         .with_exclusive_zone(settings.layer_settings.exclusive_zone)
         .with_margin(settings.layer_settings.margin)
         .with_keyboard_interacivity(settings.layer_settings.keyboard_interactivity)
-        .with_connection(settings.with_connection)
+        .with_connection(settings.with_connection);
+    if settings.session_lock {
+        builder = builder.with_session_lock();
+    }
+    let ev: WindowState<iced::window::Id> = builder
         .build()
         .expect("Cannot create layershell");
 
@@ -825,6 +829,20 @@ where
                 let layer_shell_id = layershellev::id::Id::unique();
                 ev.append_return_data(ReturnData::NewInputPanel((
                     settings,
+                    layer_shell_id,
+                    Some(iced_id),
+                )));
+            }
+            LayershellCustomAction::NewSessionLock {
+                settings,
+                id: iced_id,
+            } => {
+                let layer_shell_id = layershellev::id::Id::unique();
+                ev.append_return_data(ReturnData::NewSessionLock((
+                    layershellev::NewSessionLockSettings {
+                        size: settings.size,
+                        output: layershellev::OutputOption::LastOutput,
+                    },
                     layer_shell_id,
                     Some(iced_id),
                 )));

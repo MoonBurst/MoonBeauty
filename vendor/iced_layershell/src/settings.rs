@@ -51,6 +51,13 @@ pub struct Settings {
     ///
     pub antialiasing: bool,
 
+    /// Opt into ext-session-lock-v1 acquisition. When true, the program
+    /// acquires the session lock at build time and creates session-lock
+    /// surfaces instead of layer-shell surfaces (Phase 2c). Used by
+    /// lockscreen children. Defaults to false; the lockscreen is the
+    /// only intended consumer.
+    pub session_lock: bool,
+
     pub virtual_keyboard_support: Option<VirtualKeyboardSettings>,
 
     /// set the used wayland connection, all wayland object will share it, and they can be used by
@@ -66,6 +73,7 @@ impl Default for Settings {
             default_font: Font::default(),
             default_text_size: Pixels(16.0),
             antialiasing: false,
+            session_lock: false,
             virtual_keyboard_support: None,
             with_connection: None,
         }
