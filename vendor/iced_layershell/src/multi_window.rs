@@ -210,6 +210,28 @@ where
                     .push_back((layer_shell_id, IcedLayerShellEvent::UserAction(event)));
             }
             LayerShellEvent::NormalDispatch => {
+                // Session-lock: auto-create one surface per output once
+                // Locked has been granted. Idempotent — has_unit_for_output
+                // skips outputs that already have a unit, so hotplug and
+                // repeated ticks both work.
+                if settings.session_lock && ev.is_session_lock_ready() {
+                    let pending_outputs: Vec<_> = ev
+                        .output_iter()
+                        .filter(|o| !ev.has_unit_for_output(o))
+                        .cloned()
+                        .collect();
+                    for output in pending_outputs {
+                        let id = IcedId::unique();
+                        ev.append_return_data(ReturnData::NewSessionLock((
+                            layershellev::NewSessionLockSettings {
+                                size: settings.layer_settings.size,
+                                output: layershellev::OutputOption::Output(output),
+                            },
+                            layershellev::id::Id::unique(),
+                            Some(id),
+                        )));
+                    }
+                }
                 waiting_layer_shell_events
                     .push_back((layer_shell_id, IcedLayerShellEvent::NormalDispatch));
             }

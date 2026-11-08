@@ -1083,6 +1083,27 @@ impl<T> WindowState<T> {
         self.session_lock_ready
     }
 
+    /// True if the builder opted into session-lock mode.
+    pub fn is_session_lock_requested(&self) -> bool {
+        self.session_lock_requested
+    }
+
+    /// Iterator over all bound WlOutput handles. Used by session-lock
+    /// children to create one surface per output without exposing the
+    /// `outputs` field.
+    pub fn output_iter(&self) -> impl Iterator<Item = &WlOutput> {
+        self.outputs.iter().map(|(_, out)| out)
+    }
+
+    /// True if a WindowStateUnit already exists bound to this output.
+    /// Session-lock auto-creator uses this to skip outputs that already
+    /// have a surface (idempotent on tick + hotplug).
+    pub fn has_unit_for_output(&self, output: &WlOutput) -> bool {
+        self.units
+            .iter()
+            .any(|u| u.wl_output.as_ref() == Some(output))
+    }
+
     /// True if a lock object is held (may be pre-Locked).
     pub fn session_lock_acquired(&self) -> bool {
         self.session_lock.is_some()
@@ -2674,7 +2695,14 @@ impl<T: 'static> WindowState<T> {
         // finally thing to remember is to commit the surface, make the shell to init.
         //let (init_w, init_h) = self.size;
         // this example is ok for both xdg_surface and layer_shell
-        if self.is_background() {
+        if self.session_lock_requested {
+            // Session-lock: no surfaces created here. Locked event
+            // arrives asynchronously (event_queue.roundtrip during
+            // running_with_proxy). Child's runner (multi_window::run)
+            // auto-creates NewSessionLock return-data on NormalDispatch
+            // once is_session_lock_ready() becomes true.
+            self.message.clear();
+        } else if self.is_background() {
             let background_surface = wmcompositer.create_surface(&qh, ());
             if self.events_transparent {
                 let region = wmcompositer.create_region(&qh, ());
@@ -3006,6 +3034,12 @@ impl<T: 'static> WindowState<T> {
                             }
                             (_, DispatchMessageInner::NewDisplay(output_display)) => {
                                 if !window_state.is_allscreens() {
+                                    continue;
+                                }
+                                if window_state.is_session_lock_requested() {
+                                    // Session-lock: NewDisplay is informational
+                                    // only. The runner creates units via
+                                    // ReturnData::NewSessionLock on NormalDispatch.
                                     continue;
                                 }
                                 let wl_surface = wmcompositer.create_surface(&qh, ()); // and create a surface. if two or more,
