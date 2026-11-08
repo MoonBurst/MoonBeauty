@@ -38,6 +38,30 @@ impl NotifServer {
         hints: HashMap<String, OwnedValue>,
         _expire_timeout: i32,
     ) -> u32 {
+        // Finding 55: cap payload fields at ingress before try_send
+        // into the bounded channel (sync_channel 256). Without this,
+        // a hostile client can queue 256 x N MB and OOM the shell.
+        const MAX_APP_NAME: usize = 128;
+        const MAX_SUMMARY: usize = 512;
+        const MAX_BODY: usize = 4096;
+        const MAX_ACTIONS: usize = 16;
+        const MAX_ACTION_LEN: usize = 256;
+        let cap = |s: String, n: usize| -> String {
+            if s.chars().count() <= n {
+                s
+            } else {
+                s.chars().take(n).collect()
+            }
+        };
+        let app_name = cap(app_name, MAX_APP_NAME);
+        let summary = cap(summary, MAX_SUMMARY);
+        let body = cap(body, MAX_BODY);
+        let actions: Vec<String> = actions
+            .into_iter()
+            .take(MAX_ACTIONS)
+            .map(|a| cap(a, MAX_ACTION_LEN))
+            .collect();
+        
         let id = next_id();
         eprintln!(
             "[notif-raw] app={:?} summary={:?} body={:?}",

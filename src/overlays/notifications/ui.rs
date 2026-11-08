@@ -661,32 +661,9 @@ impl NotificationOverlay {
         actions: Vec<String>,
         settings: &ShellSettings,
     ) {
-        // Finding 45: cap attacker-controlled fields. Notification
-        // payloads arrive from any same-user D-Bus client (any app
-        // calling notify-send, or D-Bus directly). A 100 MB body is
-        // bounded to 4 KB; history stays small; load_history can
-        // never OOM. Caps generous for real content.
-        const MAX_APP_NAME: usize = 128;
-        const MAX_SUMMARY: usize = 512;
-        const MAX_BODY: usize = 4096;
-        const MAX_ACTIONS: usize = 16;
-        const MAX_ACTION_LEN: usize = 256;
-        let cap = |s: &str, n: usize| -> String {
-            if s.chars().count() <= n {
-                s.to_string()
-            } else {
-                s.chars().take(n).collect()
-            }
-        };
-        let app_name: String = cap(app_name, MAX_APP_NAME);
-        let summary: String = cap(summary, MAX_SUMMARY);
-        let body: String = cap(body, MAX_BODY);
-        let actions: Vec<String> = actions
-            .into_iter()
-            .take(MAX_ACTIONS)
-            .map(|a| cap(&a, MAX_ACTION_LEN))
-            .collect();
-
+        // Finding 55: payloads pre-capped at NotifServer::notify
+        // ingress (dbus.rs). Re-capping here would duplicate work.
+        
         let id = rand_id();
 
         let matched_profile = settings.friend_profiles.iter().find(|p| {

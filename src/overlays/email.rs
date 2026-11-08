@@ -17,13 +17,16 @@ pub const COMPOSE_MANUAL_ATTACH_ID: &str = "compose_manual_attach";
 /// A hostile sender delivering `invoice.pdf.desktop` looks like a PDF to
 /// the user but routes xdg-open → desktop file Exec= → RCE.
 fn is_safe_to_auto_open(path: &std::path::Path) -> bool {
-    const DENY_EXT: &[&str] = &[
-        "desktop", "service", "sh", "bash", "zsh", "ksh", "csh", "fish", "py", "pl", "rb", "php",
-        "lua", "exe", "bat", "cmd", "ps1", "vbs", "app", "command", "run", "bin", "msi", "dmg",
-        "pkg", "deb", "rpm", "appimage", "lnk", "url", "scf", "reg", "hta",
+    // Finding 25: default-deny allowlist. Only known-safe media/doc
+    // formats auto-open. Replaces a denylist that could not anticipate
+    // new macro formats (.docm/.xlsm) or multi-step archives (.tar.gz).
+    const ALLOW_EXT: &[&str] = &[
+        "png", "jpg", "jpeg", "gif", "webp", "svg",
+        "pdf", "txt", "md", "csv",
+        "mp3", "mp4", "ogg", "webm", "flac",
     ];
     match path.extension().and_then(|s| s.to_str()) {
-        Some(ext) => !DENY_EXT.iter().any(|d| ext.eq_ignore_ascii_case(d)),
+        Some(ext) => ALLOW_EXT.iter().any(|a| ext.eq_ignore_ascii_case(a)),
         None => false,
     }
 }
