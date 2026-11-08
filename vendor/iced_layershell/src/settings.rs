@@ -50,6 +50,21 @@ pub struct Settings {
     /// By default, it is disabled.
     ///
     pub antialiasing: bool,
+    /// DO NOT SET THIS TO TRUE unless you have re-verified lock release
+    /// on your exact compositor version.
+    ///
+    /// Attempted migration to ext-session-lock-v1 Nov 2026. Two lock-outs
+    /// during testing on sway 1.12 — the protocol holds the lock across
+    /// client death, and there is no reliable in-client recovery path
+    /// once the child has exited. `swaymsg exit` from a second TTY was
+    /// the only guaranteed escape, which loses the entire session.
+    ///
+    /// That failure mode is worse than the layer-shell displacement risk
+    /// it was intended to fix. Rolled back to layer-shell at ccbce73
+    /// (Phase 3a). The plumbing in layershellev and this crate is dormant
+    /// and inert with this = false; kept for revival if sway's
+    /// ext_session_lock_v1 client-death handling becomes reliable, or if
+    /// migrating to a compositor with a stronger guarantee.
 
     /// Opt into ext-session-lock-v1 acquisition. When true, the program
     /// acquires the session lock at build time and creates session-lock
