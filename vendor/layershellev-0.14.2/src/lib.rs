@@ -3579,8 +3579,19 @@ impl<T: 'static> WindowState<T> {
                     }
 
                     // NOTE: this is for those closed because wl_output is dead.
+                    //
+                    // In session-lock mode, per-output surface loss is
+                    // expected on monitor unplug and does NOT mean the
+                    // session is over. The runner auto-creates a new
+                    // surface on the next NormalDispatch once the output
+                    // reappears. Only the lock's Finished event (which
+                    // pushes Closed with `None` id) signals the lockscreen
+                    // should exit.
                     let closed_ids = window_state.closed_ids.clone();
                     for id in closed_ids {
+                        if window_state.is_session_lock_requested() {
+                            continue;
+                        }
                         window_state.handle_event(
                             &mut *event_handler,
                             LayerShellEvent::RequestMessages(&DispatchMessage::Closed),
