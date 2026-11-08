@@ -728,9 +728,20 @@ impl LockCoordinator {
                                 // legit user without any real PAM attempt.
                                 //
                                 // Backoff: min(1s * 2^fail_streak, 16s). First
-                                // attempt is never rate-limited (last_failed_
-                                // submit = None). Caps at 16s after 4 failures,
-                                // well below pam_faillock's 3-per-10min budget.
+                                // attempt is never rate-limited.
+                                //
+                                // Correction to earlier claim: this caps at 16s
+                                // after 4 failures, but a same-user attacker
+                                // holding the coordinator socket can still reach
+                                // 5+ submits in ~3s (1+2+4), which trips
+                                // pam_faillock's tighter Fedora/RHEL default of
+                                // 3-per-10min. The backoff defends against rapid
+                                // PAM spawn from a compromised shell, not against
+                                // a determined same-user attacker who already has
+                                // socket access. Mitigating that fully requires a
+                                // hard cap at 2 failures (breaks legitimate UX)
+                                // or a pam_faillock exemption for the pamtester
+                                // service. Neither is implemented.
                                 let now = std::time::Instant::now();
                                 let exponent = fail_streak.min(4);
                                 let min_delay = Duration::from_millis(

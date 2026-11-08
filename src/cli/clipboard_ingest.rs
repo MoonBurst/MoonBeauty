@@ -1,3 +1,30 @@
+/// Restrict URI-list ingestion to known-safe roots. Any same-user
+/// process can `wl-copy file:///home/user/.ssh/id_rsa`, and the
+/// clipboard cache would persist a 0600 copy. This confines ingestion
+/// to content dirs (Pictures/Downloads/Documents/Desktop/Videos/Music)
+/// and the shell's own mbs-tmp scratch. Symlinks are resolved via
+/// canonicalize before the check; a symlink inside a safe root that
+/// points outside is rejected.
+fn is_safe_ingest_root(path: &std::path::Path) -> bool {
+    let Ok(canon) = std::fs::canonicalize(path) else {
+        return false;
+    };
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        for sub in ["Pictures", "Downloads", "Documents", "Desktop", "Videos", "Music"] {
+            roots.push(home.join(sub));
+        }
+    }
+    if let Ok(rt) = std::env::var("XDG_RUNTIME_DIR") {
+        roots.push(std::path::PathBuf::from(rt).join("mbs-tmp"));
+    }
+    roots.iter().any(|root| {
+        std::fs::canonicalize(root)
+            .ok()
+            .is_some_and(|cr| canon.starts_with(&cr))
+    })
+}
+
 pub fn run(args: &[String]) {
     if args.iter().any(|a| a == "--clipboard-ingest") {
         use std::io::Read;
@@ -76,6 +103,13 @@ pub fn run(args: &[String]) {
                     let path_str = line.strip_prefix("file://").unwrap_or(line);
                     let path = std::path::PathBuf::from(path_str);
                     if !path.is_file() {
+                        continue;
+                    }
+                    if !is_safe_ingest_root(&path) {
+                        eprintln!(
+                            "[clipboard-ingest] reject URI outside safe roots: {}",
+                            path.display()
+                        );
                         continue;
                     }
                     if moonbeauty::overlays::clipboard::ClipboardOverlay::add_entry(&path, None)
