@@ -512,28 +512,6 @@ fn tray_cache_budget_ok(dir: &std::path::Path) -> bool {
 ///
 /// Both canonicalizations can fail (broken symlink, race, missing root);
 /// caller treats `None` as "try next candidate", which is the safe default.
-fn safe_icon_candidate(
-    candidate: &std::path::Path,
-    root: &std::path::Path,
-) -> Option<std::path::PathBuf> {
-    let canon = std::fs::canonicalize(candidate).ok()?;
-    let canon_root = std::fs::canonicalize(root).ok()?;
-    // Finding 64: allow canonical targets under /nix/store/ (NixOS icons
-    // are symlinks into the immutable store). Hostile symlinks to
-    // user/system paths outside the store and outside the declared root
-    // are still rejected.
-    const NIX_STORE: &str = "/nix/store/";
-    if canon.starts_with(&canon_root) || canon.starts_with(NIX_STORE) {
-        Some(canon)
-    } else {
-        eprintln!(
-            "[tray-icon] symlink escape blocked: {:?} -> {:?}",
-            candidate, canon
-        );
-        None
-    }
-}
-
 fn resolve_icon(icon_name: &str) -> Option<String> {
     if icon_name.is_empty() {
         return None;
@@ -619,7 +597,7 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
                         .join(format!("{}.{}", icon_name, ext));
                     if candidate.exists() {
                         // Finding 27: canonicalize + verify under root.
-                        if let Some(canon) = safe_icon_candidate(&candidate, root) {
+                        if let Some(canon) = crate::libraries::process::safe_icon_candidate(&candidate, root) {
                             found = Some(canon);
                             break 'search;
                         }
@@ -633,7 +611,7 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
                 for ext in &exts {
                     let candidate = pix_root.join(format!("{}.{}", icon_name, ext));
                     if candidate.exists() {
-                        if let Some(canon) = safe_icon_candidate(&candidate, &pix_root) {
+                        if let Some(canon) = crate::libraries::process::safe_icon_candidate(&candidate, &pix_root) {
                             found = Some(canon);
                             break 'search2;
                         }

@@ -1104,11 +1104,6 @@ impl<T> WindowState<T> {
             .any(|u| u.wl_output.as_ref() == Some(output))
     }
 
-    /// True if a lock object is held (may be pre-Locked).
-    pub fn session_lock_acquired(&self) -> bool {
-        self.session_lock.is_some()
-    }
-
     pub fn is_allscreens(&self) -> bool {
         self.start_mode.is_allscreens()
     }

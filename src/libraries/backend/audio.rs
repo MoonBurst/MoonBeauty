@@ -6,6 +6,51 @@ pub struct AudioStatus {
     pub is_muted: bool,
 }
 
+/// Spawn an audio player from the pw-play -> paplay -> aplay fallback
+/// chain. Returns (Child, tool_name) on success. The caller decides
+/// whether to wait (fire-and-forget sound), or hold-and-kill (alarm
+/// sound with duration cap).
+///
+/// Shared by `notifications::ui::play_sound` and `audio::play_alarm_sound`
+/// to eliminate the previously duplicated 3-player chain in each.
+pub fn spawn_audio_player(
+    path: &str,
+    volume_pct: u32,
+) -> std::io::Result<(std::process::Child, &'static str)> {
+    let vol_f = (volume_pct as f32) / 100.0;
+    let vol_pa = (vol_f * 65536.0) as u32;
+
+    let try_spawn = |bin: &str, args: Vec<String>| -> Option<std::process::Child> {
+        std::process::Command::new(bin)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .ok()
+    };
+
+    if let Some(c) = try_spawn(
+        "pw-play",
+        vec![format!("--volume={:.2}", vol_f), path.to_string()],
+    ) {
+        return Ok((c, "pw-play"));
+    }
+    if let Some(c) = try_spawn(
+        "paplay",
+        vec![format!("--volume={}", vol_pa), path.to_string()],
+    ) {
+        return Ok((c, "paplay"));
+    }
+    if let Some(c) = try_spawn("aplay", vec![path.to_string()]) {
+        return Ok((c, "aplay"));
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "no audio player available (tried pw-play, paplay, aplay)",
+    ))
+}
+
 pub struct AudioBackend;
 
 fn cached(which: &'static str) -> Option<AudioStatus> {
@@ -222,8 +267,6 @@ pub fn play_alarm_sound(sound: &str, volume_pct: u32, duration_secs: u32) {
         return;
     };
     let path_str = path.display().to_string();
-    let vol_f = (volume_pct as f32) / 100.0;
-    let vol_pa = (vol_f * 65536.0) as u32;
     let dur = std::time::Duration::from_secs(duration_secs.max(1) as u64);
 
     eprintln!(
@@ -232,36 +275,12 @@ pub fn play_alarm_sound(sound: &str, volume_pct: u32, duration_secs: u32) {
     );
 
     std::thread::spawn(move || {
-        let try_spawn = |bin: &str, args: Vec<String>| -> Option<std::process::Child> {
-            std::process::Command::new(bin)
-                .args(args)
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .ok()
-        };
-
-        let mut child = try_spawn(
-            "pw-play",
-            vec![format!("--volume={:.2}", vol_f), path_str.clone()],
-        );
-        let mut tool = "pw-play";
-
-        if child.is_none() {
-            child = try_spawn(
-                "paplay",
-                vec![format!("--volume={}", vol_pa), path_str.clone()],
-            );
-            tool = "paplay";
-        }
-        if child.is_none() {
-            child = try_spawn("aplay", vec![path_str.clone()]);
-            tool = "aplay";
-        }
-
-        let Some(mut child) = child else {
-            eprintln!("[alarm-sound] no audio tool available (tried pw-play, paplay, aplay)");
-            return;
+        let (mut child, tool) = match spawn_audio_player(&path_str, volume_pct) {
+            Ok(pair) => pair,
+            Err(_) => {
+                eprintln!("[alarm-sound] no audio tool available (tried pw-play, paplay, aplay)");
+                return;
+            }
         };
 
         std::thread::sleep(dur);
