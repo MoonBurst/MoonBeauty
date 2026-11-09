@@ -16,7 +16,6 @@ mod clock;
 mod cpu;
 mod custom;
 mod gpu;
-mod mic;
 mod music;
 mod net;
 mod notify;
@@ -153,7 +152,7 @@ impl CapsuleRenderer {
             "notify" | "notifications" => notify::render::<Message>(theme),
             "clock" => clock::render::<Message>(telemetry, theme),
             "audio" => audio::render::<Message>(telemetry, theme),
-            "mic" => mic::render::<Message>(telemetry, theme),
+            "mic" => audio::render_mic::<Message>(telemetry, theme),
             "net" => net::render::<Message>(telemetry, theme),
             "cpu" => cpu::render::<Message>(telemetry, theme),
             "gpu" => gpu::render::<Message>(telemetry, theme, settings),
