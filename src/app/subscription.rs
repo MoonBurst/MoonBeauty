@@ -459,7 +459,9 @@ impl MoonBeautyShellApp {
         // that a human attacker cannot reliably exploit the window.
 
         let notif_sub = if self.is_notif_surface {
-            iced::time::every(std::time::Duration::from_millis(50)).map(|_| Message::PollNotifs)
+            // 16ms (60fps) instead of 50ms — reduces notification arrival
+            // latency by up to 34ms with no cost (poll checks a channel).
+            iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::PollNotifs)
         } else {
             iced::Subscription::none()
         };
