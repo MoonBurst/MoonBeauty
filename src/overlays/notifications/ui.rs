@@ -436,6 +436,12 @@ pub enum NotifMessage {
 }
 
 pub struct NotificationOverlay {
+    /// Icon resolution cache. Keys are "app_name|desktop_entry" (empty
+    /// when desktop_entry is None). First toast per app does the
+    /// 168-1000 stat() lookups; subsequent toasts reuse the cached
+    /// result. Bounded at 200 entries (personal shell has ~10 apps;
+    /// 200 guards against runaway unique app_names from a noisy client).
+    pub icon_cache: std::collections::HashMap<String, Option<String>>,
     pub active_toasts: Vec<NotificationToast>,
     /// Overflow queue. When `active_toasts` hits the visible limit (4),
     /// new toasts land here instead of evicting the oldest. `tick_toasts`
@@ -463,6 +469,7 @@ impl NotificationOverlay {
         let history = Self::load_history();
         let selected_history_id = history.first().map(|t| t.id);
         Self {
+            icon_cache: std::collections::HashMap::new(),
             active_toasts: Vec::new(),
             pending_toasts: VecDeque::new(),
             history,
@@ -478,6 +485,7 @@ impl NotificationOverlay {
 
     pub fn empty() -> Self {
         Self {
+            icon_cache: std::collections::HashMap::new(),
             active_toasts: Vec::new(),
             pending_toasts: VecDeque::new(),
             history: Vec::new(),
@@ -701,27 +709,45 @@ impl NotificationOverlay {
         //   3. Desktop-entry icon (real app icon from .desktop → Icon=)
         //   4. App-name based icon lookup
         // Logs every decision so we can debug missing icons.
-        let avatar_path: Option<String> = match matched_profile {
-            Some(p) => avatar_path_for(&p.name)
-                .or_else(|| desktop_entry.and_then(resolve_desktop_icon))
-                .or_else(|| resolve_icon_name(&app_name.to_lowercase().replace(' ', "-"))),
-            None => {
-                if let Some(p) = desktop_entry.and_then(resolve_desktop_icon) {
-                    Some(p)
-                } else {
-                    let lower = app_name.to_lowercase();
-                    let variants = [
-                        lower.clone(),
-                        lower.replace(' ', "-"),
-                        lower.replace(' ', "_"),
-                        lower.split_whitespace().next().unwrap_or("").to_string(),
-                    ];
-                    variants
-                        .iter()
-                        .filter(|v| !v.is_empty())
-                        .find_map(|v| resolve_icon_name(v))
+        // Icon resolution cache: first toast per (app_name, desktop_entry)
+        // pair pays the 168-1000 stat() cost; subsequent toasts are
+        // instant. Without this, every notification on NixOS spends
+        // ~500-800ms scanning icon theme directories before the toast
+        // can render — the "1 second behind" the user sees.
+        let cache_key = format!("{}|{}", app_name, desktop_entry.unwrap_or(""));
+        let avatar_path: Option<String> = if let Some(cached) = self.icon_cache.get(&cache_key) {
+            cached.clone()
+        } else {
+            let resolved = match matched_profile {
+                Some(p) => avatar_path_for(&p.name)
+                    .or_else(|| desktop_entry.and_then(resolve_desktop_icon))
+                    .or_else(|| resolve_icon_name(&app_name.to_lowercase().replace(' ', "-"))),
+                None => {
+                    if let Some(p) = desktop_entry.and_then(resolve_desktop_icon) {
+                        Some(p)
+                    } else {
+                        let lower = app_name.to_lowercase();
+                        let variants = [
+                            lower.clone(),
+                            lower.replace(' ', "-"),
+                            lower.replace(' ', "_"),
+                            lower.split_whitespace().next().unwrap_or("").to_string(),
+                        ];
+                        variants
+                            .iter()
+                            .filter(|v| !v.is_empty())
+                            .find_map(|v| resolve_icon_name(v))
+                    }
+                }
+            };
+            // Bounded cache: evict oldest when full (Vec shift, cheap at 200).
+            if self.icon_cache.len() >= 200 {
+                if let Some(k) = self.icon_cache.keys().next().cloned() {
+                    self.icon_cache.remove(&k);
                 }
             }
+            self.icon_cache.insert(cache_key, resolved.clone());
+            resolved
         };
         let item = NotificationToast {
             id,
@@ -821,30 +847,11 @@ impl NotificationOverlay {
 
     pub fn play_sound(path: String, volume: u32) {
         std::thread::spawn(move || {
-            let vol_f = (volume as f32) / 100.0;
-            // Try pipewire
-            if let Ok(o) = std::process::Command::new("pw-play")
-                .arg(format!("--volume={:.2}", vol_f))
-                .arg(&path)
-                .output()
+            if let Ok((mut child, _tool)) =
+                crate::libraries::backend::audio::spawn_audio_player(&path, volume)
             {
-                if o.status.success() {
-                    return;
-                }
+                let _ = child.wait();
             }
-            // Try pulseaudio
-            let vol_pa = (vol_f * 65536.0) as u32;
-            if let Ok(o) = std::process::Command::new("paplay")
-                .arg(format!("--volume={}", vol_pa))
-                .arg(&path)
-                .output()
-            {
-                if o.status.success() {
-                    return;
-                }
-            }
-            // Fallback to ALSA (no software volume)
-            let _ = std::process::Command::new("aplay").arg(&path).output();
         });
     }
 
