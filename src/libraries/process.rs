@@ -16,7 +16,11 @@ extern "C" fn sigterm_handler(_sig: libc::c_int) {
 pub fn install_sigterm_handler() {
     #[allow(unsafe_code)]
     unsafe {
-        libc::signal(libc::SIGTERM, sigterm_handler as libc::sighandler_t);
+        // fn -> *const () -> sighandler_t: the pointer indirection
+        // silences rustc's "fn_ptr_cast" lint. The signal handler
+        // signature (extern "C" fn(c_int)) matches sighandler_t.
+        let handler = sigterm_handler as *const () as libc::sighandler_t;
+        libc::signal(libc::SIGTERM, handler);
     }
 }
 
