@@ -229,6 +229,15 @@ impl App {
                     self.closing_at = Some(snap);
                 }
                 self.anim_frame = self.anim_frame.wrapping_add(1);
+                
+                let mut tasks = Vec::new();
+
+                // Keep the tooltip live if it's the music player (~1 sec)
+                // ONLY do this if we aren't currently closing!
+                if self.mode == "music" && self.anim_frame % 250 == 0 && self.closing_at.is_none() {
+                    tasks.push(Task::perform(fetch_data("music".to_string()), Message::Loaded));
+                }
+
                 let elapsed_ms = self.opened.elapsed().as_millis() as u64;
                 if std::env::var_os("MBS_TICK_DIAG").is_some() {
                     eprintln!("[tick] frame={} elapsed={}ms", self.anim_frame, elapsed_ms);
@@ -254,10 +263,12 @@ impl App {
                     100
                 };
 
-                return Task::perform(
+                tasks.push(Task::perform(
                     async move { tokio::time::sleep(std::time::Duration::from_millis(next_ms)).await },
                     |_| Message::Tick,
-                );
+                ));
+
+                return Task::batch(tasks);
             }
             Message::SearchChanged(q) => {
                 self.search_query = q;
@@ -294,26 +305,49 @@ impl App {
                 }
             }
             Message::MusicPrev => {
-                // Finding 74: route through the bar's backend selector
-                // (MPD if playing, else MPRIS) instead of playerctl,
-                // which would only control the active MPRIS player.
-                if let Ok(exe) = std::env::current_exe() {
-                    let _ = std::process::Command::new(exe)
-                        .arg("--music-previous")
-                        .status();
-                }
+                return Task::perform(
+                    async {
+                        if let Ok(exe) = std::env::current_exe() {
+                            let _ = tokio::process::Command::new(exe)
+                                .arg("--music-previous")
+                                .status()
+                                .await;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                        fetch_data("music".to_string()).await
+                    },
+                    Message::Loaded,
+                );
             }
             Message::MusicNext => {
-                if let Ok(exe) = std::env::current_exe() {
-                    let _ = std::process::Command::new(exe).arg("--music-next").status();
-                }
+                return Task::perform(
+                    async {
+                        if let Ok(exe) = std::env::current_exe() {
+                            let _ = tokio::process::Command::new(exe)
+                                .arg("--music-next")
+                                .status()
+                                .await;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                        fetch_data("music".to_string()).await
+                    },
+                    Message::Loaded,
+                );
             }
             Message::MusicPlayPause => {
-                if let Ok(exe) = std::env::current_exe() {
-                    let _ = std::process::Command::new(exe)
-                        .arg("--music-play-pause")
-                        .status();
-                }
+                return Task::perform(
+                    async {
+                        if let Ok(exe) = std::env::current_exe() {
+                            let _ = tokio::process::Command::new(exe)
+                                .arg("--music-play-pause")
+                                .status()
+                                .await;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                        fetch_data("music".to_string()).await
+                    },
+                    Message::Loaded,
+                );
             }
             Message::CyclePlayer => {
                 // Cycle to next player (or pause current), then re-fetch
@@ -828,7 +862,7 @@ pub fn run() -> Result<(), iced_layershell::Error> {
 async fn fetch_data(mode: String) -> InfoData {
     match mode.as_str() {
         "calendar" => InfoData::Calendar(ClockBackend::compute_calendar(0, 0)),
-        "music" => InfoData::Music(MprisBackend::poll().await),
+        "music" => InfoData::Music(crate::libraries::backend::poll_track().await.0),
         "unified" => {
             let p = PodmanBackend::poll().await;
             let b = BorgBackend::poll().await;
