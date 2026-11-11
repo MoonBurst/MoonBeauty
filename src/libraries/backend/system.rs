@@ -981,35 +981,11 @@ impl SystemCollector {
     /// which does not exist on many modern kernels. Also falls back to
     /// nvidia-smi compute apps for NVIDIA GPUs.
     async fn get_top_gpu_processes(card_id: &str) -> Vec<ProcessItem> {
-        // Cached for 15s per card. Reading /proc/*/fdinfo for every process
-        // is heavy I/O — on a busy system that's 200+ fdinfo reads per
-        // hardware poll (every 2s by default). The GPU process list barely
-        // changes on a 2s cadence, so 15s is a huge accuracy-preserving win.
-        use std::collections::HashMap;
-        use std::sync::{Mutex, OnceLock};
-        use std::time::Instant;
-        static CACHE: OnceLock<Mutex<HashMap<String, (Instant, Vec<ProcessItem>)>>> =
-            OnceLock::new();
-        let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-
-        {
-            let g = cache.lock().unwrap();
-            if let Some((t, items)) = g.get(card_id) {
-                if t.elapsed().as_secs() < 15 {
-                    return items.clone();
-                }
-            }
-        }
-
         if card_id.starts_with("nvidia") {
-            let procs = Self::get_nvidia_compute_procs().await;
-            let mut g = cache.lock().unwrap();
-            g.insert(card_id.to_string(), (Instant::now(), procs.clone()));
-            return procs;
+            return Self::get_nvidia_compute_procs().await;
         }
 
-        // Resolve this card's PCI address. Try the symlink first (most reliable),
-        // fall back to uevent.
+        // Resolve this card's PCI address.
         let pci_addr = std::fs::read_link(format!("/sys/class/drm/{}/device", card_id))
             .ok()
             .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
@@ -1024,20 +1000,14 @@ impl SystemCollector {
                     })
             });
         let Some(pci_addr) = pci_addr else {
-            if std::env::var_os("MBS_DEBUG").is_some() {
-                eprintln!("[gpu-procs] {} has no PCI address", card_id);
-            }
             return Vec::new();
         };
-        if std::env::var_os("MBS_DEBUG").is_some() {
-            eprintln!("[gpu-procs] scanning for pdev={}", pci_addr);
-        }
 
         let Ok(proc_dir) = fs::read_dir("/proc") else {
             return Vec::new();
         };
 
-        let mut users: std::collections::HashMap<u32, (String, u64)> =
+        let mut users: std::collections::HashMap<u32, (String, u64, u64)> =
             std::collections::HashMap::new();
         let mut any_vram_reported = false;
 
@@ -1049,9 +1019,7 @@ impl SystemCollector {
                 continue;
             };
 
-            // Dedupe by client-id: the same client can appear on multiple FDs
-            // (e.g. two opens of the same DRM node from the same process).
-            let mut clients: std::collections::HashMap<String, u64> =
+            let mut clients: std::collections::HashMap<String, (u64, u64)> =
                 std::collections::HashMap::new();
 
             for fd in fds.flatten() {
@@ -1062,6 +1030,7 @@ impl SystemCollector {
                 let mut vram_kib = 0u64;
                 let mut pdev = String::new();
                 let mut is_amd_or_intel = false;
+                let mut engine_ns = 0u64;
 
                 for line in content.lines() {
                     if let Some(v) = line.strip_prefix("drm-client-id:") {
@@ -1080,65 +1049,91 @@ impl SystemCollector {
                     } else if let Some(v) = line.strip_prefix("drm-driver:") {
                         let d = v.trim();
                         is_amd_or_intel = d == "amdgpu" || d == "i915" || d == "xe";
+                    } else if let Some(v) = line.strip_prefix("drm-engine-gfx:") {
+                        if let Some(ns_str) = v.split_whitespace().next() {
+                            if let Ok(ns) = ns_str.parse::<u64>() { engine_ns += ns; }
+                        }
+                    } else if let Some(v) = line.strip_prefix("drm-engine-compute:") {
+                        if let Some(ns_str) = v.split_whitespace().next() {
+                            if let Ok(ns) = ns_str.parse::<u64>() { engine_ns += ns; }
+                        }
                     }
                 }
 
                 if !is_amd_or_intel {
                     continue;
                 }
-                // Match by PCI address. Some kernels prefix with "0000:" and some
-                // don't — accept both directions of ends_with.
                 if pdev != pci_addr && !pdev.ends_with(&pci_addr) && !pci_addr.ends_with(&pdev) {
                     continue;
                 }
+                
                 if let Some(c) = cid {
-                    let e = clients.entry(c).or_insert(0);
-                    if vram_kib > *e {
-                        *e = vram_kib;
+                    let e = clients.entry(c).or_insert((0, 0));
+                    if vram_kib > e.0 {
+                        e.0 = vram_kib;
+                    }
+                    if engine_ns > e.1 {
+                        e.1 = engine_ns;
                     }
                 }
             }
 
             if !clients.is_empty() {
-                let total_kib: u64 = clients.values().sum();
+                let total_kib: u64 = clients.values().map(|(v, _)| *v).sum();
+                let total_engine_ns: u64 = clients.values().map(|(_, e)| *e).sum();
                 let comm = fs::read_to_string(format!("/proc/{}/comm", pid))
                     .map(|s| s.trim().to_string())
                     .unwrap_or_else(|_| format!("pid {}", pid));
-                users.insert(pid, (comm, total_kib));
+                users.insert(pid, (comm, total_kib, total_engine_ns));
             }
         }
 
         let mut procs: Vec<_> = users.into_iter().collect();
-        procs.sort_by_key(|(_, (_, mem))| std::cmp::Reverse(*mem));
+        procs.sort_by_key(|(_, (_, mem, _))| std::cmp::Reverse(*mem));
 
-        if std::env::var_os("MBS_DEBUG").is_some() {
-            eprintln!(
-                "[gpu-procs] found {} clients on {}, vram_reported={}",
-                procs.len(),
-                pci_addr,
-                any_vram_reported
-            );
-        }
+        static PREV_ENGINE_TIMES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<u32, (std::time::Instant, u64)>>> = std::sync::OnceLock::new();
+        let engine_cache = PREV_ENGINE_TIMES.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+        let mut cache_lock = engine_cache.lock().unwrap();
+        let now = std::time::Instant::now();
 
         let result: Vec<ProcessItem> = procs
             .into_iter()
-            .take(15)
-            .map(|(pid, (name, kib))| ProcessItem {
-                pid,
-                name,
-                metric: if any_vram_reported {
+            .filter_map(|(pid, (name, kib, ns))| {
+                let pct = if let Some((prev_time, prev_ns)) = cache_lock.get(&pid) {
+                    let dt = now.duration_since(*prev_time).as_nanos() as f64;
+                    let dns = ns.saturating_sub(*prev_ns) as f64;
+                    if dt > 0.0 && ns > *prev_ns {
+                        (dns / dt * 100.0).clamp(0.0, 100.0)
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
+                cache_lock.insert(pid, (now, ns));
+
+                let metric = if ns > 0 {
+                    format!("{:.1}% · {}M", pct, kib / 1024)
+                } else if any_vram_reported {
                     format!("{} MiB", kib / 1024)
                 } else {
                     "—".to_string()
-                },
-                is_highlight: false,
+                };
+
+                if pct < 0.1 && kib < 1024 * 50 {
+                    return None; // Filter out idle processes using <50MB VRAM
+                }
+
+                Some(ProcessItem {
+                    pid,
+                    name,
+                    metric,
+                    is_highlight: false,
+                })
             })
+            .take(15)
             .collect();
 
-        {
-            let mut g = cache.lock().unwrap();
-            g.insert(card_id.to_string(), (Instant::now(), result.clone()));
-        }
         result
     }
 

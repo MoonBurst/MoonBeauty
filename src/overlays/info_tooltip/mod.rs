@@ -17,7 +17,7 @@ use std::time::Instant;
 
 use crate::bar::unified::{BorgBackend, BorgStatus, PodmanBackend, PodmanStatus};
 use crate::libraries::backend::system::ProcessItem;
-use crate::libraries::backend::{ClockBackend, MprisBackend, MprisTrack, SystemCollector};
+use crate::libraries::backend::{ClockBackend, MprisTrack, SystemCollector};
 use crate::libraries::config::theme::ShellTheme;
 use crate::libraries::config::ShellSettings;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
@@ -371,16 +371,26 @@ impl App {
                 return Task::perform(
                     async move {
                         let _ = crate::libraries::backend::MprisBackend::set_position(secs).await;
+                        let _ = crate::libraries::backend::MpdBackend::seek(secs).await;
+                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                        crate::libraries::backend::MprisBackend::clear_cache();
+                        crate::libraries::backend::MpdBackend::clear_cache();
+                        fetch_data("music".to_string()).await
                     },
-                    |_| Message::Noop,
+                    Message::Loaded,
                 );
             }
             Message::MusicSetVolume(vol) => {
                 return Task::perform(
                     async move {
                         let _ = crate::libraries::backend::MprisBackend::set_volume(vol).await;
+                        let _ = crate::libraries::backend::MpdBackend::set_volume(vol).await;
+                        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                        crate::libraries::backend::MprisBackend::clear_cache();
+                        crate::libraries::backend::MpdBackend::clear_cache();
+                        fetch_data("music".to_string()).await
                     },
-                    |_| Message::Noop,
+                    Message::Loaded,
                 );
             }
             Message::MusicOpenFolder(url) => {

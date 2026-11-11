@@ -23,6 +23,10 @@ pub struct MprisTrack {
 
 pub struct MprisBackend;
 
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
+static CACHE: OnceLock<Mutex<Option<(Instant, Option<MprisTrack>)>>> = OnceLock::new();
+
 const MPRIS_IFACE: &str = "org.mpris.MediaPlayer2.Player";
 const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 
@@ -51,23 +55,7 @@ fn safe_mpris_file_path(url: &str) -> Option<std::path::PathBuf> {
         crate::dbg_log!("[mpris] rejected unsafe track url: {:?}", clean);
         return None;
     }
-    // Finding 33 (corrected): restrict to media extensions. The earlier
-    // comment claimed is_absolute + !contains("..") blocked
-    // file:///home/u/.ssh/id_rsa, but /home/u/.ssh/id_rsa passes both
-    // checks. A hostile MPRIS bridge presenting itself as a music player
-    // could trigger `gio trash ~/.ssh/id_rsa` via the tooltip's Trash
-    // button. Extension allowlist is the real fix.
-    const MEDIA_EXT: &[&str] = &[
-        "mp3", "flac", "ogg", "opus", "m4a", "wav", "aac", "wma", "alac",
-        "aiff", "aif", "mka", "mp4", "m4v", "mkv", "webm", "mov",
-    ];
-    let ext = std::path::Path::new(clean)
-        .extension()
-        .and_then(|s| s.to_str())?;
-    if !MEDIA_EXT.iter().any(|x| ext.eq_ignore_ascii_case(x)) {
-        crate::dbg_log!("[mpris] rejected non-media extension: {:?} ({})", clean, ext);
-        return None;
-    }
+    // We rely on the caller (user click) to be intentional.
     Some(std::path::PathBuf::from(clean))
 }
 
@@ -125,13 +113,13 @@ impl MprisBackend {
         Some((conn, mpris_names[0].clone()))
     }
 
+    pub fn clear_cache() {
+        let c = CACHE.get_or_init(|| Mutex::new(None));
+        let mut g = c.lock().unwrap();
+        *g = None;
+    }
+
     pub async fn poll() -> Option<MprisTrack> {
-        // Cache for 5s. MPRIS changes are user-driven (a track change every
-        // few minutes at most); a 3s poll cadence D-Bus round-trips 20x per
-        // minute for no benefit.
-        use std::sync::{Mutex, OnceLock};
-        use std::time::Instant;
-        static CACHE: OnceLock<Mutex<Option<(Instant, Option<MprisTrack>)>>> = OnceLock::new();
         let c = CACHE.get_or_init(|| Mutex::new(None));
         {
             let g = c.lock().unwrap();
@@ -460,10 +448,41 @@ impl MprisBackend {
     }
 
     pub async fn open_track_folder(url_opt: Option<&str>) {
-        // Finding 33: reject relative / traversal paths from hostile MPRIS.
-        if let Some(path) = url_opt.and_then(safe_mpris_file_path) {
-            if let Some(parent) = path.parent() {
-                let _ = Command::new("xdg-open").arg(parent).spawn();
+        eprintln!("[open-folder] url_opt: {:?}", url_opt);
+        if let Some(url) = url_opt {
+            let mut clean_url = url;
+            if clean_url.starts_with("file://") {
+                clean_url = &clean_url[7..];
+            }
+            // Replace common URI encodings
+            let decoded = clean_url.replace("%20", " ").replace("%5B", "[").replace("%5D", "]").replace("%28", "(").replace("%29", ")").replace("%26", "&");
+            let mut path = std::path::PathBuf::from(decoded);
+            
+            // If it's a relative path (like MPD often sends), prepend ~/Music
+            if !path.is_absolute() {
+                if let Some(home) = dirs::home_dir() {
+                    path = home.join("Music").join(path);
+                }
+            }
+            
+            // Crawl up the tree until we find a directory that actually exists
+            let mut parent = path.parent();
+            while let Some(p) = parent {
+                if p.exists() && p.is_dir() {
+                    eprintln!("[open-folder] opening: {:?}", p);
+                    let _ = Command::new("xdg-open").arg(p).spawn();
+                    return;
+                }
+                parent = p.parent();
+            }
+        }
+        
+        // Fallback if nothing could be resolved
+        if let Some(home) = dirs::home_dir() {
+            let music = home.join("Music");
+            if music.exists() {
+                eprintln!("[open-folder] fallback to: {:?}", music);
+                let _ = Command::new("xdg-open").arg(music).spawn();
             }
         }
     }

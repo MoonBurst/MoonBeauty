@@ -280,19 +280,13 @@ impl MoonBeautyShellApp {
         };
 
         let launcher_sub = if matches!(self.active_overlay, Some(OverlayTarget::Launcher)) {
-            // Use listen_with (not on_key_press) so Left/Right events reach us
-            // even though text_input consumes them for cursor movement.
-            iced::event::listen_with(|event, status, _window| {
+            iced::event::listen_with(|event, _status, _window| {
                 let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                    key, modifiers, ..
+                    key, ..
                 }) = event
                 else {
                     return None;
                 };
-                let shift = modifiers.shift();
-
-                // Debug: log all key presses while launcher is open
-                eprintln!("[launcher-key] key={:?} status={:?}", key, status);
 
                 match key {
                     iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
@@ -307,11 +301,8 @@ impl MoonBeautyShellApp {
                     iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft) => {
                         Some(Message::Launcher(LauncherMessage::SelectPrev))
                     }
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab) if shift => {
-                        Some(Message::Launcher(LauncherMessage::SelectPrev))
-                    }
-                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab) => {
-                        Some(Message::Launcher(LauncherMessage::SelectNext))
+                    iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter) => {
+                        Some(Message::Launcher(LauncherMessage::EnterPressed))
                     }
                     _ => None,
                 }
@@ -485,6 +476,16 @@ impl MoonBeautyShellApp {
             iced::Subscription::none()
         };
 
+        let launcher_music_sub = if matches!(self.active_overlay, Some(OverlayTarget::Launcher))
+            && self.launcher.music_state.is_some()
+            && self.launcher.search_query.trim().to_lowercase() == "music"
+        {
+            iced::time::every(std::time::Duration::from_millis(1000))
+                .map(|_| Message::Launcher(LauncherMessage::MusicTick))
+        } else {
+            iced::Subscription::none()
+        };
+
         let anim_sub = if anim_active {
             iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::TrayAnimTick)
         } else {
@@ -535,6 +536,7 @@ impl MoonBeautyShellApp {
             text_typing_sub,
             email_sub,
             launcher_sub,
+            launcher_music_sub,
             history_sub,
             todo_sub,
             notes_sub,

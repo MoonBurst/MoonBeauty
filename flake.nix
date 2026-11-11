@@ -103,11 +103,13 @@
 
           postInstall = ''
             # Hardening: refuse to package if lock-debug-bypass is compiled in.
-            if grep -aqF 'DEBUG BYPASS (compile-time feature)' $out/bin/moon-beauty-shell; then
+            if grep -aqF 'DEBUG BYPASS (compile-time feature)' $out/bin/moonbeauty; then
               echo "FATAL: lock-debug-bypass feature compiled into release binary" >&2
               echo "       Rebuild without --features lock-debug-bypass." >&2
               exit 1
             fi
+
+            mv $out/bin/moonbeauty $out/bin/moon-beauty-shell
 
             wrapProgram $out/bin/moon-beauty-shell \
               --prefix PATH : ${p.lib.makeBinPath (runtimeTools p)}

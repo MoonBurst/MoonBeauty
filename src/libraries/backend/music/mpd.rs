@@ -25,7 +25,7 @@ use std::time::Duration;
 use mpd_client::{
     commands::{
         definitions::{CurrentSong, Next, Play, Previous, SetPause},
-        Status,
+        Status, SetVolume, Seek, SeekMode,
     },
     responses::{PlayState, Song},
     tag::Tag,
@@ -219,7 +219,15 @@ impl MpdBackend {
             position_sec: status.elapsed.unwrap_or(Duration::ZERO).as_secs_f64(),
             length_sec: song.duration.unwrap_or(Duration::ZERO).as_secs_f64(),
             volume_pct: status.volume,
-            url: None, // MPD doesn't expose a file:// URL in Status
+            url: {
+                let base = dirs::home_dir().map(|h| h.join("Music")).unwrap_or_else(|| std::path::PathBuf::from("/"));
+                let full_path = if song.url.starts_with('/') {
+                    std::path::PathBuf::from(&song.url)
+                } else {
+                    base.join(&song.url)
+                };
+                Some(format!("file://{}", full_path.to_string_lossy()))
+            },
         })
     }
 
@@ -244,12 +252,24 @@ impl MpdBackend {
                 let title = Self::first_tag(s, Tag::Title);
                 title.to_lowercase().contains(&q) || s.url.to_lowercase().contains(&q)
             })
-            .take(10)
+            .take(500)
             .map(|s| {
                 let title = Self::first_tag(&s, Tag::Title);
                 (title, s.url)
             })
             .collect()
+    }
+
+    pub async fn set_volume(vol: u8) {
+        if let Some(client) = Self::connect().await {
+            let _ = client.command(SetVolume(vol)).await;
+        }
+    }
+
+    pub async fn seek(secs: f64) {
+        if let Some(client) = Self::connect().await {
+            let _ = client.command(Seek(SeekMode::Absolute(Duration::from_secs_f64(secs)))).await;
+        }
     }
 
     pub async fn next() {

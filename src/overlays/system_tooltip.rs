@@ -264,15 +264,32 @@ impl App {
                         .filter(|n| *n >= 1 && *n <= 100)
                         .unwrap_or(4)
                 } else {
-                    // 100ms (was 500) so SIGTERM-close is picked up within
-                    // ~100ms during idle.
                     100
                 };
 
-                return Task::perform(
+                let mut tasks = Vec::new();
+
+                if self.anim_frame % 250 == 0 && self.closing_at.is_none() {
+                    let target = self.target.clone();
+                    let gpu_info = self.gpu_list.get(self.selected_gpu).cloned().unwrap_or_default();
+                    tasks.push(Task::perform(
+                        async move {
+                            match target.as_str() {
+                                "cpu" => Data::Cpu(async { SystemCollector::collect_all().await.0 }.await),
+                                "gpu" => Data::Gpu(SystemCollector::collect_gpu_by_info(&gpu_info).await),
+                                _ => Data::Ram(async { SystemCollector::collect_all().await.1 }.await),
+                            }
+                        },
+                        Message::Loaded,
+                    ));
+                }
+
+                tasks.push(Task::perform(
                     async move { tokio::time::sleep(std::time::Duration::from_millis(next_ms)).await },
                     |_| Message::Tick,
-                );
+                ));
+
+                return Task::batch(tasks);
             }
             Message::SearchChanged(q) => {
                 self.search_query = q;
@@ -448,11 +465,13 @@ fn render_proc_row(
     let text_col = apply(t.text);
     let surface_alt = apply(t.surface_alt);
 
-    let metric_str = if let Some(total) = total_ram_gib {
+    let metric_str = if raw_metric.contains('%') {
+        raw_metric
+    } else if let Some(total) = total_ram_gib {
         let rss_mib = leading_number(&raw_metric);
         let total_mib = (total.max(0.01) as f64) * 1024.0;
         let pct = (rss_mib / total_mib * 100.0).clamp(0.0, 100.0);
-        format!("{:.1}% · {:.0}M", pct, rss_mib)
+        format!("{:.1}% VRAM", pct)
     } else {
         raw_metric
     };
@@ -753,9 +772,9 @@ impl App {
                     let header_h = fs as f32 + 16.0;
                     let multi = self.gpu_list.len() > 1;
                     let header_label = if multi {
-                        format!("GPU: {}  ▼", g.name)
+                        format!("GPU: {} ({}%)  ▼", g.name, g.usage_pct)
                     } else {
-                        format!("GPU: {}", g.name)
+                        format!("GPU: {} ({}%)", g.name, g.usage_pct)
                     };
 
                     let header_el: Element<'_, Message> = if multi {

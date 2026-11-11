@@ -114,6 +114,11 @@ impl MoonBeautyShellApp {
             | LauncherMessage::SelectUp => {
                 let cmd = self.launcher.update(msg);
 
+                // If we are in music mode, the launcher update already returns a scroll task for "music_scroll"
+                if self.launcher.search_query.trim().to_lowercase() == "music" {
+                    return cmd.map(Message::Launcher);
+                }
+
                 let idx = self.launcher.selected_index;
                 let math_count = self
                     .launcher
