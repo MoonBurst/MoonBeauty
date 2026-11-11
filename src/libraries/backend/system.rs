@@ -610,7 +610,7 @@ impl SystemCollector {
                 }
                 *g = Some((Instant::now(), new_ping));
             }
-            g.as_ref().unwrap().1.clone()
+            format!("{:>6}", g.as_ref().unwrap().1)
         };
 
         NetMetrics {
@@ -813,11 +813,11 @@ impl SystemCollector {
 
     pub fn format_bits(bps: f32) -> String {
         if bps >= 1_000_000_000.0 {
-            format!("{:.1}Gb", bps / 1_000_000_000.0)
+            format!("{:>5.1}Gb", bps / 1_000_000_000.0)
         } else if bps >= 1_000_000.0 {
-            format!("{:.1}Mb", bps / 1_000_000.0)
+            format!("{:>5.1}Mb", bps / 1_000_000.0)
         } else {
-            format!("{:.1}Kb", (bps / 1_000.0).max(0.0))
+            format!("{:>5.1}Kb", (bps / 1_000.0).max(0.0))
         }
     }
 

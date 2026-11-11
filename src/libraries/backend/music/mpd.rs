@@ -34,9 +34,52 @@ use mpd_client::{
 
 use super::mpris::MprisTrack;
 
+pub fn get_music_dir() -> std::path::PathBuf {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<std::path::PathBuf> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let mut paths = vec![
+            std::path::PathBuf::from("/etc/mpd.conf"),
+            std::path::PathBuf::from("/etc/xdg/mpd/mpd.conf"),
+        ];
+        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+            paths.push(std::path::PathBuf::from(xdg).join("mpd/mpd.conf"));
+        } else if let Some(home) = dirs::home_dir() {
+            paths.push(home.join(".config/mpd/mpd.conf"));
+        }
+
+        for conf in paths {
+            if let Ok(s) = std::fs::read_to_string(&conf) {
+                for line in s.lines() {
+                    let line = line.trim();
+                    if line.starts_with("music_directory") && line.contains('"') {
+                        let parts: Vec<&str> = line.split('"').collect();
+                        if parts.len() >= 3 {
+                            let mut path = parts[1].to_string();
+                            if path.starts_with("~/") {
+                                if let Some(home) = dirs::home_dir() {
+                                    path = path.replace("~/", &format!("{}/", home.display()));
+                                }
+                            }
+                            crate::dbg_log!("[mpd] found music_directory in {}: {:?}", conf.display(), path);
+                            return std::path::PathBuf::from(path);
+                        }
+                    }
+                }
+            }
+        }
+        crate::dbg_log!("[mpd] WARNING: Could not find music_directory in any config file. Falling back to ~/Music");
+        dirs::home_dir().map(|h| h.join("Music")).unwrap_or_else(|| std::path::PathBuf::from("/"))
+    }).clone()
+}
+
 pub struct MpdBackend;
 
+
 impl MpdBackend {
+    pub fn get_music_dir() -> std::path::PathBuf {
+        super::super::music::mpd::get_music_dir()
+    }
     /// Resolve the connection target. Priority:
     ///   1. `MPD_HOST` env (if starts with `/` → Unix socket; else
     ///      `host:MPD_PORT` or `host:6600`)
@@ -220,7 +263,7 @@ impl MpdBackend {
             length_sec: song.duration.unwrap_or(Duration::ZERO).as_secs_f64(),
             volume_pct: status.volume,
             url: {
-                let base = dirs::home_dir().map(|h| h.join("Music")).unwrap_or_else(|| std::path::PathBuf::from("/"));
+                let base = get_music_dir();
                 let full_path = if song.url.starts_with('/') {
                     std::path::PathBuf::from(&song.url)
                 } else {
@@ -242,7 +285,7 @@ impl MpdBackend {
         {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("[mpd] listallinfo failed: {:?}", e);
+                crate::dbg_log!("[mpd] listallinfo failed: {:?}", e);
                 return Vec::new();
             }
         };
@@ -330,7 +373,7 @@ impl MpdBackend {
             return;
         }
         let Some(client) = Self::connect().await else {
-            eprintln!("[mpd] play_queue: connection failed");
+            crate::dbg_log!("[mpd] play_queue: connection failed");
             return;
         };
         eprintln!(
@@ -342,7 +385,7 @@ impl MpdBackend {
         let current_len = match client.command(mpd_client::commands::Queue).await {
             Ok(q) => q.len(),
             Err(e) => {
-                eprintln!("[mpd] queue failed: {:?}", e);
+                crate::dbg_log!("[mpd] queue failed: {:?}", e);
                 0
             }
         };
@@ -352,7 +395,7 @@ impl MpdBackend {
                 .command(mpd_client::commands::Add::uri(url.as_str()))
                 .await
             {
-                eprintln!("[mpd] add failed for {}: {:?}", url, e);
+                crate::dbg_log!("[mpd] add failed for {}: {:?}", url, e);
             }
         }
         let _ = client

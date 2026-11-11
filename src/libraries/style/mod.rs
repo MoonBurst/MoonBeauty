@@ -3,7 +3,7 @@ pub mod shape_box;
 pub use shape_box::{ShapeBox, ShapeType, SlantSide};
 
 /// Shell font family. Matches `fontFamily` in the QML build (Shapes.qml / Theme.qml).
-pub const SHELL_FAMILY: &str = "Fira Sans Condensed";
+pub const SHELL_FAMILY: &str = "Fira Code";
 
 /// Build a `Font` using the shell family at the given weight.
 pub fn shell_font(weight: iced::font::Weight) -> iced::Font {

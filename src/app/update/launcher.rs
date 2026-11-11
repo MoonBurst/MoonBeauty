@@ -4,6 +4,18 @@ use moonbeauty::overlays::launcher::LauncherMessage;
 impl MoonBeautyShellApp {
     pub(crate) fn handle_launcher(&mut self, msg: LauncherMessage) -> Command<Message> {
         match msg {
+            LauncherMessage::EnterPressed => {
+                if self.launcher.search_query.trim().to_lowercase() == "music" {
+                    if self.launcher.music_focus_idx == 0 {
+                        return self.handle_launcher(LauncherMessage::MusicPlaySelected);
+                    } else {
+                        return self.handle_launcher(LauncherMessage::MusicTriggerAction);
+                    }
+                } else if let Some(selected) = self.launcher.filtered_apps.get(self.launcher.selected_index) {
+                    return self.handle_launcher(LauncherMessage::ExecuteApp(selected.exec.clone()));
+                }
+                return Command::none();
+            }
             LauncherMessage::Dismiss => {
                 if self.is_standalone {
                     std::process::exit(0);

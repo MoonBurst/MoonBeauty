@@ -448,43 +448,51 @@ impl MprisBackend {
     }
 
     pub async fn open_track_folder(url_opt: Option<&str>) {
-        eprintln!("[open-folder] url_opt: {:?}", url_opt);
+        crate::dbg_log!("[open-folder] RECEIVED URL: {:?}", url_opt);
+        
         if let Some(url) = url_opt {
             let mut clean_url = url;
             if clean_url.starts_with("file://") {
                 clean_url = &clean_url[7..];
             }
-            // Replace common URI encodings
             let decoded = clean_url.replace("%20", " ").replace("%5B", "[").replace("%5D", "]").replace("%28", "(").replace("%29", ")").replace("%26", "&");
             let mut path = std::path::PathBuf::from(decoded);
             
-            // If it's a relative path (like MPD often sends), prepend ~/Music
             if !path.is_absolute() {
-                if let Some(home) = dirs::home_dir() {
-                    path = home.join("Music").join(path);
+                let base = crate::libraries::backend::music::mpd::get_music_dir();
+                path = base.join(path);
+            }
+            
+            crate::dbg_log!("[open-folder] CONSTRUCTED PATH: {:?}", path);
+            
+            // If the exact file exists, open its parent folder
+            if path.exists() && path.is_file() {
+                if let Some(parent) = path.parent() {
+                    crate::dbg_log!("[open-folder] SUCCESS (file exists), opening parent: {:?}", parent);
+                    let _ = Command::new("xdg-open").arg(parent).spawn();
+                    return;
                 }
             }
             
-            // Crawl up the tree until we find a directory that actually exists
-            let mut parent = path.parent();
-            while let Some(p) = parent {
-                if p.exists() && p.is_dir() {
-                    eprintln!("[open-folder] opening: {:?}", p);
-                    let _ = Command::new("xdg-open").arg(p).spawn();
+            // If the file is missing, but the directory of the file exists, open that
+            if let Some(parent) = path.parent() {
+                if parent.exists() && parent.is_dir() {
+                    crate::dbg_log!("[open-folder] PARTIAL SUCCESS (parent dir exists), opening: {:?}", parent);
+                    let _ = Command::new("xdg-open").arg(parent).spawn();
                     return;
                 }
-                parent = p.parent();
             }
+
+            // If not found, just try opening the music root as a last resort
+            let base = crate::libraries::backend::music::mpd::get_music_dir();
+            crate::dbg_log!("[open-folder] FAILED to find exact path, falling back to root: {:?}", base);
+            let _ = Command::new("xdg-open").arg(base).spawn();
+            return;
         }
         
-        // Fallback if nothing could be resolved
-        if let Some(home) = dirs::home_dir() {
-            let music = home.join("Music");
-            if music.exists() {
-                eprintln!("[open-folder] fallback to: {:?}", music);
-                let _ = Command::new("xdg-open").arg(music).spawn();
-            }
-        }
+        let base = crate::libraries::backend::music::mpd::get_music_dir();
+        crate::dbg_log!("[open-folder] NO URL PROVIDED, opening root: {:?}", base);
+        let _ = Command::new("xdg-open").arg(base).spawn();
     }
 
     pub async fn trash_current_track(url_opt: Option<&str>) -> bool {

@@ -65,6 +65,11 @@ fn app_style(_state: &MoonBeautyShellApp, _theme: &iced::Theme) -> iced::theme::
 pub fn main() -> Result<(), iced_layershell::Error> {
     let args: Vec<String> = std::env::args().collect();
 
+    if args.iter().any(|a| a == "--debug") {
+        std::env::set_var("MBS_DEBUG", "1");
+        eprintln!("[main] MBS_DEBUG=1 enabled via --debug flag");
+    }
+
     cli::clipboard_ingest::run(&args);
 
     // Finding 07 defense-in-depth: restrictive ImageMagick policy that

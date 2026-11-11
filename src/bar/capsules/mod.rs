@@ -32,17 +32,9 @@ thread_local! {
 
 fn est_text_width(txt: &str, size: u16) -> f32 {
     let em = size as f32;
-    txt.chars()
-        .map(|c| {
-            if c == ' ' {
-                em * 0.25
-            } else if c.is_ascii() {
-                em * 0.6
-            } else {
-                em * 1.3
-            }
-        })
-        .sum()
+    // Fira Code is monospaced: every character (including spaces) 
+    // takes exactly the same width. We use 0.65em to provide a safe margin.
+    txt.chars().count() as f32 * (em * 0.65)
 }
 
 fn label<'a, Message: 'a>(segments: &[(String, Color)], size: u16) -> Element<'a, Message> {
@@ -164,10 +156,14 @@ impl CapsuleRenderer {
         };
 
         let text_w = LABEL_W.with(|w| w.get());
+        
+        // Let all capsules dynamically size to their text content.
+        // Fira Code (monospace) ensures numbers don't cause jitter.
         let bounding_w = if id == "tray" {
             settings.tray_width as f32 + theme.slant_width * 2.0
         } else {
-            text_w + theme.slant_width * 2.0 + settings.capsule_internal_padding as f32
+            // Add a 16px buffer so the text never touches the slanted edges
+            text_w + theme.slant_width * 2.0 + settings.capsule_internal_padding as f32 + 16.0
         };
         record_width(id, bounding_w);
 

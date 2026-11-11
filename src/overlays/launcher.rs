@@ -612,7 +612,7 @@ impl AppLauncher {
     pub async fn launch(exec: &str) {
         if exec.is_empty() { return; }
         let Some((prog, args)) = Self::parse_exec(exec) else {
-            eprintln!("[launcher] refusing to launch: unparseable Exec {:?}", exec);
+            crate::dbg_log!("[launcher] refusing to launch: unparseable Exec {:?}", exec);
             return;
         };
         let _ = Command::new("systemd-run").args(["--user", "--collect", "--quiet", "--slice=app.slice", "--"]).arg(&prog).args(&args).spawn();
