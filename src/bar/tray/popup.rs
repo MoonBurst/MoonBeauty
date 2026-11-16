@@ -107,7 +107,7 @@ impl App {
             settings: s.clone(),
             theme: ShellTheme::from_settings(&s),
         };
-        let task = Task::perform(fetch_tray_items(), Message::ItemsLoaded);
+        let task = Task::perform(fetch_tray_items(Vec::new()), Message::ItemsLoaded);
         (
             app,
             Task::batch(vec![

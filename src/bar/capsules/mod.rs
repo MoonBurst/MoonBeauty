@@ -95,7 +95,8 @@ pub fn compute_expanded_visible_width(settings: &ShellSettings, item_count: usiz
         + if shown > 0 { spacing } else { 0.0 }
         + (icon_slot + spacing) * shown as f32
         + empty_w;
-    content_w + 32.0
+    // Added a 40px buffer so the last item doesn't get clipped
+    content_w + 40.0 + 24.0
 }
 
 // ══════════════ Public API ══════════════

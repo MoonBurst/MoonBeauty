@@ -37,3 +37,5 @@ pub use annotator::{save_annotated_image, AnnotatorMessage, AnnotatorOverlay};
 pub mod watermark;
 
 pub use watermark::{add_plate_watermark, reveal};
+
+pub mod cli;

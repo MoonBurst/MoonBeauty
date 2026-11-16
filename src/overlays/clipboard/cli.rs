@@ -83,12 +83,12 @@ pub fn run(args: &[String]) {
                 "txt"
             };
             let path = dir.join(format!("{}.{}", id, ext));
-            let _ = moonbeauty::libraries::process::private_write_file(&path, &bytes);
+            let _ = crate::libraries::process::private_write_file(&path, &bytes);
 
             // Pre-generate the 512x512 preview so the long-running UI
             // process never has to decode the full 4K image later.
             if is_image {
-                let _ = moonbeauty::overlays::clipboard::ensure_image_preview(&path);
+                let _ = crate::overlays::clipboard::ensure_image_preview(&path);
             }
 
             // URI-list ingest (annotator saves, file-manager copies).
@@ -112,7 +112,7 @@ pub fn run(args: &[String]) {
                         );
                         continue;
                     }
-                    if moonbeauty::overlays::clipboard::ClipboardOverlay::add_entry(&path, None)
+                    if crate::overlays::clipboard::ClipboardOverlay::add_entry(&path, None)
                         .is_some()
                     {
                         ingested += 1;
@@ -123,7 +123,7 @@ pub fn run(args: &[String]) {
                 std::process::exit(0);
             }
 
-            let mut items: Vec<moonbeauty::overlays::clipboard::ClipItem> = Vec::new();
+            let mut items: Vec<crate::overlays::clipboard::ClipItem> = Vec::new();
             if let Ok(content) = std::fs::read_to_string(&index_path) {
                 if let Ok(parsed) = serde_json::from_str(&content) {
                     items = parsed;
@@ -136,7 +136,7 @@ pub fn run(args: &[String]) {
             };
 
             if is_image {
-                let name_file = moonbeauty::libraries::process::mbs_runtime_dir()
+                let name_file = crate::libraries::process::mbs_runtime_dir()
                     .join("mbs-last-clip-name.txt");
                 if let Ok(txt) = std::fs::read_to_string(&name_file) {
                     text_preview = txt.trim().to_string();
@@ -161,7 +161,7 @@ pub fn run(args: &[String]) {
             if let Some(top) = items.first_mut() {
                 if top.content_hash.is_none() {
                     if let Some(p) =
-                        moonbeauty::overlays::clipboard::ClipboardOverlay::get_file_path(
+                        crate::overlays::clipboard::ClipboardOverlay::get_file_path(
                             &dir, top.id,
                         )
                     {
@@ -183,7 +183,7 @@ pub fn run(args: &[String]) {
 
             items.insert(
                 0,
-                moonbeauty::overlays::clipboard::ClipItem {
+                crate::overlays::clipboard::ClipItem {
                     id,
                     text: text_preview,
                     is_image,
@@ -196,13 +196,13 @@ pub fn run(args: &[String]) {
 
             if let Ok(json) = serde_json::to_string(&items) {
                 let tmp = dir.join("index.json.tmp");
-                if moonbeauty::libraries::process::private_write_file(&tmp, json.as_bytes()).is_ok()
+                if crate::libraries::process::private_write_file(&tmp, json.as_bytes()).is_ok()
                 {
                     let _ = std::fs::rename(&tmp, &index_path);
                     // Purge AFTER successful write: if the write fails,
                     // the old index still references files we would
                     // have deleted.
-                    moonbeauty::overlays::clipboard::ClipboardOverlay::purge_orphans(&dir, &items);
+                    crate::overlays::clipboard::ClipboardOverlay::purge_orphans(&dir, &items);
                     eprintln!(
                         "[clipboard-ingest] Saved {} items, is_image={}",
                         items.len(),

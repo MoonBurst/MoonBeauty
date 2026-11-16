@@ -446,6 +446,7 @@ fn render_proc_row(
     p: &ProcessItem,
     t: &ShellTheme,
     total_ram_gib: Option<f32>,
+    is_gpu: bool,
     font_size: u16,
     alpha: f32,
     row_w: f32,
@@ -465,13 +466,19 @@ fn render_proc_row(
     let text_col = apply(t.text);
     let surface_alt = apply(t.surface_alt);
 
-    let metric_str = if raw_metric.contains('%') {
+    let metric_str = if is_gpu {
         raw_metric
     } else if let Some(total) = total_ram_gib {
         let rss_mib = leading_number(&raw_metric);
         let total_mib = (total.max(0.01) as f64) * 1024.0;
         let pct = (rss_mib / total_mib * 100.0).clamp(0.0, 100.0);
-        format!("{:.1}% VRAM", pct)
+        
+        // Format it cleanly: e.g. "6.4% · 450M" instead of "6.4% VRAM"
+        if rss_mib >= 1024.0 {
+            format!("{:.1}% · {:.1}G", pct, rss_mib / 1024.0)
+        } else {
+            format!("{:.1}% · {:.0}M", pct, rss_mib)
+        }
     } else {
         raw_metric
     };
@@ -745,6 +752,7 @@ impl App {
                             p,
                             t,
                             None,
+                            false,
                             fs,
                             alpha,
                             inner_w,
@@ -862,6 +870,7 @@ impl App {
                             p,
                             t,
                             Some(g.vram_total_gib as f32),
+                            true,
                             fs,
                             alpha,
                             inner_w,
@@ -973,6 +982,7 @@ impl App {
                             p,
                             t,
                             Some(total),
+                            false,
                             fs,
                             alpha,
                             inner_w,

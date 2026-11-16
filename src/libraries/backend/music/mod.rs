@@ -38,3 +38,5 @@ pub async fn poll_track() -> (Option<MprisTrack>, TrackSource) {
         (None, None) => (None, TrackSource::None),
     }
 }
+
+pub mod cli;

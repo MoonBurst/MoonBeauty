@@ -140,7 +140,8 @@ impl MoonBeautyShellApp {
                 let _ = std::fs::remove_file(&cmd_path);
                 match cmd.trim() {
                     "dismiss" => {
-                        if let Some(last) = self.notifs.active_toasts.first().cloned() {
+                        // Dismiss the newest toast (.last()), not the oldest (.first())
+                        if let Some(last) = self.notifs.active_toasts.last().cloned() {
                             self.notifs.update(NotifMessage::DismissToast(last.id));
                         }
                     }
@@ -257,9 +258,12 @@ impl MoonBeautyShellApp {
             moonbeauty::libraries::process::mbs_runtime_dir().join("moonbeauty-notif-cmd");
         // private_write_file: O_EXCL + 0600 + refuses pre-placed
         // symlinks. std::fs::write followed symlinks and inherited umask.
-        match moonbeauty::libraries::process::private_write_file(&cmd_path, b"dismiss") {
-            Ok(_) => eprintln!("[ipc] DismissLatestNotif -> notif-surface"),
-            Err(e) => eprintln!("[ipc] DismissLatestNotif write failed: {e}"),
+        let tmp_path = cmd_path.with_extension("tmp");
+        if moonbeauty::libraries::process::private_write_file(&tmp_path, b"dismiss").is_ok() {
+            let _ = std::fs::rename(&tmp_path, &cmd_path);
+            eprintln!("[ipc] DismissLatestNotif -> notif-surface");
+        } else {
+            eprintln!("[ipc] DismissLatestNotif write failed");
         }
         Command::none()
     }

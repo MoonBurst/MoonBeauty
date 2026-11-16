@@ -78,7 +78,7 @@ impl MoonBeautyShellApp {
         // the user ever clicks the tray capsule. Eliminates the
         // 0-item → N-item re-animation on first open.
         return Command::perform(
-            moonbeauty::bar::tray::watcher::fetch_tray_items(),
+            moonbeauty::bar::tray::watcher::fetch_tray_items(self.tray_items.clone()),
             Message::TrayItemsLoaded,
         );
     }
@@ -87,7 +87,19 @@ impl MoonBeautyShellApp {
         &mut self,
         items: Vec<moonbeauty::bar::tray::TrayItem>,
     ) -> Command<Message> {
-        self.tray_items = items;
+        // Merge the new list with the old list.
+        // If D-Bus temporarily drops an app, we keep its old icon instead of losing it.
+        let mut merged = items;
+        for old_item in &self.tray_items {
+            // Check if the old item is missing from the new list
+            if !merged.iter().any(|new_item| new_item.id == old_item.id || new_item.bus == old_item.bus) {
+                merged.push(old_item.clone());
+            }
+        }
+        
+        if !merged.is_empty() {
+            self.tray_items = merged;
+        }
         if self.tray_expanded {
             let new_target = moonbeauty::bar::capsules::compute_expanded_visible_width(
                 &self.settings,

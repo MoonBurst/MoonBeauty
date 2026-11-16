@@ -17,11 +17,11 @@ pub fn run(args: &[String]) {
             .unwrap_or(400u32);
         if let Ok(json) = std::fs::read_to_string(&json_path) {
             if let Ok(items) =
-                serde_json::from_str::<Vec<moonbeauty::bar::tray::TrayMenuItem>>(&json)
+                serde_json::from_str::<Vec<crate::bar::tray::TrayMenuItem>>(&json)
             {
                 let _ = std::fs::remove_file(&json_path);
                 std::process::exit(
-                    match moonbeauty::bar::tray::context::run(items, bus, menu_path, w, h) {
+                    match crate::bar::tray::context::run(items, bus, menu_path, w, h) {
                         Ok(_) => 0,
                         Err(_) => 1,
                     },

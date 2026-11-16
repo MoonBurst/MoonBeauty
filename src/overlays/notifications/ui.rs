@@ -714,41 +714,43 @@ impl NotificationOverlay {
         // instant. Without this, every notification on NixOS spends
         // ~500-800ms scanning icon theme directories before the toast
         // can render — the "1 second behind" the user sees.
-        let cache_key = format!("{}|{}", app_name, desktop_entry.unwrap_or(""));
-        let avatar_path: Option<String> = if let Some(cached) = self.icon_cache.get(&cache_key) {
-            cached.clone()
+        let avatar_path: Option<String> = if let Some(p) = matched_profile {
+            // Profile matches are highly specific. Resolve them every time.
+            // If we cache them under "app_name", Bob will inherit Alice's avatar!
+            avatar_path_for(&p.name)
+                .or_else(|| desktop_entry.and_then(resolve_desktop_icon))
+                .or_else(|| resolve_icon_name(&app_name.to_lowercase().replace(' ', "-")))
         } else {
-            let resolved = match matched_profile {
-                Some(p) => avatar_path_for(&p.name)
-                    .or_else(|| desktop_entry.and_then(resolve_desktop_icon))
-                    .or_else(|| resolve_icon_name(&app_name.to_lowercase().replace(' ', "-"))),
-                None => {
-                    if let Some(p) = desktop_entry.and_then(resolve_desktop_icon) {
-                        Some(p)
-                    } else {
-                        let lower = app_name.to_lowercase();
-                        let variants = [
-                            lower.clone(),
-                            lower.replace(' ', "-"),
-                            lower.replace(' ', "_"),
-                            lower.split_whitespace().next().unwrap_or("").to_string(),
-                        ];
-                        variants
-                            .iter()
-                            .filter(|v| !v.is_empty())
-                            .find_map(|v| resolve_icon_name(v))
+            let cache_key = format!("{}|{}", app_name, desktop_entry.unwrap_or(""));
+            if let Some(cached) = self.icon_cache.get(&cache_key) {
+                cached.clone()
+            } else {
+                let resolved = if let Some(p) = desktop_entry.and_then(resolve_desktop_icon) {
+                    Some(p)
+                } else {
+                    let lower = app_name.to_lowercase();
+                    let variants = [
+                        lower.clone(),
+                        lower.replace(' ', "-"),
+                        lower.replace(' ', "_"),
+                        lower.split_whitespace().next().unwrap_or("").to_string(),
+                    ];
+                    variants
+                        .iter()
+                        .filter(|v| !v.is_empty())
+                        .find_map(|v| resolve_icon_name(v))
+                };
+                // Bounded cache: evict oldest when full
+                if self.icon_cache.len() >= 200 {
+                    if let Some(k) = self.icon_cache.keys().next().cloned() {
+                        self.icon_cache.remove(&k);
                     }
                 }
-            };
-            // Bounded cache: evict oldest when full (Vec shift, cheap at 200).
-            if self.icon_cache.len() >= 200 {
-                if let Some(k) = self.icon_cache.keys().next().cloned() {
-                    self.icon_cache.remove(&k);
-                }
+                self.icon_cache.insert(cache_key, resolved.clone());
+                resolved
             }
-            self.icon_cache.insert(cache_key, resolved.clone());
-            resolved
         };
+
         let item = NotificationToast {
             id,
             app_name: app_name.to_string(),
@@ -1143,9 +1145,9 @@ impl NotificationOverlay {
 
         let mut removed_any = false;
         self.active_toasts.retain(|t| {
-            if t.is_urgent {
-                return true;
-            }
+            // Note: We DO NOT skip is_urgent here. If the user explicitly
+            // dismissed an urgent toast, exit_started_at is set and we
+            // need to actually remove it after the animation finishes.
             match t.exit_started_at {
                 Some(start) => {
                     if start.elapsed() < exit_duration {

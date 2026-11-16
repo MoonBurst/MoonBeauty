@@ -1,9 +1,9 @@
 //! Music CLI flags: --music-cycle, --music-next, --music-previous,
 //! --music-play-pause. All fire IpcCommand::Music* over the local socket.
 
-use moonbeauty::libraries::ipc::IpcCommand;
+use crate::libraries::ipc::IpcCommand;
 
-use crate::send_ipc_sync;
+use crate::libraries::ipc::send_ipc_sync;
 
 pub fn run(args: &[String]) {
     // Music CLI flags — fired from the tooltip's Cycle/Prev/Play/Next

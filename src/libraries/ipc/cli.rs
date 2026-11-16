@@ -1,8 +1,8 @@
 //! --toggle <overlay> and bare --<overlay> (implicit IPC toggle).
 
-use moonbeauty::libraries::ipc::{IpcCommand, OverlayTarget};
+use crate::libraries::ipc::{IpcCommand, OverlayTarget};
 
-use crate::send_ipc_sync;
+use crate::libraries::ipc::send_ipc_sync;
 
 pub fn run(args: &[String]) {
     // Generic IPC toggle: moonbeauty --toggle <overlay>

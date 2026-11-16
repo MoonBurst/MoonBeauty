@@ -3,7 +3,7 @@
 
 pub fn run(args: &[String]) {
     if args.iter().any(|a| a == "--sys-tooltip") {
-        match moonbeauty::overlays::system_tooltip::run() {
+        match crate::overlays::system_tooltip::run() {
             Ok(()) => std::process::exit(0),
             Err(e) => {
                 eprintln!("[sys-tooltip] {e}");
@@ -13,7 +13,7 @@ pub fn run(args: &[String]) {
     }
 
     if args.iter().any(|a| a == "--weather-tooltip") {
-        match moonbeauty::bar::weather::tooltip::run() {
+        match crate::bar::weather::tooltip::run() {
             Ok(()) => std::process::exit(0),
             Err(e) => {
                 eprintln!("[weather-tooltip] {e}");
@@ -23,7 +23,7 @@ pub fn run(args: &[String]) {
     }
 
     if args.iter().any(|a| a == "--info-tooltip") {
-        match moonbeauty::overlays::info_tooltip::run() {
+        match crate::overlays::info_tooltip::run() {
             Ok(()) => std::process::exit(0),
             Err(e) => {
                 eprintln!("[info-tooltip] {e}");

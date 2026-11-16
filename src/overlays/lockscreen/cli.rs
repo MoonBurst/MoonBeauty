@@ -6,6 +6,7 @@ pub fn run(args: &[String]) {
     if args.iter().any(|a| a == "--lockscreen")
         && !args.iter().any(|a| a == "--lockscreen-instance")
     {
-        moonbeauty::overlays::lockscreen::LockCoordinator::spawn();
+        crate::overlays::lockscreen::LockCoordinator::spawn();
     }
 }
+

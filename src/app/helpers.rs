@@ -333,7 +333,7 @@ impl MoonBeautyShellApp {
                     // tray_opened_at.elapsed() every 500ms while
                     // tray_expanded is true. No per-open timer needed.
                     return Command::perform(
-                        moonbeauty::bar::tray::watcher::fetch_tray_items(),
+                        moonbeauty::bar::tray::watcher::fetch_tray_items(self.tray_items.clone()),
                         Message::TrayItemsLoaded,
                     );
                 } else {

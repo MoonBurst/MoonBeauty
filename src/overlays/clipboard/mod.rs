@@ -1041,3 +1041,5 @@ impl ClipboardOverlay {
             .into()
     }
 }
+
+pub mod cli;

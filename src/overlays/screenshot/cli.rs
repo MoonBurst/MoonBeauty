@@ -1,8 +1,10 @@
-use moonbeauty::libraries::ipc::{IpcCommand, OverlayTarget};
-use moonbeauty::libraries::process::resolve_exe;
-use moonbeauty::overlays::screenshot;
+use crate::libraries::ipc::{IpcCommand, OverlayTarget};
+use crate::libraries::process::resolve_exe;
+use super::capture;
+use super::output;
+use super::fragment;
 
-use crate::send_ipc_sync;
+use crate::libraries::ipc::send_ipc_sync;
 
 pub fn run_fragment(args: &[String]) {
     // Temporary: verify freeze-frame capture works before UI build
@@ -18,7 +20,7 @@ pub fn run_fragment(args: &[String]) {
             eprintln!("usage: --freeze-fragment <name> <gx> <gy> <local.png> <state_file>");
             std::process::exit(2);
         }
-        match screenshot::fragment::run(
+        match fragment::run(
             monitor,
             gx,
             gy,
@@ -39,13 +41,13 @@ pub fn run_orchestrator(args: &[String]) {
     if args.iter().any(|a| a == "--screenshot") {
         // Multi-monitor: capture the entire desktop once, then spawn one fragment
         // per monitor with a local crop. Fragments coordinate drags via a shared state file.
-        let outputs = screenshot::output::list_all_outputs();
+        let outputs = output::list_all_outputs();
         if outputs.is_empty() {
             eprintln!("[screenshot] no outputs found");
             std::process::exit(1);
         }
 
-        let full_bytes = match screenshot::capture::capture_output(None) {
+        let full_bytes = match capture::capture_output(None) {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("[screenshot] capture failed: {e}");
@@ -64,8 +66,8 @@ pub fn run_orchestrator(args: &[String]) {
         let min_x = outputs.iter().map(|(_, x, _, _, _)| *x).min().unwrap_or(0);
         let min_y = outputs.iter().map(|(_, _, y, _, _)| *y).min().unwrap_or(0);
 
-        let state_file = moonbeauty::libraries::process::mbs_unique_tmp("mbs-freeze-state", "txt");
-        screenshot::fragment::write_state_file(&state_file, "idle", 0, 0, 0, 0);
+        let state_file = crate::libraries::process::mbs_unique_tmp("mbs-freeze-state", "txt");
+        fragment::write_state_file(&state_file, "idle", 0, 0, 0, 0);
 
         let exe = resolve_exe();
         let mut children: Vec<(String, std::process::Child)> = Vec::new();
@@ -78,11 +80,11 @@ pub fn run_orchestrator(args: &[String]) {
                 continue;
             }
             let crop = image::imageops::crop_imm(&full_img, lx, ly, *w, *h).to_image();
-            let local_png = moonbeauty::libraries::process::mbs_unique_tmp(
+            let local_png = crate::libraries::process::mbs_unique_tmp(
                 &format!("mbs-freeze-{}", name),
                 "png",
             );
-            let write_ok = match moonbeauty::libraries::process::private_create_new(&local_png) {
+            let write_ok = match crate::libraries::process::private_create_new(&local_png) {
                 Ok(mut f) => {
                     let ok = image::DynamicImage::ImageRgba8(crop)
                         .write_to(&mut f, image::ImageFormat::Png)
@@ -111,7 +113,7 @@ pub fn run_orchestrator(args: &[String]) {
                 ])
                 .spawn()
             {
-                Ok(child) => children.push((name.clone(), child)),
+                Ok(child) => children.push((name.to_string(), child)),
                 Err(e) => eprintln!("[screenshot] spawn {} failed: {e}", name),
             }
         }
@@ -124,7 +126,7 @@ pub fn run_orchestrator(args: &[String]) {
         // Poll state file
         let mut rect: Option<(i32, i32, i32, i32)> = None;
         loop {
-            let (state, sx, sy, cx, cy) = screenshot::fragment::read_state_file(&state_file);
+            let (state, sx, sy, cx, cy) = fragment::read_state_file(&state_file);
             if state == "done" {
                 rect = Some((sx, sy, cx, cy));
                 break;
@@ -173,8 +175,8 @@ pub fn run_orchestrator(args: &[String]) {
         }
 
         let cropped = image::imageops::crop_imm(&full_img, rx, ry, rw, rh).to_image();
-        let out_path = moonbeauty::libraries::process::mbs_unique_tmp("mbs-freeze-out", "png");
-        let save_ok = match moonbeauty::libraries::process::private_create_new(&out_path) {
+        let out_path = crate::libraries::process::mbs_unique_tmp("mbs-freeze-out", "png");
+        let save_ok = match crate::libraries::process::private_create_new(&out_path) {
             Ok(mut f) => {
                 let ok = image::DynamicImage::ImageRgba8(cropped)
                     .write_to(&mut f, image::ImageFormat::Png)

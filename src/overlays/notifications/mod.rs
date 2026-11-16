@@ -17,3 +17,5 @@ pub use ui::{
     take_held_notifs, toggle_dnd, write_active_count, NotifMessage, NotificationOverlay,
     NotificationToast,
 };
+
+pub mod cli;

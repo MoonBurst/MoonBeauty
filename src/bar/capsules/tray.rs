@@ -1,10 +1,67 @@
 use iced::widget::{button, container, text, tooltip, MouseArea, Row, Stack};
 use iced::{Alignment, Color, Element, Length};
+use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use super::{label, CapsuleAction};
+
+static RGBA_CACHE: OnceLock<Mutex<HashMap<String, iced::widget::image::Handle>>> = OnceLock::new();
+
+fn cached_rgba_handle(path: &str) -> Option<iced::widget::image::Handle> {
+    let cache = RGBA_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut g = cache.lock().unwrap();
+    if let Some(h) = g.get(path) {
+        return Some(h.clone());
+    }
+
+    let bytes = std::fs::read(path).ok()?;
+    
+    // Try Rust image crate first. If it fails, fallback to ImageMagick.
+    let rgba = match image::load_from_memory(&bytes) {
+        Ok(img) => img.to_rgba8(),
+        Err(_) => {
+            eprintln!("[tray-render] image crate failed, trying ImageMagick for {:?}", path);
+            let out = std::process::Command::new("convert")
+                .args([path, "-depth", "8", "rgba:-"])
+                .output()
+                .ok()?;
+            if !out.status.success() { return None; }
+            let raw = out.stdout;
+            let dims = std::process::Command::new("identify")
+                .args(["-format", "%w %h", path])
+                .output().ok()?;
+            let dims_str = String::from_utf8_lossy(&dims.stdout);
+            let mut parts = dims_str.split_whitespace();
+            let w = parts.next()?.parse::<u32>().ok()?;
+            let h = parts.next()?.parse::<u32>().ok()?;
+            if raw.len() != (w * h * 4) as usize { return None; }
+            image::RgbaImage::from_raw(w, h, raw)?
+        }
+    };
+    
+    // Check if the image is completely transparent. If so, force the text fallback.
+    let mut has_visible_pixel = false;
+    for pixel in rgba.pixels() {
+        if pixel[3] > 10 { 
+            has_visible_pixel = true; 
+            break; 
+        }
+    }
+    if !has_visible_pixel {
+        eprintln!("[tray-render] image {:?} is fully transparent, using fallback", path);
+        return None;
+    }
+
+    
+    let (w, h) = rgba.dimensions();
+    let handle = iced::widget::image::Handle::from_rgba(w, h, rgba.into_raw());
+    g.insert(path.to_string(), handle.clone());
+    Some(handle)
+}
+
 use crate::libraries::config::settings::ShellSettings;
 use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::style::TextExt;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
 
 pub(super) fn render<'a, Message: 'a>(
@@ -67,7 +124,10 @@ pub(super) fn render_expanded<'a, Message: 'static + Clone>(
     display_width: f32,
     on_action: impl Fn(CapsuleAction) -> Message + 'static + Copy,
 ) -> Element<'a, Message> {
-    let icon_size = settings.tray_icon_size as f32;
+    let icon_size = settings.tray_icon_size.max(16) as f32;
+    let fallback_bg = theme.surface_alt;
+    let fallback_border = theme.border;
+    let fallback_fg = theme.text;
     let icon_pad = 4.0_f32;
     let icon_slot = icon_size + icon_pad * 2.0;
     let close_slot = 24.0_f32;
@@ -124,33 +184,52 @@ pub(super) fn render_expanded<'a, Message: 'static + Clone>(
                     .height(Length::Fixed(icon_size))
                     .into()
             } else if exists {
-                iced::widget::image(iced::widget::image::Handle::from_path(p.clone()))
+                if let Some(handle) = cached_rgba_handle(p) {
+                    iced::widget::image(handle)
+                        .width(Length::Fixed(icon_size))
+                        .height(Length::Fixed(icon_size))
+                        .into()
+                } else {
+                    let initial = item.title.chars().next().or_else(|| item.id.chars().next()).unwrap_or('?').to_uppercase().to_string();
+                    container(text(initial).size(icon_size * 0.6).color(fallback_fg).bold())
+                        .width(Length::Fixed(icon_size))
+                        .height(Length::Fixed(icon_size))
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill)
+                        .style(move |_t| container::Style {
+                            background: Some(iced::Background::Color(fallback_bg)),
+                            border: iced::Border { color: fallback_border, width: 1.0, radius: 4.0.into() },
+                            ..Default::default()
+                        })
+                        .into()
+                }
+            } else {
+                let initial = item.title.chars().next().or_else(|| item.id.chars().next()).unwrap_or('?').to_uppercase().to_string();
+                container(text(initial).size(icon_size * 0.6).color(fallback_fg).bold())
                     .width(Length::Fixed(icon_size))
                     .height(Length::Fixed(icon_size))
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill)
+                    .style(move |_t| container::Style {
+                        background: Some(iced::Background::Color(fallback_bg)),
+                        border: iced::Border { color: fallback_border, width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    })
                     .into()
-            } else {
-                let initial = item
-                    .title
-                    .chars()
-                    .next()
-                    .or_else(|| item.id.chars().next())
-                    .or_else(|| item.tooltip.chars().next())
-                    .unwrap_or('?')
-                    .to_uppercase()
-                    .to_string();
-                text(initial).size(icon_size * 0.7).color(theme.text).into()
             }
         } else {
-            let initial = item
-                .title
-                .chars()
-                .next()
-                .or_else(|| item.id.chars().next())
-                .or_else(|| item.tooltip.chars().next())
-                .unwrap_or('?')
-                .to_uppercase()
-                .to_string();
-            text(initial).size(icon_size * 0.7).color(theme.text).into()
+            let initial = item.title.chars().next().or_else(|| item.id.chars().next()).unwrap_or('?').to_uppercase().to_string();
+            container(text(initial).size(icon_size * 0.6).color(fallback_fg).bold())
+                .width(Length::Fixed(icon_size))
+                .height(Length::Fixed(icon_size))
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .style(move |_t| container::Style {
+                    background: Some(iced::Background::Color(fallback_bg)),
+                    border: iced::Border { color: fallback_border, width: 1.0, radius: 4.0.into() },
+                    ..Default::default()
+                })
+                .into()
         };
 
         let activate_item = item.clone();

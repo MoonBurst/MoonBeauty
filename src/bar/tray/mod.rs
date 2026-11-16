@@ -19,3 +19,5 @@ pub use watcher::{
     activate_tray_item, fetch_tray_items, get_menu_tree, spawn as spawn_tray_watcher,
     trigger_menu_item, TrayItem, TrayMenuItem,
 };
+
+pub mod cli;

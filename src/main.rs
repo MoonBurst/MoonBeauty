@@ -1,11 +1,11 @@
 use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use moonbeauty::libraries::config::ShellSettings;
-use moonbeauty::libraries::ipc::{IpcCommand, OverlayTarget};
+use moonbeauty::libraries::ipc::OverlayTarget;
 use moonbeauty::libraries::process::resolve_exe;
 
 mod app;
-mod cli;
+pub mod debug;
 
 use app::MoonBeautyShellApp;
 
@@ -33,23 +33,7 @@ pub(crate) fn detect_standalone_overlay(args: &[String]) -> Option<OverlayTarget
 // Sync IPC helper — send_client_command uses tokio::net::UnixStream,
 // which requires a tokio reactor. main() has no runtime, so we use
 // std::os::unix::net::UnixStream directly. Same wire format.
-pub(crate) fn send_ipc_sync(cmd: &IpcCommand) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    use std::io::{Read, Write};
-    use std::os::unix::net::UnixStream;
-    let path = std::env::var("XDG_RUNTIME_DIR")
-        .map(|d| std::path::PathBuf::from(d).join("moonbeauty.sock"))
-        .map_err(|e| format!("XDG_RUNTIME_DIR: {e}"))?;
-    let mut stream = UnixStream::connect(&path)?;
-    // Finding 36: read timeout. Without this, a hung bar (deadlock,
-    // SIGSTOP, half-close race) blocks the CLI forever.
-    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
-    let encoded = serde_json::to_vec(cmd)?;
-    stream.write_all(&encoded)?;
-    stream.shutdown(std::net::Shutdown::Write)?;
-    let mut resp = String::new();
-    stream.read_to_string(&mut resp)?;
-    Ok(resp)
-}
+
 
 fn app_theme(_state: &MoonBeautyShellApp) -> iced::Theme {
     iced::Theme::Dark
@@ -70,7 +54,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         eprintln!("[main] MBS_DEBUG=1 enabled via --debug flag");
     }
 
-    cli::clipboard_ingest::run(&args);
+    moonbeauty::overlays::clipboard::cli::run(&args);
 
     // Finding 07 defense-in-depth: restrictive ImageMagick policy that
     // every child process (annotator, watermark, reveal) inherits via
@@ -79,30 +63,30 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         std::env::set_var("MAGICK_CONFIGURE_PATH", &dir);
     }
 
-    cli::test_lock_auth::run(&args);
+    debug::lock_auth::run(&args);
 
-    cli::test_email::run(&args);
+    debug::email::run(&args);
 
-    cli::lockscreen_coordinator::run(&args);
+    moonbeauty::overlays::lockscreen::cli::run(&args);
 
-    cli::notify_flags::run(&args);
+    moonbeauty::overlays::notifications::cli::run(&args);
 
-    cli::music_flags::run(&args);
+    moonbeauty::libraries::backend::music::cli::run(&args);
 
     // Restart bar (used by Settings when changing monitor)
-    cli::restart::run(&args);
-    cli::toggle::run(&args);
+    app::restart::run(&args);
+    moonbeauty::libraries::ipc::cli::run(&args);
 
     // ── Screenshot CLI ────────────────────────────────────────────────
     // --screenshot [--annotate] [--watermark "name"]
     // MUST be above the notif-surface spawn block, or the flag falls
     // through and boots the full bar.
-    cli::screenshot::run_fragment(&args);
+    moonbeauty::overlays::screenshot::cli::run_fragment(&args);
 
-    cli::screenshot::run_orchestrator(&args);
+    moonbeauty::overlays::screenshot::cli::run_orchestrator(&args);
 
 
-    cli::tray::run(&args);
+    moonbeauty::bar::tray::cli::run(&args);
 
     let is_notif_surface = detect_notif_surface(&args);
 
@@ -316,7 +300,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         }
     };
 
-    cli::tooltips::run(&args);
+    moonbeauty::overlays::tooltips::run(&args);
 
     let _app = iced_layershell::application(
         MoonBeautyShellApp::new_app,

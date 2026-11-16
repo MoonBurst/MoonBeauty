@@ -5,16 +5,16 @@
 //! no-op otherwise), so combined execution is safe regardless of which
 //! other CLI block would have run first in main().
 
-use moonbeauty::libraries::ipc::IpcCommand;
+use crate::libraries::ipc::IpcCommand;
 
-use crate::send_ipc_sync;
+use crate::libraries::ipc::send_ipc_sync;
 
 pub fn run(args: &[String]) {
     // Notification CLI actions
     if args.iter().any(|a| a == "--activate-latest-notif") {
         let cmd_path =
-            moonbeauty::libraries::process::mbs_runtime_dir().join("moonbeauty-notif-cmd");
-        match moonbeauty::libraries::process::private_write_file(&cmd_path, b"activate-latest") {
+            crate::libraries::process::mbs_runtime_dir().join("moonbeauty-notif-cmd");
+        match crate::libraries::process::private_write_file(&cmd_path, b"activate-latest") {
             Ok(_) => std::process::exit(0),
             Err(e) => {
                 eprintln!("[activate-latest] write {:?}: {e}", cmd_path);
@@ -24,13 +24,14 @@ pub fn run(args: &[String]) {
     }
     if args.iter().any(|a| a == "--dismiss-notif") {
         let cmd_path =
-            moonbeauty::libraries::process::mbs_runtime_dir().join("moonbeauty-notif-cmd");
-        match moonbeauty::libraries::process::private_write_file(&cmd_path, b"dismiss") {
-            Ok(_) => std::process::exit(0),
-            Err(e) => {
-                eprintln!("[dismiss-notif] write {:?}: {e}", cmd_path);
-                std::process::exit(1);
-            }
+            crate::libraries::process::mbs_runtime_dir().join("moonbeauty-notif-cmd");
+        let tmp_path = cmd_path.with_extension("tmp");
+        if crate::libraries::process::private_write_file(&tmp_path, b"dismiss").is_ok() {
+            let _ = std::fs::rename(&tmp_path, &cmd_path);
+            std::process::exit(0);
+        } else {
+            eprintln!("[dismiss-notif] failed to write to {:?}", tmp_path);
+            std::process::exit(1);
         }
     }
     if args.iter().any(|a| a == "--notif-history") {

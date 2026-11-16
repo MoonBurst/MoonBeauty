@@ -142,11 +142,11 @@ pub struct TrayItem {
     pub tooltip: String,
 }
 
-pub async fn fetch_tray_items() -> Vec<TrayItem> {
+pub async fn fetch_tray_items(cache: Vec<TrayItem>) -> Vec<TrayItem> {
     let conn = match zbus::Connection::session().await {
         Ok(c) => c,
         Err(e) => {
-            crate::dbg_log!("[tray-fetch] session bus: {e}");
+            eprintln!("[tray-fetch] session bus: {e}");
             return Vec::new();
         }
     };
@@ -160,14 +160,14 @@ pub async fn fetch_tray_items() -> Vec<TrayItem> {
     {
         Ok(p) => p,
         Err(e) => {
-            crate::dbg_log!("[tray-fetch] watcher proxy: {e}");
+            eprintln!("[tray-fetch] watcher proxy: {e}");
             return Vec::new();
         }
     };
     let raw_items: Vec<String> = match watcher.get_property("RegisteredStatusNotifierItems").await {
         Ok(v) => v,
         Err(e) => {
-            crate::dbg_log!("[tray-fetch] RegisteredStatusNotifierItems: {e}");
+            eprintln!("[tray-fetch] RegisteredStatusNotifierItems: {e}");
             return Vec::new();
         }
     };
@@ -185,8 +185,20 @@ pub async fn fetch_tray_items() -> Vec<TrayItem> {
             MAX_ITEMS
         );
     }
-    let mut out = Vec::new();
-    for raw in raw_items.into_iter().take(MAX_ITEMS) {
+    // Deduplicate raw items by their object path. Steam and other apps
+    // leak old bus names, which causes timeouts and blocked fetches.
+    let mut seen_paths = std::collections::HashSet::new();
+    let mut filtered_raw_items = Vec::new();
+    for raw in raw_items {
+        let path = if let Some(idx) = raw.find('/') { &raw[idx..] } else { &raw };
+        if seen_paths.insert(path.to_string()) {
+            filtered_raw_items.push(raw);
+        }
+    }
+
+    let mut out: Vec<TrayItem> = Vec::new();
+    let mut seen_names: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for raw in filtered_raw_items.into_iter().take(MAX_ITEMS) {
         let Some((bus, path)) = parse_registered(&raw) else {
             continue;
         };
@@ -194,7 +206,7 @@ pub async fn fetch_tray_items() -> Vec<TrayItem> {
         // when combined with MAX_ITEMS. A hung peer no longer stalls the
         // whole enumeration at the D-Bus default 25s.
         let proxy_result = tokio::time::timeout(
-            std::time::Duration::from_secs(3),
+            std::time::Duration::from_secs(2),
             zbus::Proxy::new(
                 &conn,
                 bus.as_str(),
@@ -203,14 +215,21 @@ pub async fn fetch_tray_items() -> Vec<TrayItem> {
             ),
         )
         .await;
+        
         let proxy = match proxy_result {
             Ok(Ok(p)) => p,
             Ok(Err(e)) => {
-                crate::dbg_log!("[tray-fetch] {} proxy: {e}", raw);
+                eprintln!("[tray-fetch] {} proxy error: {e}", raw);
+                if let Some(c) = cache.iter().find(|i| i.bus == bus && i.path == path) {
+                    out.push(c.clone());
+                }
                 continue;
             }
             Err(_) => {
-                crate::dbg_log!("[tray-fetch] {} proxy: timeout", raw);
+                eprintln!("[tray-fetch] {} proxy timeout", raw);
+                if let Some(c) = cache.iter().find(|i| i.bus == bus && i.path == path) {
+                    out.push(c.clone());
+                }
                 continue;
             }
         };
@@ -218,22 +237,25 @@ pub async fn fetch_tray_items() -> Vec<TrayItem> {
         const MAX_ID: usize = 128;
         const MAX_TITLE: usize = 512;
         const MAX_ICON_NAME: usize = 128;
-        let id: String = proxy
-            .get_property::<String>("Id")
-            .await
-            .ok()
-            .map(|s| s.chars().take(MAX_ID).collect())
-            .unwrap_or_default();
-        let title: String = proxy
+        let id_res = proxy.get_property::<String>("Id").await;
+        let id: String = id_res.ok().map(|s| s.chars().take(MAX_ID).collect()).unwrap_or_default();
+        
+        if id.is_empty() {
+            eprintln!("[tray-fetch] empty id for {}, using cache", raw);
+            if let Some(c) = cache.iter().find(|i| i.bus == bus && i.path == path) {
+                out.push(c.clone());
+            }
+            continue;
+        }
+
+        let mut title: String = proxy
             .get_property::<String>("Title")
             .await
             .ok()
             .map(|s| s.chars().take(MAX_TITLE).collect())
             .unwrap_or_default();
-        let status: String = proxy.get_property("Status").await.unwrap_or_default();
-        if status.eq_ignore_ascii_case("Passive") {
-            continue;
-        }
+
+
 
         let icon_name: String = proxy
             .get_property::<String>("IconName")
@@ -278,7 +300,35 @@ pub async fn fetch_tray_items() -> Vec<TrayItem> {
             }
             Err(_) => String::new(),
         };
-        crate::dbg_log!("[tray-fetch] item: {} path: {:?}", title, icon_path);
+        eprintln!("[tray-fetch] item: {} path: {:?}", title, icon_path);
+        if title.trim().is_empty() {
+            title = id.clone();
+        }
+        
+        // Skip ghost items that have no title and no icon
+        if title.trim().is_empty() && icon_path.is_none() {
+            eprintln!("[tray-fetch] skipping ghost item: {}", raw);
+            continue;
+        }
+
+        // Deduplicate: Steam and other apps sometimes register twice
+        let title_clean = title.trim().to_string();
+        if let Some(&idx) = seen_names.get(&title_clean) {
+            if icon_path.is_some() && out[idx].icon_path.is_none() {
+                eprintln!("[tray-fetch] replacing duplicate {} with better icon", title_clean);
+                out[idx] = TrayItem {
+                    bus,
+                    path,
+                    id,
+                    title: title_clean.clone(),
+                    icon_path,
+                    tooltip,
+                };
+            }
+            continue;
+        }
+        
+        seen_names.insert(title_clean, out.len());
         out.push(TrayItem {
             bus,
             path,
@@ -288,6 +338,7 @@ pub async fn fetch_tray_items() -> Vec<TrayItem> {
             tooltip,
         });
     }
+    
     out
 }
 
@@ -561,7 +612,20 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
                 .map(|m| m.len() > 0)
                 .unwrap_or(false)
         {
-            return Some(cached.to_string_lossy().into_owned());
+            // Validate that the file is actually a fully decodable image
+            // AND that it's larger than a minimum threshold (Steam's is 3KB but structurally broken)
+            let is_valid = std::fs::metadata(&cached).map(|m| m.len() > 100).unwrap_or(false)
+                && std::fs::read(&cached)
+                    .ok()
+                    .and_then(|bytes| image::load_from_memory(&bytes).ok())
+                    .is_some();
+            
+            if is_valid {
+                return Some(cached.to_string_lossy().into_owned());
+            } else {
+                eprintln!("[tray-icon] cached file {:?} is corrupt or too small, deleting", cached);
+                let _ = std::fs::remove_file(&cached);
+            }
         }
     }
 
@@ -737,10 +801,6 @@ fn save_pixmap(id: &str, w: u32, h: u32, data: &[u8]) -> Option<String> {
     if w == 0 || h == 0 {
         return None;
     }
-    // Finding 06: hard dimension cap. SNI items are attacker-controlled.
-    // Real tray icons are ≤256×256; 512×512 gives generous headroom.
-    // Without this, a hostile IconPixmap (10000×10000 × 4 = 400MB) hits
-    // Vec::with_capacity() below and OOMs the process.
     if w > 512 || h > 512 {
         eprintln!("[tray-icon] rejecting oversize pixmap {}×{}", w, h);
         return None;
@@ -748,8 +808,8 @@ fn save_pixmap(id: &str, w: u32, h: u32, data: &[u8]) -> Option<String> {
     if data.len() != (w as usize * h as usize * 4) {
         return None;
     }
+
     let mut rgba = Vec::with_capacity(data.len());
-    // SNI IconPixmap is ARGB32 network order: [A, R, G, B]
     for chunk in data.as_chunks::<4>().0 {
         rgba.push(chunk[1]);
         rgba.push(chunk[2]);
@@ -762,7 +822,20 @@ fn save_pixmap(id: &str, w: u32, h: u32, data: &[u8]) -> Option<String> {
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
         .collect();
     let icon_dir = crate::libraries::process::mbs_subdir("mbs-tray");
-    let path = icon_dir.join(format!("mbs-tray-{}.png", safe));
-    img.save(&path).ok()?;
+
+    // Append a content hash so Iced's image cache invalidates when the data changes
+    use sha2::Digest;
+    let hash = sha2::Sha256::digest(data);
+    let short = format!("{:x}", hash)[..8].to_string();
+    let path = icon_dir.join(format!("mbs-tray-{}-{}.png", safe, short));
+
+    if path.exists() {
+        return Some(path.to_string_lossy().into_owned());
+    }
+
+    // Write atomically to prevent Iced from reading a half-written file
+    let tmp_path = path.with_file_name(format!(".tmp-{}.png", short));
+    img.save(&tmp_path).ok()?;
+    std::fs::rename(&tmp_path, &path).ok()?;
     Some(path.to_string_lossy().into_owned())
 }
