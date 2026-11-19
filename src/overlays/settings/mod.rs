@@ -45,7 +45,7 @@ fn mbs_dbg(msg: &str) {
     }
 }
 use crate::libraries::config::theme::{hex_to_color, ShellTheme};
-use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
+use crate::libraries::style::shape_box::{AngledHexGeometry, ShapeBox, ShapeType};
 use crate::libraries::style::TextExt;
 
 mod notifications;
@@ -835,27 +835,10 @@ impl SettingsOverlay {
 
         let cut_f = settings.overlay_cut as f32;
         let angle_deg = settings.overlay_angle as f32;
-        let rad = angle_deg.to_radians();
-        let sqrt2 = std::f32::consts::SQRT_2;
-        let dx = (cut_f * rad.cos() * sqrt2).min(card_w * 0.45).max(0.0);
-        let dy = (cut_f * rad.sin() * sqrt2).min(card_h * 0.45).max(0.0);
-
-        // Safe inward clearance so the header and tabs never clip over the top corners
-        let header_inset = if dy > 22.0 {
-            (dx * (1.0 - (22.0 / dy))).max(0.0) + 18.0
-        } else {
-            18.0
-        };
-        let tab_inset = if dy > 55.0 {
-            (dx * (1.0 - (55.0 / dy))).max(0.0) + 14.0
-        } else {
-            14.0
-        };
-        let footer_inset = if dy > 24.0 {
-            (dx * (1.0 - (24.0 / dy))).max(0.0) + 18.0
-        } else {
-            18.0
-        };
+        let hex = AngledHexGeometry::new(card_w, card_h, cut_f, angle_deg);
+        let header_inset = hex.inset_at(22.0, 18.0);
+        let tab_inset = hex.inset_at(55.0, 14.0);
+        let footer_inset = hex.inset_at(24.0, 18.0);
 
         let base_sz = theme.font_size_overlay;
         let scale_sz = |factor: f32| -> u16 { ((base_sz as f32) * factor).round().max(9.0) as u16 };

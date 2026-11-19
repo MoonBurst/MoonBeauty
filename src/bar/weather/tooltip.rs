@@ -1,6 +1,6 @@
 use iced::widget::{column, container, row, text, Stack};
 use iced::{Alignment, Color, Element, Length, Padding, Task, Theme};
-use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
+use iced_layershell::reexport::{KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use std::time::Instant;
 
@@ -57,17 +57,7 @@ pub struct App {
 impl App {
     fn new_app() -> (Self, Task<Message>) {
         crate::libraries::process::install_sigterm_handler();
-        let cx: i32 = std::env::var("MBS_CAPSULE_CX")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(200);
-        let sw: i32 = std::env::var("MBS_SCREEN_W")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1920);
-        let grow_right = std::env::var("MBS_GROW_RIGHT")
-            .map(|v| v == "1")
-            .unwrap_or_else(|_| cx < sw / 2);
+        let env = crate::overlays::tooltip_common::TooltipEnv::from_env(W_START);
         let w: u32 = std::env::var("MBS_TOOLTIP_W")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -82,32 +72,17 @@ impl App {
 
         let drop_ms = s.tooltip_drop_ms as f32;
         let expand_ms = s.tooltip_expand_ms as f32;
-        let w_start: f32 = std::env::var("MBS_CAPSULE_W")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(W_START);
-        let sl_str = std::env::var("MBS_SLANT_L").unwrap_or_else(|_| "L".into());
-        let sr_str = std::env::var("MBS_SLANT_R").unwrap_or_else(|_| "L".into());
-        let slant_l = if sl_str == "R" {
-            SlantSide::Right
-        } else {
-            SlantSide::Left
-        };
-        let slant_r = if sr_str == "R" {
-            SlantSide::Right
-        } else {
-            SlantSide::Left
-        };
+        
 
         let app = Self {
             opened: Instant::now(),
             weather: None,
             fetched: false,
-            grow_right,
+            grow_right: env.grow_right,
             w,
-            w_start,
-            slant_l,
-            slant_r,
+            w_start: env.w_start,
+            slant_l: env.slant_l,
+            slant_r: env.slant_r,
             h,
             drop_ms,
             expand_ms,
@@ -449,40 +424,7 @@ pub fn run() -> Result<(), iced_layershell::Error> {
     eprintln!("[weather_tooltip-h] MBS_TOOLTIP_H = {}", h);
     eprintln!("[child-h] weather_tooltip MBS_TOOLTIP_H = {}", h);
 
-    let cx: i32 = std::env::var("MBS_CAPSULE_CX")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(200);
-    let sw: i32 = std::env::var("MBS_SCREEN_W")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1920);
-    let cap_w: f32 = std::env::var("MBS_CAPSULE_W")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(100.0);
-    let grow_right = cx < sw / 2;
-
-    let bar_h = s.bar_height as i32;
-    let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
-    let half_cap = (cap_w / 2.0) as i32;
-
-    // Finding 76: per-capsule bias added to global offsets.
-    let (bias_l, bias_r) = crate::bar::tooltip_spawn::read_offset_extra();
-    let adjust_left = s.effective_tooltip_offset_left() + bias_l;
-    let adjust_right = s.effective_tooltip_offset_right() + bias_r;
-
-    let (anchor, margin) = if grow_right {
-        (
-            Anchor::Top | Anchor::Left,
-            (margin_top, 0, 0, (cx - half_cap + adjust_left).max(0)),
-        )
-    } else {
-        (
-            Anchor::Top | Anchor::Right,
-            (margin_top, (sw - cx - half_cap + adjust_right).max(0), 0, 0),
-        )
-    };
+    let (anchor, margin) = crate::overlays::tooltip_common::layer_anchor_and_margin(&s, w, false);
 
     let layer = LayerShellSettings {
         size: Some((w, h)),

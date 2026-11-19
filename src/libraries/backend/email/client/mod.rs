@@ -470,6 +470,122 @@ pub fn save_index(folder: &str, envs: &[NativeEnvelope]) {
     }
 }
 
+pub async fn save_draft(to: &str, subject: &str, body: &str) -> Result<(), String> {
+    save_draft_sync(to, subject, body)
+}
+
+pub fn drafts_path() -> std::path::PathBuf {
+    dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join("moonbeauty/drafts.txt")
+}
+
+pub fn save_draft_sync(to: &str, subject: &str, body: &str) -> Result<(), String> {
+    let path = drafts_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    secure_append(
+        &path,
+        format!("To: {}\nSubject: {}\n{}\n---\n", to, subject, body).as_bytes(),
+    ).map_err(|e| e.to_string())?;
+    println!("[draft] saved successfully");
+    Ok(())
+}
+
+pub fn delete_draft(id: &str) -> Result<(), String> {
+    let num = id.strip_prefix("draft_").ok_or_else(|| "invalid draft id".to_string())?.parse::<usize>().map_err(|_| "invalid draft number".to_string())?;
+    let path = drafts_path();
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return Err("could not read drafts file".into());
+    };
+
+    // Split into chunks by the exact delimiter
+    let mut chunks: Vec<String> = content.split("\n---\n")
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string())
+        .collect();
+
+    // Since load_drafts reverses the list, draft_0 is the last chunk in the file
+    if num >= chunks.len() {
+        return Err(format!("draft index {} out of bounds (len: {})", num, chunks.len()));
+    }
+    let idx = chunks.len() - 1 - num;
+    chunks.remove(idx);
+
+    let mut new_content = String::new();
+    for chunk in chunks {
+        new_content.push_str(&chunk);
+        new_content.push_str("\n---\n");
+    }
+    
+    std::fs::write(&path, new_content).map_err(|e| e.to_string())?;
+    println!("[draft] successfully deleted draft_{}", num);
+    Ok(())
+}
+
+pub fn load_drafts() -> Vec<NativeEnvelope> {
+    let path = drafts_path();
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let mut envs = Vec::new();
+    let mut current_id = 0;
+
+    for chunk in content.split("\n---\n") {
+        if chunk.trim().is_empty() { continue; }
+        let mut to = String::new();
+        let mut subject = String::new();
+        for line in chunk.lines() {
+            if line.starts_with("To: ") { to = line[4..].to_string(); }
+            else if line.starts_with("Subject: ") { subject = line[9..].to_string(); }
+        }
+        envs.push(NativeEnvelope {
+            id: format!("draft_{}", current_id),
+            subject: subject.clone(),
+            sender: to.clone(),
+            sender_email: to.clone(),
+            is_starred: false,
+            is_read: true,
+        });
+        current_id += 1;
+    }
+    envs.reverse();
+    envs
+}
+
+fn read_draft(id: &str) -> Option<ParsedEmail> {
+    let num = id.strip_prefix("draft_")?.parse::<usize>().ok()?;
+    let path = drafts_path();
+    let content = std::fs::read_to_string(&path).ok()?;
+
+    let mut bodies = Vec::new();
+    let mut current_body = String::new();
+    let mut in_body = false;
+
+    for line in content.lines() {
+        if line.starts_with("To: ") {
+            in_body = false;
+            current_body.clear();
+        } else if line.starts_with("Subject: ") {
+            in_body = true;
+        } else if line.trim() == "---" {
+            bodies.push(current_body.trim().to_string());
+            in_body = false;
+        } else if in_body {
+            current_body.push_str(line);
+            current_body.push('\n');
+        }
+    }
+    if in_body {
+        bodies.push(current_body.trim().to_string());
+    }
+
+    bodies.reverse();
+    let text = bodies.get(num)?.clone();
+    Some(ParsedEmail { text, images: Vec::new(), attachments: Vec::new() })
+}
+
 pub async fn fetch_envelopes(folder: &str) -> Result<Vec<NativeEnvelope>, String> {
     if std::env::var_os("MBS_DEBUG").is_some() {
         eprintln!("[sync] fetch_envelopes called for {}", folder);
@@ -773,6 +889,12 @@ pub async fn sync_bodies_background(folder: String) {
 }
 
 pub async fn read_message(id: &str, folder: &str) -> ParsedEmail {
+    if id.starts_with("draft_") {
+        if let Some(draft) = read_draft(id) {
+            return draft;
+        }
+    }
+
     // Finding 26: cap raw MIME size BEFORE parse. mail_parser decodes the
     // full MIME tree in memory; base64/QUOTED-PRINTABLE can expand up to
     // 3×, so a 500 MB body from a hostile server/peer is a multi-GB
@@ -1127,124 +1249,53 @@ pub async fn toggle_star(id: &str, folder: &str, star: bool) -> Result<(), Strin
     Ok(())
 }
 
-pub async fn move_to_trash(id: &str, folder: &str) -> Result<(), String> {
-    // Finding 29: numeric-uid gate before uid_copy/uid_store.
+async fn imap_move_message(
+    id: &str,
+    src_imap_folder: &str,
+    dest_imap_folder: &str,
+) -> Result<(), String> {
     if !is_safe_imap_uid(id) {
         return Err(format!("unsafe message id: {:?}", id));
     }
-
-    // Finding 28 defense-in-depth: sink-level folder validation.
-    // fetch_from_network validates the same sink; these four
-    // mutation fns previously trusted their folder argument.
-    if !is_safe_imap_folder(folder) {
-        return Err(format!("unsafe folder name: {:?}", folder));
+    if !is_safe_imap_folder(src_imap_folder) {
+        return Err(format!("unsafe folder name: {:?}", src_imap_folder));
+    }
+    if !is_safe_imap_folder(dest_imap_folder) {
+        return Err(format!("unsafe folder name: {:?}", dest_imap_folder));
     }
     let cfg = load_config();
     let pass = resolve_password(&cfg);
     let mut session = connect_and_login(&cfg.imap_host, cfg.imap_port, &cfg.email, &pass).await?;
-    let orig_folder = map_gmail_folder(folder);
-    let trash_folder = map_gmail_folder("Trash");
-    session
-        .select(&orig_folder)
-        .await
-        .map_err(|e| e.to_string())?;
-    session
-        .uid_copy(id, &trash_folder)
-        .await
-        .map_err(|e| e.to_string())?;
+    session.select(src_imap_folder).await.map_err(|e| e.to_string())?;
+    session.uid_copy(id, dest_imap_folder).await.map_err(|e| e.to_string())?;
     let _: Vec<_> = session
-        .uid_store(id, "+FLAGS (\\Deleted)")
-        .await
-        .map_err(|e| e.to_string())?
-        .try_collect()
-        .await
-        .map_err(|e| e.to_string())?;
+        .uid_store(id, r"+FLAGS (\Deleted)")
+        .await.map_err(|e| e.to_string())?
+        .try_collect().await.map_err(|e| e.to_string())?;
     let _: Vec<_> = session
         .expunge()
-        .await
-        .map_err(|e| e.to_string())?
-        .try_collect()
-        .await
-        .map_err(|e| e.to_string())?;
+        .await.map_err(|e| e.to_string())?
+        .try_collect().await.map_err(|e| e.to_string())?;
     let _ = session.logout().await;
     Ok(())
+}
+
+pub async fn move_to_trash(id: &str, folder: &str) -> Result<(), String> {
+    if !is_safe_imap_folder(folder) {
+        return Err(format!("unsafe folder name: {:?}", folder));
+    }
+    imap_move_message(id, &map_gmail_folder(folder), &map_gmail_folder("Trash")).await
 }
 
 pub async fn move_to_spam(id: &str, folder: &str) -> Result<(), String> {
-    // Finding 29: numeric-uid gate before uid_copy/uid_store.
-    if !is_safe_imap_uid(id) {
-        return Err(format!("unsafe message id: {:?}", id));
-    }
-
-    // Finding 28 defense-in-depth: sink-level folder validation.
-    // fetch_from_network validates the same sink; these four
-    // mutation fns previously trusted their folder argument.
     if !is_safe_imap_folder(folder) {
         return Err(format!("unsafe folder name: {:?}", folder));
     }
-    let cfg = load_config();
-    let pass = resolve_password(&cfg);
-    let mut session = connect_and_login(&cfg.imap_host, cfg.imap_port, &cfg.email, &pass).await?;
-    let orig_folder = map_gmail_folder(folder);
-    let spam_folder = map_gmail_folder("Spam");
-    session
-        .select(&orig_folder)
-        .await
-        .map_err(|e| e.to_string())?;
-    session
-        .uid_copy(id, &spam_folder)
-        .await
-        .map_err(|e| e.to_string())?;
-    let _: Vec<_> = session
-        .uid_store(id, "+FLAGS (\\Deleted)")
-        .await
-        .map_err(|e| e.to_string())?
-        .try_collect()
-        .await
-        .map_err(|e| e.to_string())?;
-    let _: Vec<_> = session
-        .expunge()
-        .await
-        .map_err(|e| e.to_string())?
-        .try_collect()
-        .await
-        .map_err(|e| e.to_string())?;
-    let _ = session.logout().await;
-    Ok(())
+    imap_move_message(id, &map_gmail_folder(folder), &map_gmail_folder("Spam")).await
 }
 
 pub async fn mark_not_spam(id: &str) -> Result<(), String> {
-    // Finding 29: numeric-uid gate before uid_copy/uid_store.
-    if !is_safe_imap_uid(id) {
-        return Err(format!("unsafe message id: {:?}", id));
-    }
-    let cfg = load_config();
-    let pass = resolve_password(&cfg);
-    let mut session = connect_and_login(&cfg.imap_host, cfg.imap_port, &cfg.email, &pass).await?;
-    session
-        .select("[Gmail]/Spam")
-        .await
-        .map_err(|e| e.to_string())?;
-    session
-        .uid_copy(id, "INBOX")
-        .await
-        .map_err(|e| e.to_string())?;
-    let _: Vec<_> = session
-        .uid_store(id, "+FLAGS (\\Deleted)")
-        .await
-        .map_err(|e| e.to_string())?
-        .try_collect()
-        .await
-        .map_err(|e| e.to_string())?;
-    let _: Vec<_> = session
-        .expunge()
-        .await
-        .map_err(|e| e.to_string())?
-        .try_collect()
-        .await
-        .map_err(|e| e.to_string())?;
-    let _ = session.logout().await;
-    Ok(())
+    imap_move_message(id, "[Gmail]/Spam", "INBOX").await
 }
 
 pub async fn delete_message(id: &str, folder: &str) -> Result<(), String> {
@@ -1397,20 +1448,7 @@ pub async fn save_contact(email: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn save_draft(to: &str, subject: &str, body: &str) -> Result<(), String> {
-    let path = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
-        .join("moonbeauty/drafts.txt");
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    secure_append(
-        &path,
-        format!("To: {}\nSubject: {}\n{}\n---\n", to, subject, body).as_bytes(),
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
+
 
 fn map_gmail_folder(folder: &str) -> String {
     match folder {

@@ -4,7 +4,7 @@ use tokio::process::Command;
 
 use crate::libraries::config::settings::ShellSettings;
 use crate::libraries::config::theme::ShellTheme;
-use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
+use crate::libraries::style::shape_box::{AngledHexGeometry, ShapeBox, ShapeType};
 
 #[derive(Debug, Clone)]
 pub enum CalcMessage {
@@ -197,21 +197,9 @@ impl CalculatorOverlay {
 
         let cut_f = theme.overlay_cut;
         let angle_deg = theme.overlay_angle;
-        let rad = angle_deg.to_radians();
-        let sqrt2 = std::f32::consts::SQRT_2;
-        let dx = (cut_f * rad.cos() * sqrt2).min(win_w * 0.45).max(0.0);
-        let dy = (cut_f * rad.sin() * sqrt2).min(win_h * 0.45).max(0.0);
-
-        let header_inset = if dy > 22.0 {
-            (dx * (1.0 - (22.0 / dy))).max(0.0) + 16.0
-        } else {
-            16.0
-        };
-        let footer_inset = if dy > 20.0 {
-            (dx * (1.0 - (20.0 / dy))).max(0.0) + 16.0
-        } else {
-            16.0
-        };
+        let hex = AngledHexGeometry::new(win_w, win_h, cut_f, angle_deg);
+        let header_inset = hex.inset_at(22.0, 16.0);
+        let footer_inset = hex.inset_at(20.0, 16.0);
 
         let input = text_input(
             "Type math or unit conversion (e.g. 50 * 12, 100 kg in lbs)...",

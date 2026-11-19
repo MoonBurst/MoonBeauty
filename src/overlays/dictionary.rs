@@ -8,7 +8,7 @@ use tokio::process::Command;
 
 use crate::libraries::config::settings::ShellSettings;
 use crate::libraries::config::theme::ShellTheme;
-use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
+use crate::libraries::style::shape_box::{AngledHexGeometry, ShapeBox, ShapeType, SlantSide};
 use crate::libraries::style::TextExt;
 
 pub const DICT_SEARCH_ID: &str = "dict_search";
@@ -173,31 +173,10 @@ impl DictionaryOverlay {
 
         let cut_f = theme.overlay_cut;
         let angle_deg = theme.overlay_angle;
-        let rad = angle_deg.to_radians();
-        let sqrt2 = std::f32::consts::SQRT_2;
-        let dx = (cut_f * rad.cos() * sqrt2).min(win_w * 0.45).max(0.0);
-        let dy = (cut_f * rad.sin() * sqrt2).min(win_h * 0.45).max(0.0);
-
         let pad_top = 18.0_f32;
         let pad_bottom = 16.0_f32;
-
-        let search_inward = if dy > pad_top {
-            (dx * (1.0 - (pad_top / dy))).max(0.0) + 16.0
-        } else {
-            16.0
-        };
-
-        let list_top_inset = if dy > 72.0 {
-            (dx * (1.0 - (72.0 / dy))).max(0.0) + 16.0
-        } else {
-            16.0
-        };
-        let list_bottom_inset = if dy > 45.0 {
-            (dx * (1.0 - (45.0 / dy))).max(0.0) + 16.0
-        } else {
-            16.0
-        };
-        let list_side_inset = list_top_inset.max(list_bottom_inset).max(20.0);
+        let (search_inward, list_top_inset, list_bottom_inset, list_side_inset) =
+            AngledHexGeometry::new(win_w, win_h, cut_f, angle_deg).search_list_insets();
 
         let input = text_input("Type a word and press Enter...", &self.word_query)
             .id(DICT_SEARCH_ID)

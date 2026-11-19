@@ -1,5 +1,5 @@
 use super::{label, CapsuleAction};
-use crate::bar::unified::UnifiedTelemetry;
+use crate::libraries::backend::UnifiedTelemetry;
 use crate::libraries::config::theme::ShellTheme;
 use iced::{Color, Element};
 

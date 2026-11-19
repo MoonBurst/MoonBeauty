@@ -113,24 +113,7 @@ impl MoonBeautyShellApp {
         let is_test = matches!(msg, SettingsMessage::TestNotification);
 
         if is_test {
-            for (title, body) in [
-                (
-                    "System Diagnostics #1 (first)",
-                    "Verification toast successfully routed.",
-                ),
-                (
-                    "System Diagnostics #2 (second)",
-                    "Background worker service nominal.",
-                ),
-                (
-                    "System Diagnostics #3 (third)",
-                    "Telemetry stream established.",
-                ),
-            ] {
-                let _ = std::process::Command::new("notify-send")
-                    .args(["-a", "Diagnostics", title, body])
-                    .spawn();
-            }
+            return self.test_notification();
         } else if matches!(msg, SettingsMessage::Dismiss) {
             // Persist before closing / exiting the settings process.
             let _ = self.settings.save();

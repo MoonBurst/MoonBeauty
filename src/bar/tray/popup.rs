@@ -54,17 +54,7 @@ pub struct App {
 #[allow(dead_code)]
 impl App {
     fn new_app() -> (Self, Task<Message>) {
-        let cx: i32 = std::env::var("MBS_CAPSULE_CX")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(200);
-        let sw: i32 = std::env::var("MBS_SCREEN_W")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1920);
-        let grow_right = std::env::var("MBS_GROW_RIGHT")
-            .map(|v| v == "1")
-            .unwrap_or_else(|_| cx < sw / 2);
+        let env = crate::overlays::tooltip_common::TooltipEnv::from_env(W_START);
         let w: u32 = std::env::var("MBS_TOOLTIP_W")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -73,30 +63,15 @@ impl App {
         let h = s.tooltip_height_px;
         let drop_ms = s.tooltip_drop_ms as f32;
         let expand_ms = s.tooltip_expand_ms as f32;
-        let w_start: f32 = std::env::var("MBS_CAPSULE_W")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(W_START);
-        let sl_str = std::env::var("MBS_SLANT_L").unwrap_or_else(|_| "L".into());
-        let sr_str = std::env::var("MBS_SLANT_R").unwrap_or_else(|_| "L".into());
-        let slant_l = if sl_str == "R" {
-            SlantSide::Right
-        } else {
-            SlantSide::Left
-        };
-        let slant_r = if sr_str == "R" {
-            SlantSide::Right
-        } else {
-            SlantSide::Left
-        };
+        
 
         let app = Self {
             opened: Instant::now(),
-            grow_right,
+            grow_right: env.grow_right,
             w,
-            w_start,
-            slant_l,
-            slant_r,
+            w_start: env.w_start,
+            slant_l: env.slant_l,
+            slant_r: env.slant_r,
             items: Vec::new(),
             loaded: false,
             h,

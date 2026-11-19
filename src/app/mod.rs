@@ -17,6 +17,7 @@
 //!   - split app.rs into app/{mod,update,view,...} submodules (10g)
 
 pub mod helpers;
+pub mod keys;
 pub mod new_app;
 pub mod subscription;
 pub mod update;
@@ -28,16 +29,13 @@ pub mod view;
 // because we don't need to re-export them outside `app`.
 use crate::{detect_notif_surface, detect_standalone_overlay};
 use moonbeauty::libraries::process::resolve_exe;
-use crate::app::keys::{
-    focus_notification_app, handle_annotator_text_input, handle_email_keypress,
-    handle_lock_keypress, is_app_focused, notification_candidates,
-};
+// Keyboard handlers now live in their respective feature modules.
 
 use iced::widget::{container, Stack};
 use iced::{Element, Length, Padding, Task as Command};
 use moonbeauty::bar::geometry::{capsule_actual_width, capsule_center_x};
-use moonbeauty::bar::outputs::{get_screen_width_for, resolve_primary_output};
-use moonbeauty::bar::unified::UnifiedTelemetry;
+use moonbeauty::bar::tooltip_spawn::{get_screen_width_for, resolve_primary_output};
+use moonbeauty::libraries::backend::UnifiedTelemetry;
 use moonbeauty::bar::{CapsuleAction, TopBar, TopBarMessage};
 use moonbeauty::libraries::backend::*;
 use moonbeauty::libraries::config::{ShellSettings, ShellTheme};
@@ -217,5 +215,4 @@ pub struct MoonBeautyShellApp {
     pub last_active_pending_written: Option<(usize, std::time::Instant)>,
 }
 
-pub mod keys;
 pub mod restart;

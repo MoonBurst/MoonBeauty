@@ -2,6 +2,46 @@ use iced::mouse::Cursor;
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke};
 use iced::{Color, Element, Length, Point, Rectangle, Size, Theme};
 
+#[derive(Debug, Clone, Copy)]
+pub struct AngledHexGeometry {
+    pub dx: f32,
+    pub dy: f32,
+}
+
+impl AngledHexGeometry {
+    pub fn new(win_w: f32, win_h: f32, cut: f32, angle_deg: f32) -> Self {
+        let rad = angle_deg.to_radians();
+        let sqrt2 = std::f32::consts::SQRT_2;
+        Self {
+            dx: (cut * rad.cos() * sqrt2).min(win_w * 0.45).max(0.0),
+            dy: (cut * rad.sin() * sqrt2).min(win_h * 0.45).max(0.0),
+        }
+    }
+
+    pub fn inset_at(self, y: f32, pad: f32) -> f32 {
+        if self.dy > y {
+            (self.dx * (1.0 - (y / self.dy))).max(0.0) + pad
+        } else {
+            pad
+        }
+    }
+
+    pub fn standard_insets(self) -> (f32, f32, f32) {
+        let header = self.inset_at(20.0, 16.0);
+        let footer = self.inset_at(20.0, 16.0);
+        let body = header.min(footer) + 4.0;
+        (header, body, footer)
+    }
+
+    pub fn search_list_insets(self) -> (f32, f32, f32, f32) {
+        let search = self.inset_at(18.0, 16.0);
+        let list_top = self.inset_at(72.0, 16.0);
+        let list_bottom = self.inset_at(45.0, 16.0);
+        let list_side = list_top.max(list_bottom).max(20.0);
+        (search, list_top, list_bottom, list_side)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ShapeType {
     Rounded(u16),
@@ -189,10 +229,7 @@ impl<Message> canvas::Program<Message> for ShapeBox {
                 })
             }
             ShapeType::AngledHexagon { cut, angle_deg } => {
-                let rad = angle_deg.to_radians();
-                let sqrt2 = std::f32::consts::SQRT_2;
-                let dx = (cut * rad.cos() * sqrt2).min(w * 0.45).max(0.0);
-                let dy = (cut * rad.sin() * sqrt2).min(h * 0.45).max(0.0);
+                let AngledHexGeometry { dx, dy } = AngledHexGeometry::new(w, h, cut, angle_deg);
 
                 Path::new(|builder| {
                     builder.move_to(Point::new(dx + half, half));

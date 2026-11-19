@@ -72,6 +72,19 @@ impl MoonBeautyShellApp {
     /// even with rapid clicking). Preserving `id` as String inside
     /// the body keeps the extracted logic byte-for-byte identical
     /// to the inline version; no per-site &str/String juggling.
+    pub(crate) fn dismiss_tooltip_child(&mut self) {
+        if let Some(mut c) = self.weather_tooltip_child.take() {
+            let pid = c.id() as libc::pid_t;
+            #[allow(unsafe_code)]
+            unsafe {
+                libc::kill(pid, libc::SIGTERM);
+            }
+            std::thread::spawn(move || {
+                let _ = c.wait();
+            });
+        }
+    }
+
     pub fn toggle_tooltip(&mut self, id: &str) -> Command<Message> {
         let id = id.to_string();
         // Recent click => use cursor position for dynamic placement.
@@ -85,14 +98,7 @@ impl MoonBeautyShellApp {
             .is_some_and(|status| status.is_none());
         if running {
             eprintln!("[tooltip] Already open; toggling off via SIGTERM (animate)");
-            if let Some(mut c) = self.weather_tooltip_child.take() {
-                let pid = c.id() as libc::pid_t;
-                #[allow(unsafe_code)]
-                unsafe { libc::kill(pid, libc::SIGTERM); }
-                // Reap on a background thread; do NOT block the UI thread
-                // waiting for the ~340ms close animation.
-                std::thread::spawn(move || { let _ = c.wait(); });
-            }
+            self.dismiss_tooltip_child();
             return Command::none();
         }
         self.weather_tooltip_child = None;
@@ -228,12 +234,7 @@ impl MoonBeautyShellApp {
                 //       selection and falls through to --sys-tooltip
                 //       (which defaults unknown targets to RAM).
                 if id == "alarm" {
-                    if let Some(mut c) = self.weather_tooltip_child.take() {
-                        let pid = c.id() as libc::pid_t;
-                        #[allow(unsafe_code)]
-                        unsafe { libc::kill(pid, libc::SIGTERM); }
-                        std::thread::spawn(move || { let _ = c.wait(); });
-                    }
+                    self.dismiss_tooltip_child();
                     self.toggle_standalone(OverlayTarget::Reminders);
                     return Command::none();
                 }
@@ -294,12 +295,7 @@ impl MoonBeautyShellApp {
             CapsuleAction::ToggleNotificationDnd => return self.toggle_notification_dnd(),
             CapsuleAction::CancelTooltip(id) => {
                 eprintln!("[topbar] CancelTooltip: {}", id);
-                if let Some(mut c) = self.weather_tooltip_child.take() {
-                    let pid = c.id() as libc::pid_t;
-                    #[allow(unsafe_code)]
-                    unsafe { libc::kill(pid, libc::SIGTERM); }
-                    std::thread::spawn(move || { let _ = c.wait(); });
-                }
+                self.dismiss_tooltip_child();
                 // Right-click on alarm capsule: wipe active timers
                 if id == "alarm" {
                     moonbeauty::overlays::reminders::save_reminders(&[]);

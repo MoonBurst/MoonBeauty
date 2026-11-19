@@ -38,46 +38,96 @@ impl MoonBeautyShellApp {
                 }
             }
             EmailMessage::SelectFolder(f) => {
+                println!("[email] SelectFolder: {:?}", f);
                 self.email.update(EmailMessage::SelectFolder(f.clone()));
+                self.email.envelopes.clear();
+                self.email.selected_index = 0;
+                self.email.active_mail_id = None;
+                self.email.parsed_email = None;
+
+                if f == "Drafts" {
+                    self.email.is_loading = false;
+                    let envs = moonbeauty::libraries::backend::email::client::load_drafts();
+                    self.email.envelopes = envs.clone();
+                    return Command::done(Message::Email(EmailMessage::EnvelopesLoaded(f, envs)));
+                }
+
+                self.email.is_loading = true;
                 let f_fetch = f.clone();
                 let f_resp = f;
-                return Command::batch(vec![
-                    Command::done(Message::Email(EmailMessage::SetLoading)),
-                    Command::perform(
-                        async move {
-                            moonbeauty::libraries::backend::email::client::fetch_envelopes(&f_fetch)
-                                .await
-                        },
-                        move |res| match res {
-                            Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(f_resp, envs)),
-                            Err(e) => Message::Email(EmailMessage::Error(e)),
-                        },
-                    ),
-                ]);
+                return Command::perform(
+                    async move { moonbeauty::libraries::backend::email::client::fetch_envelopes(&f_fetch).await },
+                    move |res| match res {
+                        Ok(envs) => Message::Email(EmailMessage::EnvelopesLoaded(f_resp, envs)),
+                        Err(e) => Message::Email(EmailMessage::Error(e)),
+                    },
+                );
             }
             EmailMessage::SelectMail(id) => {
                 let folder = self.email.active_folder.clone();
-                // If we're in a local folder, the email actually lives
-                // in the Gmail folder it was assigned from (usually INBOX).
-                let source = moonbeauty::libraries::backend::email::local_sort::source_folder_for(
-                    &id, &folder,
-                )
-                .unwrap_or_else(|| folder.clone());
+                let source = moonbeauty::libraries::backend::email::local_sort::source_folder_for(&id, &folder).unwrap_or_else(|| folder.clone());
                 self.email.update(EmailMessage::SelectMail(id.clone()));
-                // Cache hit in email.rs::update -> parsed_email is Some,
-                // no need to spawn an async re-fetch.
-                if self.email.active_mail_id.as_deref() == Some(&id)
-                    && self.email.parsed_email.is_some()
-                {
+
+                if self.email.active_mail_id.as_deref() == Some(&id) && self.email.parsed_email.is_some() {
                     return Command::none();
                 }
+                let id_resp = id.clone();
                 return Command::perform(
-                    async move {
-                        moonbeauty::libraries::backend::email::client::read_message(&id, &source)
-                            .await
-                    },
-                    |body| Message::Email(EmailMessage::MessageLoaded(body)),
+                    async move { moonbeauty::libraries::backend::email::client::read_message(&id, &source).await },
+                    move |body| Message::Email(EmailMessage::MessageLoadedFor(folder, id_resp, body)),
                 );
+            }
+            EmailMessage::SelectFolderNext | EmailMessage::SelectFolderPrev => {
+                if self.email.is_composing || self.email.is_logging_in || self.email.is_adding_folder {
+                    return Command::none();
+                }
+                if self.email.folders.is_empty() {
+                    return Command::none();
+                }
+                let next_idx = if matches!(msg, EmailMessage::SelectFolderNext) {
+                    (self.email.active_folder_idx + 1) % self.email.folders.len()
+                } else if self.email.active_folder_idx == 0 {
+                    self.email.folders.len() - 1
+                } else {
+                    self.email.active_folder_idx - 1
+                };
+                let folder = self.email.folders[next_idx].clone();
+                return self.handle_email(EmailMessage::SelectFolder(folder));
+            }
+            EmailMessage::SelectMailNext | EmailMessage::SelectMailPrev => {
+                if self.email.is_composing || self.email.is_logging_in || self.email.is_adding_folder {
+                    return Command::none();
+                }
+                self.email.update(msg);
+                let mut cmds = Vec::new();
+                if let Some(id) = self
+                    .email
+                    .envelopes
+                    .get(self.email.selected_index)
+                    .map(|m| m.id.clone())
+                {
+                    cmds.push(self.handle_email(EmailMessage::SelectMail(id)));
+                }
+                let scroll_y = (self.email.selected_index as f32 * 64.0 - 180.0).max(0.0);
+                cmds.push(iced::widget::operation::scroll_to(
+                    iced::widget::Id::new("email_mail_list"),
+                    iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: scroll_y },
+                ));
+                return Command::batch(cmds);
+            }
+            EmailMessage::OpenSelected => {
+                if self.email.is_composing || self.email.is_logging_in || self.email.is_adding_folder {
+                    return Command::none();
+                }
+                if let Some(mail) = self.email.envelopes.get(self.email.selected_index).cloned() {
+                    let already_loaded = self.email.active_mail_id.as_deref() == Some(mail.id.as_str())
+                        && self.email.parsed_email.is_some();
+                    if already_loaded {
+                        self.email.fullscreen_read = !self.email.fullscreen_read;
+                    } else {
+                        return self.handle_email(EmailMessage::SelectMail(mail.id));
+                    }
+                }
             }
             EmailMessage::SendMail => {
                 let to = self.email.compose_to.clone();
@@ -135,13 +185,34 @@ impl MoonBeautyShellApp {
                 );
             }
             EmailMessage::EnvelopesLoaded(folder, envs) => {
+                println!("[email] EnvelopesLoaded for {:?} ({} emails)", folder, envs.len());
+                if folder == "Drafts" {
+                    if self.email.active_folder == "Drafts"
+                        && self.email.active_mail_id.is_none()
+                        && !self.email.is_composing
+                        && !self.email.is_logging_in
+                    {
+                        if let Some(id) = self.email.envelopes.get(self.email.selected_index).map(|m| m.id.clone()) {
+                            return self.handle_email(EmailMessage::SelectMail(id));
+                        }
+                    }
+                    return Command::none(); // NEVER accept IMAP updates for Drafts
+                }
+                let mut cmds = Vec::new();
                 if folder == self.email.active_folder {
-                    self.email
-                        .update(EmailMessage::EnvelopesLoaded(folder.clone(), envs));
+                    self.email.update(EmailMessage::EnvelopesLoaded(folder.clone(), envs));
+                    if self.email.active_mail_id.is_none()
+                        && !self.email.is_composing
+                        && !self.email.is_logging_in
+                    {
+                        if let Some(id) = self.email.envelopes.get(self.email.selected_index).map(|m| m.id.clone()) {
+                            cmds.push(self.handle_email(EmailMessage::SelectMail(id)));
+                        }
+                    }
                 }
                 let folder_for_fetch = folder.clone();
                 let folder_for_resp = folder;
-                return Command::perform(
+                cmds.push(Command::perform(
                     async move {
                         moonbeauty::libraries::backend::email::client::fetch_from_network(
                             &folder_for_fetch,
@@ -155,226 +226,20 @@ impl MoonBeautyShellApp {
                         )),
                         Err(_) => Message::Email(EmailMessage::SyncDone),
                     },
-                );
+                ));
+                return Command::batch(cmds);
             }
             EmailMessage::NetworkEnvelopesLoaded(folder, envs) => {
-                // Local auto-sort only on INBOX (where the sort rules apply)
-                if folder == "INBOX" && self.settings.email_auto_sort_threshold > 0 {
-                    let threshold = self.settings.email_auto_sort_threshold;
-                    moonbeauty::libraries::backend::email::local_sort::auto_sort(
-                        &envs, &folder, threshold,
-                    );
-                }
-                if std::env::var_os("MBS_DEBUG").is_some() {
-                    eprintln!(
-                        "[sync] NetworkEnvelopesLoaded folder={:?} count={} active={:?}",
-                        folder,
-                        envs.len(),
-                        self.email.active_folder
-                    );
-                }
-                moonbeauty::libraries::backend::email::client::save_index(&folder, &envs);
-                if folder == self.email.active_folder {
-                    self.email
-                        .update(EmailMessage::EnvelopesLoaded(folder.clone(), envs.clone()));
-                }
-                return Command::perform(
-                    async move {
-                        moonbeauty::libraries::backend::email::client::sync_bodies_background(
-                            folder,
-                        )
-                        .await
-                    },
-                    |_| Message::Email(EmailMessage::SyncDone),
-                );
-            }
-            EmailMessage::SyncDone => {}
-            EmailMessage::SelectMailNext | EmailMessage::SelectMailPrev => {
-                if self.email.fullscreen_read {
+                if folder == "Drafts" || folder != self.email.active_folder {
                     return Command::none();
                 }
-                if self.email.is_composing && !self.email.get_autocomplete_matches().is_empty() {
-                    let target = match msg {
-                        EmailMessage::SelectMailNext => EmailMessage::SelectAutocompleteNext,
-                        _ => EmailMessage::SelectAutocompletePrev,
-                    };
-                    self.email.update(target);
-                } else if !self.email.is_composing && !self.email.is_logging_in {
-                    self.email.update(msg);
-                    // Arrow navigation is PREVIEW-ONLY. It must never
-                    // enter fullview — that is Enter's job.
-                    if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
-                        let id = mail.id.clone();
-                        // Move the visible list so the selected row stays
-                        // on screen. iced has no auto-scroll-to-selection
-                        // for scrollables, so we emit scroll_to with an
-                        // AbsoluteOffset computed from the row index.
-                        //
-                        // Row height ≈ fs_main*1.2 + fs_sub*1.2 + 24 px
-                        // padding/border. The 200px anchor keeps the
-                        // selected row below mid-viewport so context is
-                        // visible above.
-                        let fs_main = self.theme.font_size_overlay as f32;
-                        let fs_sub = (fs_main - 2.0).max(8.0);
-                        let row_h = fs_main * 1.2 + fs_sub * 1.2 + 24.0;
-                        let idx = self.email.selected_index as f32;
-                        let scroll_y = (idx * row_h - 200.0).max(0.0);
-                        let scroll_cmd: Command<Message> = iced::widget::operation::scroll_to(
-                            iced::widget::Id::new("email_mail_list"),
-                            iced::widget::scrollable::AbsoluteOffset {
-                                x: 0.0,
-                                y: scroll_y,
-                            },
-                        );
-                        let fetch_cmd = self.update(Message::Email(EmailMessage::SelectMail(id)));
-                        return Command::batch(vec![fetch_cmd, scroll_cmd]);
-                    }
-                }
-            }
-            EmailMessage::SelectFolderNext | EmailMessage::SelectFolderPrev => {
-                if !self.email.is_composing && !self.email.is_logging_in {
-                    let old_folder = self.email.active_folder.clone();
-                    self.email.update(msg);
-                    if self.email.active_folder != old_folder {
-                        let f = self.email.active_folder.clone();
-                        let f_fetch = f.clone();
-                        let f_resp = f;
-                        return Command::batch(vec![
-                            Command::done(Message::Email(EmailMessage::SetLoading)),
-                            Command::perform(
-                                async move {
-                                    moonbeauty::libraries::backend::email::client::fetch_envelopes(
-                                        &f_fetch,
-                                    )
-                                    .await
-                                },
-                                move |res| match res {
-                                    Ok(envs) => {
-                                        Message::Email(EmailMessage::EnvelopesLoaded(f_resp, envs))
-                                    }
-                                    Err(e) => Message::Email(EmailMessage::Error(e)),
-                                },
-                            ),
-                        ]);
-                    }
-                }
-            }
-            EmailMessage::OpenSelected => {
-                if std::env::var_os("MBS_DEBUG").is_some() {
-                    eprintln!(
-                        "[email-opensel] fullscreen={} composing={} logging_in={} active_id={:?} envelopes={} parsed={}",
-                        self.email.fullscreen_read,
-                        self.email.is_composing,
-                        self.email.is_logging_in,
-                        self.email.active_mail_id,
-                        self.email.envelopes.len(),
-                        self.email.parsed_email.is_some(),
-                    );
-                }
-                // Enter in fullview -> reply compose (To/Subject prefilled).
-                // Enter in 3-pane on already-loaded mail -> enter fullview.
-                // Enter in 3-pane on unloaded mail -> load + preview.
-                if self.email.fullscreen_read {
-                    let reply_env = self
-                        .email
-                        .active_mail_id
-                        .as_ref()
-                        .and_then(|id| self.email.envelopes.iter().find(|e| &e.id == id))
-                        .cloned();
-                    if let Some(env) = reply_env {
-                        // Prefer sender_email; fall back to display name if
-                        // the header couldn't be parsed into a bare address.
-                        let to_addr = if !env.sender_email.trim().is_empty() {
-                            env.sender_email.clone()
-                        } else if !env.sender.trim().is_empty() && env.sender.trim() != "Unknown" {
-                            env.sender.clone()
-                        } else {
-                            String::new()
-                        };
-                        let subj = env.subject.trim();
-                        let reply_subject = if subj.is_empty() {
-                            "Re:".to_string()
-                        } else if subj.to_lowercase().starts_with("re:") {
-                            subj.to_string()
-                        } else {
-                            format!("Re: {}", subj)
-                        };
-                        // Quote the original so the user has context. The
-                        // quoted block sits below the cursor, standard mail
-                        // client convention.
-                        let orig_text = self
-                            .email
-                            .parsed_email
-                            .as_ref()
-                            .map(|p| p.text.clone())
-                            .unwrap_or_default();
-                        let mut reply_body = String::new();
-                        reply_body.push_str("\n\n--- Original message ---\n");
-                        if !env.sender_email.trim().is_empty() && env.sender_email != env.sender {
-                            reply_body.push_str(&format!(
-                                "From: {} <{}>\n",
-                                env.sender, env.sender_email
-                            ));
-                        } else {
-                            reply_body.push_str(&format!("From: {}\n", env.sender));
-                        }
-                        reply_body.push_str(&format!("Subject: {}\n\n", env.subject));
-                        if orig_text.is_empty() {
-                            reply_body.push_str("(Original body unavailable)\n");
-                        } else {
-                            for line in orig_text.lines() {
-                                reply_body.push('>');
-                                reply_body.push(' ');
-                                reply_body.push_str(line);
-                                reply_body.push('\n');
-                            }
-                        }
-                        if std::env::var_os("MBS_DEBUG").is_some() {
-                            eprintln!(
-                                "[email-reply] to={:?} subject={:?} body_chars={}",
-                                to_addr,
-                                reply_subject,
-                                reply_body.chars().count()
-                            );
-                        }
-                        self.email.is_composing = true;
-                        self.email.compose_to = to_addr;
-                        self.email.compose_subject = reply_subject;
-                        self.email.compose_body =
-                            iced::widget::text_editor::Content::with_text(&reply_body);
-                        self.email.active_compose_field = 2;
-                        self.email.compose_attachments.clear();
-                        self.email.fullscreen_read = false;
-                        self.email.reply_from_fullview = true;
-                        return iced::widget::operation::focus(iced::widget::Id::new(
-                            moonbeauty::overlays::email::COMPOSE_BODY_ID,
-                        ))
-                        .map(Message::Email);
-                    }
-                    // No loaded envelope to reply to; just exit.
-                    self.email.fullscreen_read = false;
-                    return Command::none();
-                }
-                if !self.email.is_composing && !self.email.is_logging_in {
-                    if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
-                        let id = mail.id.clone();
-                        if self.email.active_mail_id.as_deref() == Some(&id)
-                            && self.email.parsed_email.is_some()
-                        {
-                            self.email.fullscreen_read = true;
-                            return Command::none();
-                        }
-                        let folder = self.email.active_folder.clone();
-                        self.email.update(EmailMessage::SelectMail(id.clone()));
-                        return Command::perform(
-                            async move {
-                                moonbeauty::libraries::backend::email::client::read_message(
-                                    &id, &folder,
-                                )
-                                .await
-                            },
-                            |body| Message::Email(EmailMessage::MessageLoaded(body)),
-                        );
+                self.email.update(EmailMessage::NetworkEnvelopesLoaded(folder, envs));
+                if self.email.active_mail_id.is_none()
+                    && !self.email.is_composing
+                    && !self.email.is_logging_in
+                {
+                    if let Some(id) = self.email.envelopes.get(self.email.selected_index).map(|m| m.id.clone()) {
+                        return self.handle_email(EmailMessage::SelectMail(id));
                     }
                 }
             }
@@ -407,6 +272,20 @@ impl MoonBeautyShellApp {
                         let id = mail.id.clone();
                         let mail_clone = mail.clone();
                         let folder = self.email.active_folder.clone();
+
+                        if folder == "Drafts" {
+                            if let Err(e) = moonbeauty::libraries::backend::email::client::delete_draft(&id) {
+                                self.email.imap_error = Some(e);
+                                return Command::none();
+                            }
+                            self.email.envelopes = moonbeauty::libraries::backend::email::client::load_drafts();
+                            if self.email.selected_index >= self.email.envelopes.len() && !self.email.envelopes.is_empty() {
+                                self.email.selected_index = self.email.envelopes.len() - 1;
+                            }
+                            self.email.parsed_email = None;
+                            self.email.active_mail_id = None;
+                            return Command::none();
+                        }
 
                         self.email.envelopes.remove(self.email.selected_index);
                         if self.email.selected_index >= self.email.envelopes.len()
@@ -635,7 +514,6 @@ impl MoonBeautyShellApp {
                         self.email.is_logging_in = false;
                         self.email.login_error = None;
                         return Command::batch(vec![
-                            Command::done(Message::Email(EmailMessage::SetLoading)),
                             Command::perform(
                                 async move {
                                     moonbeauty::libraries::backend::email::client::fetch_envelopes(

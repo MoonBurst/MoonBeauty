@@ -85,75 +85,13 @@ impl App {
         y += stats_h + gap;
 
         // Search Bar
-        let search_h = 40.0;
-        let y_mid_search = y + search_h * 0.5;
-        let frac_s = (y_mid_search / total_h.max(1.0)).clamp(0.0, 1.0);
-        let (lp_s, rp_s) = if slant_right {
-            (slant_h * (1.0 - frac_s) + safe, slant_h * frac_s + safe)
-        } else {
-            (slant_h * frac_s + safe, slant_h * (1.0 - frac_s) + safe)
-        };
-        let search_w = (w_f - lp_s - rp_s).max(100.0);
-        let search_border = settings.control_border_width;
-        let half_s = search_border * 0.5;
-        let search_slant = tooltip_slope * (search_h - 2.0 * half_s);
-
-        let search_bg = crate::overlays::tooltip_engine::ParallelogramBg {
-            w: search_w,
-            h: search_h,
-            slant: search_slant,
-            slant_right,
-            background: a(t.surface_alt),
-            border_color: a(t.text),
-            border_width: search_border,
-            frame: self.opened.elapsed().as_millis() as u64,
-        };
-
-        let input_muted = Color { a: 1.0, ..t.muted };
-        let input_text = Color { a: 1.0, ..t.text };
-        let input_focus = Color { a: 1.0, ..t.focus };
-        let search_input = text_input("Search programs...", &self.search_query)
-            .on_input(Message::SearchChanged)
-            .padding(Padding {
-                top: 8.0,
-                bottom: 8.0,
-                left: search_slant + 8.0,
-                right: search_slant + 8.0,
-            })
-            .size((fs) as f32)
-            .width(Length::Fill)
-            .style(move |_t, _s| iced::widget::text_input::Style {
-                background: iced::Background::Color(Color::TRANSPARENT),
-                border: iced::Border::default(),
-                icon: input_muted,
-                placeholder: input_muted,
-                value: input_text,
-                selection: input_focus,
-            });
-        let search_layer: Element<'a, Message> = Stack::new()
-            .push(search_bg.view())
-            .push(
-                container(search_input)
-                    .width(Length::Fixed(search_w))
-                    .height(Length::Fixed(search_h))
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill),
-            )
-            .width(Length::Fixed(search_w))
-            .height(Length::Fixed(search_h))
-            .into();
-
-        col = col.push(slanted_row(
-            search_layer,
-            y_mid_search,
-            total_h,
-            slant_h,
-            slant_right,
-            safe,
-            w_f,
-            search_h,
-        ));
-        y += search_h + gap;
+        let (search_row, new_y) = crate::overlays::tooltip_common::slanted_search_bar(
+            &self.search_query, Message::SearchChanged, t, settings.control_border_width,
+            alpha, y, total_h, slant_h, slant_right, safe, w_f, fs, tooltip_slope, gap,
+            self.opened.elapsed().as_millis() as u64,
+        );
+        col = col.push(search_row);
+        y = new_y;
 
         // Process List
         let proc_h = fs as f32 + 10.0;

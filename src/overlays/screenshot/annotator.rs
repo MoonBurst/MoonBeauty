@@ -307,6 +307,24 @@ impl AnnotatorOverlay {
         }
     }
 
+    fn hit_test_text(a: &Annotation, p: Point) -> bool {
+        let font_size = a.font_size.max(10.0);
+        let line_height = font_size * 1.2;
+        let max_chars = a
+            .text
+            .lines()
+            .map(|l| l.chars().count())
+            .max()
+            .unwrap_or(0)
+            .max(4);
+        let pad = 24.0;
+        let bw = (max_chars as f32 * font_size * 0.55) + pad * 2.0;
+        let bh = (a.text.lines().count() as f32).max(1.0) * line_height + pad * 2.0;
+        let bx = a.start.x - pad;
+        let by = a.start.y - pad;
+        p.x >= bx && p.x <= bx + bw && p.y >= by && p.y <= by + bh
+    }
+
     fn on_press(&mut self, p: Point) {
         crate::dbg_log!(
             "[mbs-child] on_press ({:.0},{:.0}) tool={:?}",
@@ -317,25 +335,7 @@ impl AnnotatorOverlay {
 
         // If already editing text, check if click is inside the box (for drag)
         if let Some(idx) = self.text_editing {
-            let in_box = if let Some(a) = self.annotations.get(idx) {
-                let font_size = a.font_size.max(10.0);
-                let line_height = font_size * 1.2;
-                let max_chars = a
-                    .text
-                    .lines()
-                    .map(|l| l.chars().count())
-                    .max()
-                    .unwrap_or(0)
-                    .max(4);
-                let pad = 24.0;
-                let bw = (max_chars as f32 * font_size * 0.55) + pad * 2.0;
-                let bh = (a.text.lines().count() as f32).max(1.0) * line_height + pad * 2.0;
-                let bx = a.start.x - pad;
-                let by = a.start.y - pad;
-                p.x >= bx && p.x <= bx + bw && p.y >= by && p.y <= by + bh
-            } else {
-                false
-            };
+            let in_box = self.annotations.get(idx).is_some_and(|a| Self::hit_test_text(a, p));
 
             if in_box {
                 self.text_dragging = true;
@@ -370,21 +370,7 @@ impl AnnotatorOverlay {
                 if a.tool != Tool::Text {
                     continue;
                 }
-                let font_size = a.font_size.max(10.0);
-                let line_height = font_size * 1.2;
-                let max_chars = a
-                    .text
-                    .lines()
-                    .map(|l| l.chars().count())
-                    .max()
-                    .unwrap_or(0)
-                    .max(4);
-                let pad = 24.0;
-                let bw = (max_chars as f32 * font_size * 0.55) + pad * 2.0;
-                let bh = (a.text.lines().count() as f32).max(1.0) * line_height + pad * 2.0;
-                let bx = a.start.x - pad;
-                let by = a.start.y - pad;
-                if p.x >= bx && p.x <= bx + bw && p.y >= by && p.y <= by + bh {
+                if Self::hit_test_text(a, p) {
                     crate::dbg_log!("[mbs-child] Resuming text annotation idx={}", idx);
                     self.text_buffer = a.text.clone();
                     self.text_font_size = a.font_size;
@@ -410,8 +396,6 @@ impl AnnotatorOverlay {
                 text: String::new(),
                 font_size: self.text_font_size,
             });
-            self.text_buffer = String::new();
-            self.text_font_size = 20.0;
             self.text_editing = Some(idx);
             crate::dbg_log!("[mbs-child] Text editing started, idx={}", idx);
             return;
@@ -472,12 +456,6 @@ impl AnnotatorOverlay {
         }
         crate::dbg_log!(
             "[mbs-child] on_release ({:.0},{:.0}) in_progress={}",
-            p.x,
-            p.y,
-            self.in_progress.is_some()
-        );
-        crate::dbg_log!(
-            "[mbs-child] on_release at ({:.0},{:.0}) — in_progress={}",
             p.x,
             p.y,
             self.in_progress.is_some()

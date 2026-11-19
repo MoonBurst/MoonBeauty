@@ -3,7 +3,7 @@ use iced::{Alignment, Element, Length};
 
 use super::capsules::{CapsuleAction, CapsuleRenderer};
 use crate::bar::tray::TrayItem;
-use crate::bar::unified::UnifiedTelemetry;
+use crate::libraries::backend::UnifiedTelemetry;
 use crate::libraries::config::settings::ShellSettings;
 use crate::libraries::config::theme::ShellTheme;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
@@ -15,6 +15,35 @@ pub enum TopBarMessage {
 }
 
 pub struct TopBar;
+
+#[allow(clippy::too_many_arguments)]
+fn render_capsule_slot<'a>(
+    id: &str,
+    telemetry: &'a UnifiedTelemetry,
+    theme: &ShellTheme,
+    settings: &ShellSettings,
+    sl: SlantSide,
+    sr: SlantSide,
+    region: &str,
+    tray_expanded: bool,
+    tray_items: &'a [TrayItem],
+    tray_anim_width: f32,
+) -> Element<'a, TopBarMessage> {
+    if id == "tray" && (tray_expanded || tray_anim_width > settings.tray_width as f32 + 0.5) {
+        CapsuleRenderer::render_tray_expanded(
+            tray_items, theme, settings, sl, sr, region, tray_anim_width, TopBarMessage::Action,
+        )
+    } else {
+        let cap = CapsuleRenderer::render(
+            id, telemetry, theme, settings, sl, sr, &settings.module_shape, region, TopBarMessage::Action,
+        );
+        if id == "tray" {
+            container(cap).width(Length::Fixed(settings.tray_width as f32)).into()
+        } else {
+            cap
+        }
+    }
+}
 
 impl TopBar {
     pub fn view<'a>(
@@ -35,38 +64,7 @@ impl TopBar {
                     "right" => (SlantSide::Right, SlantSide::Right),
                     _ => (SlantSide::Left, SlantSide::Left),
                 };
-                if id == "tray"
-                    && (tray_expanded || tray_anim_width > settings.tray_width as f32 + 0.5)
-                {
-                    left_row = left_row.push(CapsuleRenderer::render_tray_expanded(
-                        tray_items,
-                        theme,
-                        settings,
-                        sl,
-                        sr,
-                        "left",
-                        tray_anim_width,
-                        TopBarMessage::Action,
-                    ));
-                } else {
-                    let cap = CapsuleRenderer::render(
-                        id,
-                        telemetry,
-                        theme,
-                        settings,
-                        sl,
-                        sr,
-                        &settings.module_shape,
-                        "left",
-                        TopBarMessage::Action,
-                    );
-                    if id == "tray" {
-                        left_row = left_row
-                            .push(container(cap).width(Length::Fixed(settings.tray_width as f32)));
-                    } else {
-                        left_row = left_row.push(cap);
-                    }
-                }
+                left_row = left_row.push(render_capsule_slot(id, telemetry, theme, settings, sl, sr, "left", tray_expanded, tray_items, tray_anim_width));
             }
         }
 
@@ -92,38 +90,7 @@ impl TopBar {
                     }
                 }
             };
-            if id.as_str() == "tray"
-                && (tray_expanded || tray_anim_width > settings.tray_width as f32 + 0.5)
-            {
-                center_row = center_row.push(CapsuleRenderer::render_tray_expanded(
-                    tray_items,
-                    theme,
-                    settings,
-                    sl,
-                    sr,
-                    "center",
-                    tray_anim_width,
-                    TopBarMessage::Action,
-                ));
-            } else {
-                let cap = CapsuleRenderer::render(
-                    id,
-                    telemetry,
-                    theme,
-                    settings,
-                    sl,
-                    sr,
-                    &settings.module_shape,
-                    "center",
-                    TopBarMessage::Action,
-                );
-                if id.as_str() == "tray" {
-                    center_row = center_row
-                        .push(container(cap).width(Length::Fixed(settings.tray_width as f32)));
-                } else {
-                    center_row = center_row.push(cap);
-                }
-            }
+            center_row = center_row.push(render_capsule_slot(id, telemetry, theme, settings, sl, sr, "center", tray_expanded, tray_items, tray_anim_width));
         }
 
         let mut right_row = Row::new().spacing(spacing_px).align_y(Alignment::Center);
@@ -134,38 +101,7 @@ impl TopBar {
                     "right" => (SlantSide::Right, SlantSide::Right),
                     _ => (SlantSide::Right, SlantSide::Right),
                 };
-                if id == "tray"
-                    && (tray_expanded || tray_anim_width > settings.tray_width as f32 + 0.5)
-                {
-                    right_row = right_row.push(CapsuleRenderer::render_tray_expanded(
-                        tray_items,
-                        theme,
-                        settings,
-                        sl,
-                        sr,
-                        "right",
-                        tray_anim_width,
-                        TopBarMessage::Action,
-                    ));
-                } else {
-                    let cap = CapsuleRenderer::render(
-                        id,
-                        telemetry,
-                        theme,
-                        settings,
-                        sl,
-                        sr,
-                        &settings.module_shape,
-                        "right",
-                        TopBarMessage::Action,
-                    );
-                    if id == "tray" {
-                        right_row = right_row
-                            .push(container(cap).width(Length::Fixed(settings.tray_width as f32)));
-                    } else {
-                        right_row = right_row.push(cap);
-                    }
-                }
+                right_row = right_row.push(render_capsule_slot(id, telemetry, theme, settings, sl, sr, "right", tray_expanded, tray_items, tray_anim_width));
             }
         }
 

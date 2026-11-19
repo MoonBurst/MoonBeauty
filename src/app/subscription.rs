@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::keys::{handle_annotator_text_input, handle_email_keypress, handle_lock_keypress};
 
 pub(crate) static IPC_RX: std::sync::OnceLock<
     std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<IpcCommand>>>,

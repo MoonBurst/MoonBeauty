@@ -1,8 +1,7 @@
 use crate::libraries::style::TextExt;
-use iced::widget::canvas::Canvas;
-use iced::widget::{button, column, container, row, text, text_input, Stack};
+use iced::widget::{button, column, container, row, text, Stack};
 use iced::{Alignment, Color, Element, Length, Padding, Task, Theme};
-use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
+use iced_layershell::reexport::{KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use std::time::Instant;
 
@@ -11,7 +10,10 @@ use crate::libraries::config::theme::ShellTheme;
 use crate::libraries::config::ShellSettings;
 use crate::libraries::style::shape_box::SlantSide;
 
-use crate::overlays::tooltip_common::{slanted_row, KillButtonShape};
+use crate::overlays::tooltip_common::{
+    layer_anchor_and_margin, proc_kill_row, slanted_row, slanted_search_bar, truncate_proc_name,
+    TooltipEnv,
+};
 
 const W_START: f32 = 130.0;
 const AUTO_MS: u128 = 10_000;
@@ -71,17 +73,7 @@ impl App {
         crate::libraries::process::install_sigterm_handler();
         eprintln!("[sys-tooltip] V16 LOADED");
         let target = std::env::var("MBS_SYS_TARGET").unwrap_or_else(|_| "cpu".into());
-        let cx: i32 = std::env::var("MBS_CAPSULE_CX")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(200);
-        let sw: i32 = std::env::var("MBS_SCREEN_W")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1920);
-        let grow_right = std::env::var("MBS_GROW_RIGHT")
-            .map(|v| v == "1")
-            .unwrap_or_else(|_| cx < sw / 2);
+        let env = TooltipEnv::from_env(W_START);
         let s = ShellSettings::load();
         let mut w: u32 = std::env::var("MBS_TOOLTIP_W")
             .ok()
@@ -104,22 +96,7 @@ impl App {
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(s.tooltip_expand_ms) as f32;
-        let w_start: f32 = std::env::var("MBS_CAPSULE_W")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(W_START);
-        let sl_str = std::env::var("MBS_SLANT_L").unwrap_or_else(|_| "L".into());
-        let sr_str = std::env::var("MBS_SLANT_R").unwrap_or_else(|_| "L".into());
-        let slant_l = if sl_str == "R" {
-            SlantSide::Right
-        } else {
-            SlantSide::Left
-        };
-        let slant_r = if sr_str == "R" {
-            SlantSide::Right
-        } else {
-            SlantSide::Left
-        };
+        
 
         let gpu_list = if target == "gpu" {
             SystemCollector::list_gpus_sync()
@@ -153,14 +130,14 @@ impl App {
             opened: Instant::now(),
             target: target.clone(),
             data: None,
-            grow_right,
+            grow_right: env.grow_right,
             w,
             h,
             drop_ms,
             expand_ms,
-            w_start,
-            slant_l,
-            slant_r,
+            w_start: env.w_start,
+            slant_l: env.slant_l,
+            slant_r: env.slant_r,
             closing_at: None,
             search_query: String::new(),
             gpu_list,
@@ -431,17 +408,6 @@ impl App {
     }
 }
 
-fn truncate_name(name: &str) -> String {
-    let max = 22;
-    if name.chars().count() > max {
-        let mut s: String = name.chars().take(max - 3).collect();
-        s.push_str("...");
-        s
-    } else {
-        name.to_string()
-    }
-}
-
 fn render_proc_row(
     p: &ProcessItem,
     t: &ShellTheme,
@@ -454,98 +420,24 @@ fn render_proc_row(
     slant_right: bool,
     tooltip_slope: f32,
 ) -> Element<'static, Message> {
-    let apply = |c: Color| Color {
-        a: c.a * alpha,
-        ..c
-    };
-    let name = truncate_name(&p.name);
-    let pid = p.pid;
-    let raw_metric = p.metric.clone();
-    let muted = apply(t.muted);
-    let danger = apply(t.danger);
-    let text_col = apply(t.text);
-    let surface_alt = apply(t.surface_alt);
-
     let metric_str = if is_gpu {
-        raw_metric
+        p.metric.clone()
     } else if let Some(total) = total_ram_gib {
-        let rss_mib = leading_number(&raw_metric);
+        let rss_mib = leading_number(&p.metric);
         let total_mib = (total.max(0.01) as f64) * 1024.0;
         let pct = (rss_mib / total_mib * 100.0).clamp(0.0, 100.0);
-        
-        // Format it cleanly: e.g. "6.4% · 450M" instead of "6.4% VRAM"
         if rss_mib >= 1024.0 {
             format!("{:.1}% · {:.1}G", pct, rss_mib / 1024.0)
         } else {
             format!("{:.1}% · {:.0}M", pct, rss_mib)
         }
     } else {
-        raw_metric
+        p.metric.clone()
     };
-
-    let kill_w = 32.0;
-    let kill_h = 24.0;
-    let kill_border = t.control_border_width;
-    let half_k = kill_border * 0.5;
-    // Match the exact visual slope of the outer tooltip's yellow edge
-    let x_slant = tooltip_slope * (kill_h - 2.0 * half_k);
-    let metric_w = 140.0;
-    let spacing = 8.0;
-
-    let kill_shape = KillButtonShape {
-        w: kill_w,
-        h: kill_h,
-        slant: x_slant,
-        slant_right,
-        background: surface_alt,
-        border_color: danger,
-        border_width: kill_border,
-        x_color: danger,
-    };
-
-    let kill_canvas: Element<'static, Message> = Canvas::new(kill_shape)
-        .width(Length::Fixed(kill_w))
-        .height(Length::Fixed(kill_h))
-        .into();
-
-    let kill_btn = button(kill_canvas)
-        .on_press(Message::KillProcess(pid))
-        .padding(0)
-        .width(Length::Fixed(kill_w))
-        .height(Length::Fixed(row_h))
-        .style(|_t, _s| button::Style {
-            background: None,
-            ..Default::default()
-        });
-
-    let name_clip = container(
-        text(name)
-            .size((font_size.saturating_sub(4).max(9)) as f32)
-            .color(text_col)
-            .wrapping(iced::widget::text::Wrapping::None),
+    proc_kill_row(
+        truncate_proc_name(&p.name), metric_str, 140.0, Message::KillProcess(p.pid),
+        t, font_size, alpha, row_w, row_h, slant_right, tooltip_slope,
     )
-    .width(Length::Fill)
-    .height(Length::Fixed(row_h))
-    .align_y(Alignment::Center)
-    .clip(true);
-
-    let metric_container = container(
-        text(metric_str)
-            .size((font_size.saturating_sub(4).max(9)) as f32)
-            .color(muted)
-            .wrapping(iced::widget::text::Wrapping::None),
-    )
-    .width(Length::Fixed(metric_w))
-    .height(Length::Fixed(row_h))
-    .align_y(Alignment::Center)
-    .padding([0.0, 6.0])
-    .clip(true);
-
-    row![name_clip, metric_container, kill_btn,]
-        .spacing(spacing)
-        .align_y(Alignment::Center)
-        .width(Length::Fixed(row_w))
-        .into()
 }
 
 fn leading_number(s: &str) -> f64 {
@@ -569,82 +461,11 @@ impl App {
         tooltip_slope: f32,
         gap: f32,
     ) -> (Element<'a, Message>, f32) {
-        let search_h = 40.0;
-        let y_mid_search = y + search_h * 0.5;
-        let frac_s = (y_mid_search / total_h.max(1.0)).clamp(0.0, 1.0);
-        let (lp_s, rp_s) = if slant_right {
-            (slant_h * (1.0 - frac_s) + safe, slant_h * frac_s + safe)
-        } else {
-            (slant_h * frac_s + safe, slant_h * (1.0 - frac_s) + safe)
-        };
-        let search_w = (w_f - lp_s - rp_s).max(100.0);
-
-        let search_border = settings.control_border_width;
-        let half_s = search_border * 0.5;
-        let search_slant = tooltip_slope * (search_h - 2.0 * half_s);
-
-        let search_bg = crate::overlays::tooltip_engine::ParallelogramBg {
-            w: search_w,
-            h: search_h,
-            slant: search_slant,
-            slant_right,
-            background: Color {
-                a: t.surface_alt.a * alpha,
-                ..t.surface_alt
-            },
-            border_color: Color {
-                a: t.text.a * alpha,
-                ..t.text
-            },
-            border_width: search_border,
-            frame: self.opened.elapsed().as_millis() as u64,
-        };
-
-        let input_text_col = Color { a: 1.0, ..t.text };
-        let input_muted = Color { a: 1.0, ..t.muted };
-        let selection_col = Color { a: 1.0, ..t.focus };
-
-        let search_input = text_input("Search programs...", &self.search_query)
-            .on_input(Message::SearchChanged)
-            .padding(Padding {
-                top: 8.0,
-                bottom: 8.0,
-                left: search_slant + 8.0,
-                right: search_slant + 8.0,
-            })
-            .size((fs) as f32)
-            .width(Length::Fill)
-            .style(move |_t, _s| iced::widget::text_input::Style {
-                background: iced::Background::Color(Color::TRANSPARENT),
-                border: iced::Border::default(),
-                icon: input_muted,
-                placeholder: input_muted,
-                value: input_text_col,
-                selection: selection_col,
-            });
-
-        let search_layer: Element<'a, Message> = Stack::new()
-            .push(search_bg.view())
-            .push(
-                container(search_input)
-                    .width(Length::Fixed(search_w))
-                    .height(Length::Fixed(search_h))
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill),
-            )
-            .width(Length::Fixed(search_w))
-            .height(Length::Fixed(search_h))
-            .into();
-
-        let row_el = row![
-            iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(lp_s)),
-            search_layer,
-            iced::widget::container(iced::widget::Space::new()).width(Length::Fixed(rp_s)),
-        ]
-        .width(Length::Fixed(w_f))
-        .into();
-
-        (row_el, y + search_h + gap)
+        slanted_search_bar(
+            &self.search_query, Message::SearchChanged, t, settings.control_border_width,
+            alpha, y, total_h, slant_h, slant_right, safe, w_f, fs, tooltip_slope, gap,
+            self.opened.elapsed().as_millis() as u64,
+        )
     }
     fn build_content<'a>(
         &'a self,
@@ -1061,43 +882,7 @@ pub fn run() -> Result<(), iced_layershell::Error> {
         h = h.max(480);
     }
 
-    let cx: i32 = std::env::var("MBS_CAPSULE_CX")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(200);
-    let sw: i32 = std::env::var("MBS_SCREEN_W")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1920);
-    let cap_w: f32 = std::env::var("MBS_CAPSULE_W")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(100.0);
-    let grow_right = cx < sw / 2;
-
-    let bar_h = s.bar_height as i32;
-    let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
-
-    let half_cap = (cap_w / 2.0) as i32;
-
-    // Dynamic alignment offset for the slanted corner + padding.
-
-    // Finding 76: per-capsule bias added to global offsets.
-    let (bias_l, bias_r) = crate::bar::tooltip_spawn::read_offset_extra();
-    let adjust_left = s.effective_tooltip_offset_left() + bias_l;
-    let adjust_right = s.effective_tooltip_offset_right() + bias_r;
-
-    let (anchor, margin) = if grow_right {
-        (
-            Anchor::Top | Anchor::Left,
-            (margin_top, 0, 0, (cx - half_cap + adjust_left).max(0)),
-        )
-    } else {
-        (
-            Anchor::Top | Anchor::Right,
-            (margin_top, (sw - cx - half_cap + adjust_right).max(0), 0, 0),
-        )
-    };
+    let (anchor, margin) = layer_anchor_and_margin(&s, w, false);
 
     let layer = LayerShellSettings {
         size: Some((w, h)),

@@ -1,11 +1,3 @@
-//! Keyboard event handlers + app-focus helpers.
-//!
-//! Extracted from `main.rs`. All `pub` fns reach their call sites in
-//! `app/subscription.rs` and `app/update/notifications.rs` via the
-//! chain `super::*` -> `crate::app::*` -> `use crate::cli::keys::{...}`
-//! in `app/mod.rs`.
-
-
 use crate::app::Message;
 use moonbeauty::overlays::email::EmailMessage;
 use moonbeauty::overlays::lockscreen::LockMessage;
@@ -69,30 +61,7 @@ pub fn is_app_focused(candidates: &[String]) -> bool {
 }
 
 pub fn focus_notification_app(app_name: &str, desktop_entry: Option<&str>) -> bool {
-    use std::collections::HashSet;
-
-    let lower = app_name.to_lowercase();
-    let mut cand_set: HashSet<String> = HashSet::new();
-    cand_set.insert(lower.clone());
-    cand_set.insert(lower.replace(' ', "-"));
-    cand_set.insert(lower.replace(' ', "_"));
-    cand_set.insert(lower.replace(' ', ""));
-    if let Some(de) = desktop_entry {
-        let de_clean = de.trim_end_matches(".desktop").to_string();
-        cand_set.insert(de_clean.clone());
-        cand_set.insert(de_clean.to_lowercase());
-    }
-    let candidates: Vec<String> = cand_set
-        .into_iter()
-        .filter(|s| !s.is_empty() && moonbeauty::libraries::process::is_safe_app_id(s))
-        .collect();
-    moonbeauty::dbg_log!(
-        "[focus] app={:?} entry={:?} candidates={:?}",
-        app_name,
-        desktop_entry,
-        candidates
-    );
-
+    let candidates = notification_candidates(app_name, desktop_entry);
     if std::env::var("SWAYSOCK").is_ok() {
         for cand in &candidates {
             let _ = std::process::Command::new("swaymsg")
@@ -109,7 +78,6 @@ pub fn focus_notification_app(app_name: &str, desktop_entry: Option<&str>) -> bo
             }
         }
     }
-
     if let Some(de) = desktop_entry {
         let de_clean = de.trim_end_matches(".desktop");
         if moonbeauty::libraries::process::is_safe_app_id(de_clean) {
@@ -123,7 +91,6 @@ pub fn focus_notification_app(app_name: &str, desktop_entry: Option<&str>) -> bo
             }
         }
     }
-
     if let Some(first) = candidates.first() {
         let _ = std::process::Command::new("gtk-launch").arg(first).status();
     }
@@ -158,38 +125,27 @@ pub fn handle_email_keypress(
     };
     use iced::keyboard::{key::Named, Key};
 
-    // ---- SEND: three shortcuts to maximize compatibility ----
     if key == Key::Named(Named::Enter) && (modifiers.control() || modifiers.alt()) {
-        eprintln!("[key] Send triggered via Enter+mod");
         return Some(Message::Email(EmailMessage::SendMail));
     }
     if let Key::Character(c) = &key {
         if modifiers.control() && c.to_lowercase() == "s" {
-            eprintln!("[key] Send triggered via Ctrl+S");
             return Some(Message::Email(EmailMessage::SendMail));
         }
         if modifiers.control() && c.to_lowercase() == "o" {
-            eprintln!("[key] Attach triggered via Ctrl+O");
             return Some(Message::Email(EmailMessage::AddAttachment));
         }
     }
-
     if key == Key::Named(Named::Tab) {
         return Some(Message::ComposeTabPressed(modifiers.shift()));
     }
-
-    if modifiers.alt() {
+    if modifiers.alt() || modifiers.control() {
         match key {
-            Key::Named(Named::ArrowUp) => {
-                return Some(Message::Email(EmailMessage::SelectFolderPrev))
-            }
-            Key::Named(Named::ArrowDown) => {
-                return Some(Message::Email(EmailMessage::SelectFolderNext))
-            }
+            Key::Named(Named::ArrowUp) => return Some(Message::Email(EmailMessage::SelectFolderPrev)),
+            Key::Named(Named::ArrowDown) => return Some(Message::Email(EmailMessage::SelectFolderNext)),
             _ => {}
         }
     }
-
     if modifiers.control() {
         if let Key::Character(c) = &key {
             match c.to_lowercase().as_str() {
@@ -199,51 +155,28 @@ pub fn handle_email_keypress(
             }
         }
     }
-
-    if matches!(key, Key::Character(_))
-        && status == iced::event::Status::Captured
-        && !modifiers.control()
-    {
+    if matches!(key, Key::Character(_)) && status == iced::event::Status::Captured && !modifiers.control() {
         return None;
     }
-
     match key {
         Key::Named(Named::ArrowUp) => Some(Message::Email(EmailMessage::SelectMailPrev)),
         Key::Named(Named::ArrowDown) => Some(Message::Email(EmailMessage::SelectMailNext)),
         Key::Named(Named::Enter) => Some(Message::Email(EmailMessage::OpenSelected)),
         Key::Named(Named::Delete) => Some(Message::Email(EmailMessage::DeleteSelected)),
-        Key::Character(c) if c == "n" && !modifiers.control() => {
-            Some(Message::Email(EmailMessage::OpenComposer))
-        }
-        Key::Character(c) if c == "s" && !modifiers.control() => {
-            Some(Message::Email(EmailMessage::ToggleStar))
-        }
-        Key::Character(c) if c == "d" && !modifiers.control() => {
-            Some(Message::Email(EmailMessage::DeleteSelected))
-        }
-        Key::Character(c) if c == "c" && !modifiers.control() => {
-            Some(Message::Email(EmailMessage::SaveContact))
-        }
+        Key::Character(c) if c == "n" && !modifiers.control() => Some(Message::Email(EmailMessage::OpenComposer)),
+        Key::Character(c) if c == "s" && !modifiers.control() => Some(Message::Email(EmailMessage::ToggleStar)),
+        Key::Character(c) if c == "d" && !modifiers.control() => Some(Message::Email(EmailMessage::DeleteSelected)),
+        Key::Character(c) if c == "c" && !modifiers.control() => Some(Message::Email(EmailMessage::SaveContact)),
         _ => None,
     }
 }
 
-/// Keyboard handler for annotator text-annotation mode. Forwards printable
-/// characters, Enter, and Backspace to the annotator's text buffer. Modifier
-/// combos fall through (they're reserved for tool shortcuts / global binds);
-/// events already captured by a focused widget (e.g. the watermark
-/// text_input) are skipped so we don't double-handle them.
 pub fn handle_annotator_text_input(
     event: iced::Event,
     status: iced::event::Status,
     _window: iced::window::Id,
 ) -> Option<Message> {
-    let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-        modified_key,
-        text,
-        modifiers,
-        ..
-    }) = event
+    let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { modified_key, text, modifiers, .. }) = event
     else {
         return None;
     };
@@ -255,39 +188,22 @@ pub fn handle_annotator_text_input(
     if status == iced::event::Status::Captured {
         return None;
     }
-
-    // Named keys first (Enter's `text` is Some("\r"), a control char —
-    // must be intercepted here before the printable filter below).
     if let Key::Named(named) = &modified_key {
         match named {
-            Named::Enter => {
-                return Some(Message::Annotator(AnnotatorMessage::NewLinePressed));
-            }
-            Named::Backspace => {
-                return Some(Message::Annotator(AnnotatorMessage::BackspacePressed));
-            }
+            Named::Enter => return Some(Message::Annotator(AnnotatorMessage::NewLinePressed)),
+            Named::Backspace => return Some(Message::Annotator(AnnotatorMessage::BackspacePressed)),
             _ => {}
         }
     }
-
-    // Printable: prefer `text` (respects IME, layout, shift/caps). Convert
-    // SmolStr → String because AnnotatorMessage::CharacterInput takes String.
     if let Some(t) = text {
         if !t.is_empty() && !t.chars().any(|c| c.is_control()) {
-            return Some(Message::Annotator(AnnotatorMessage::CharacterInput(
-                t.to_string(),
-            )));
+            return Some(Message::Annotator(AnnotatorMessage::CharacterInput(t.to_string())));
         }
     }
-
-    // Fallback: modified_key.
     if let Key::Character(c) = modified_key {
         if !c.is_empty() {
-            return Some(Message::Annotator(AnnotatorMessage::CharacterInput(
-                c.to_string(),
-            )));
+            return Some(Message::Annotator(AnnotatorMessage::CharacterInput(c.to_string())));
         }
     }
-
     None
 }

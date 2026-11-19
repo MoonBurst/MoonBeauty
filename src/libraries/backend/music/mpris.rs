@@ -55,8 +55,19 @@ fn safe_mpris_file_path(url: &str) -> Option<std::path::PathBuf> {
         crate::dbg_log!("[mpris] rejected unsafe track url: {:?}", clean);
         return None;
     }
-    // We rely on the caller (user click) to be intentional.
-    Some(std::path::PathBuf::from(clean))
+    let path = std::path::PathBuf::from(clean);
+    const MEDIA_EXTS: &[&str] = &[
+        "mp3", "flac", "ogg", "opus", "m4a", "wav", "aac", "m4v", "mkv", "webm", "mp4", "wma",
+    ];
+    let ext_ok = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .is_some_and(|ext| MEDIA_EXTS.iter().any(|m| ext.eq_ignore_ascii_case(m)));
+    if !ext_ok {
+        crate::dbg_log!("[mpris] rejected non-media track url: {:?}", clean);
+        return None;
+    }
+    Some(path)
 }
 
 impl MprisBackend {
@@ -154,17 +165,17 @@ impl MprisBackend {
         result
     }
 
-    async fn poll_uncached() -> Option<MprisTrack> {
-        let (conn, bus_name) = Self::get_active_player().await?;
-        let proxy = zbus::Proxy::new(&conn, bus_name.as_str(), MPRIS_PATH, MPRIS_IFACE)
+    async fn read_track_from_bus(conn: &Connection, bus: &str) -> Option<MprisTrack> {
+        let proxy = zbus::Proxy::new(conn, bus, MPRIS_PATH, MPRIS_IFACE)
             .await
             .ok()?;
+        let t = std::time::Duration::from_secs(2);
+        let metadata: HashMap<String, OwnedValue> =
+            tokio::time::timeout(t, proxy.get_property("Metadata"))
+                .await
+                .ok()?
+                .ok()?;
 
-        let metadata: HashMap<String, OwnedValue> = proxy.get_property("Metadata").await.ok()?;
-
-        // Finding 31: cap each string as it's materialized. The primary
-        // D-Bus allocation is unpreventable at this layer; this bounds
-        // the downstream concat/display amplification.
         let get_str = |key: &str, max: usize| -> Option<String> {
             metadata.get(key).and_then(|v| match &**v {
                 zbus::zvariant::Value::Str(s) => Some(truncate_chars(s.as_str(), max)),
@@ -176,9 +187,6 @@ impl MprisBackend {
         let album = get_str("xesam:album", 512).unwrap_or_default();
         let url = get_str("xesam:url", 4096);
 
-        // Finding 31: cap array length (8 artists is generous) and each
-        // entry (256 chars). A hostile provider returning 1M-item arrays
-        // × 1KB each would otherwise allocate 1GB during join.
         let artist = metadata
             .get("xesam:artist")
             .and_then(|v| match &**v {
@@ -195,15 +203,15 @@ impl MprisBackend {
                             }
                         })
                         .collect();
-                    if parts.is_empty() {
-                        None
-                    } else {
-                        Some(parts.join(", "))
-                    }
+                    if parts.is_empty() { None } else { Some(parts.join(", ")) }
                 }
                 _ => None,
             })
             .unwrap_or_default();
+
+        if title.is_empty() && artist.is_empty() {
+            return None;
+        }
 
         let length_sec = metadata
             .get("mpris:length")
@@ -214,38 +222,23 @@ impl MprisBackend {
             })
             .unwrap_or(0.0);
 
-        let is_playing = proxy
-            .get_property::<String>("PlaybackStatus")
-            .await
-            .map(|s| s == "Playing")
-            .unwrap_or(false);
+        let is_playing = tokio::time::timeout(t, proxy.get_property::<String>("PlaybackStatus"))
+            .await.ok().and_then(|r| r.ok()).map(|s| s == "Playing").unwrap_or(false);
 
-        let position_sec = proxy
-            .get_property::<i64>("Position")
-            .await
-            .map(|p| p as f64 / 1_000_000.0)
-            .unwrap_or(0.0);
+        let position_sec = tokio::time::timeout(t, proxy.get_property::<i64>("Position"))
+            .await.ok().and_then(|r| r.ok()).map(|p| p as f64 / 1_000_000.0).unwrap_or(0.0);
 
-        let volume_pct = proxy
-            .get_property::<f64>("Volume")
-            .await
-            .map(|v| (v * 100.0).clamp(0.0, 100.0) as u8)
-            .unwrap_or(100);
-
-        if title.is_empty() && artist.is_empty() {
-            return None;
-        }
+        let volume_pct = tokio::time::timeout(t, proxy.get_property::<f64>("Volume"))
+            .await.ok().and_then(|r| r.ok()).map(|v| (v * 100.0).clamp(0.0, 100.0) as u8).unwrap_or(100);
 
         Some(MprisTrack {
-            title,
-            artist,
-            album,
-            is_playing,
-            position_sec,
-            length_sec,
-            volume_pct,
-            url,
+            title, artist, album, is_playing, position_sec, length_sec, volume_pct, url,
         })
+    }
+
+    async fn poll_uncached() -> Option<MprisTrack> {
+        let (conn, bus_name) = Self::get_active_player().await?;
+        Self::read_track_from_bus(&conn, bus_name.as_str()).await
     }
 
     async fn call_method(method: &str) {
@@ -301,89 +294,7 @@ impl MprisBackend {
     /// `poll_uncached`, just targeted.
     pub async fn poll_for(bus: &str) -> Option<MprisTrack> {
         let conn = Connection::session().await.ok()?;
-        let proxy = zbus::Proxy::new(&conn, bus, MPRIS_PATH, MPRIS_IFACE)
-            .await
-            .ok()?;
-        let t = std::time::Duration::from_secs(2);
-        let metadata: HashMap<String, OwnedValue> =
-            tokio::time::timeout(t, proxy.get_property("Metadata"))
-                .await
-                .ok()?
-                .ok()?;
-        let is_playing = tokio::time::timeout(t, proxy.get_property::<String>("PlaybackStatus"))
-            .await
-            .ok()?
-            .ok()
-            .map(|s| s == "Playing")
-            .unwrap_or(false);
-        let position_sec = tokio::time::timeout(t, proxy.get_property::<i64>("Position"))
-            .await
-            .ok()?
-            .ok()
-            .map(|p| p as f64 / 1_000_000.0)
-            .unwrap_or(0.0);
-        let volume_pct = tokio::time::timeout(t, proxy.get_property::<f64>("Volume"))
-            .await
-            .ok()?
-            .ok()
-            .map(|v| (v * 100.0).clamp(0.0, 100.0) as u8)
-            .unwrap_or(100);
-
-        let get_str = |key: &str, max: usize| -> Option<String> {
-            metadata.get(key).and_then(|v| match &**v {
-                zbus::zvariant::Value::Str(s) => Some(truncate_chars(s.as_str(), max)),
-                _ => None,
-            })
-        };
-        let title = get_str("xesam:title", 512).unwrap_or_default();
-        let album = get_str("xesam:album", 512).unwrap_or_default();
-        let url = get_str("xesam:url", 4096);
-        let artist = metadata
-            .get("xesam:artist")
-            .and_then(|v| match &**v {
-                zbus::zvariant::Value::Str(s) => Some(truncate_chars(s.as_str(), 512)),
-                zbus::zvariant::Value::Array(arr) => {
-                    let parts: Vec<String> = arr
-                        .iter()
-                        .take(8)
-                        .filter_map(|item| {
-                            if let zbus::zvariant::Value::Str(s) = item {
-                                Some(truncate_chars(s.as_str(), 256))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-                    if parts.is_empty() {
-                        None
-                    } else {
-                        Some(parts.join(", "))
-                    }
-                }
-                _ => None,
-            })
-            .unwrap_or_default();
-        let length_sec = metadata
-            .get("mpris:length")
-            .and_then(|v| match &**v {
-                zbus::zvariant::Value::I64(n) => Some(*n as f64 / 1_000_000.0),
-                zbus::zvariant::Value::U64(n) => Some(*n as f64 / 1_000_000.0),
-                _ => None,
-            })
-            .unwrap_or(0.0);
-        if title.is_empty() && artist.is_empty() {
-            return None;
-        }
-        Some(MprisTrack {
-            title,
-            artist,
-            album,
-            is_playing,
-            position_sec,
-            length_sec,
-            volume_pct,
-            url,
-        })
+        Self::read_track_from_bus(&conn, bus).await
     }
 
     /// Play/pause a specific player by bus name. Used by the music

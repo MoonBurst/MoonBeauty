@@ -1,6 +1,6 @@
 pub mod shape_box;
 
-pub use shape_box::{ShapeBox, ShapeType, SlantSide};
+pub use shape_box::{AngledHexGeometry, ShapeBox, ShapeType, SlantSide};
 
 /// Shell font family. Matches `fontFamily` in the QML build (Shapes.qml / Theme.qml).
 pub const SHELL_FAMILY: &str = "Fira Code";

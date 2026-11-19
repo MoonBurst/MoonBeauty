@@ -286,12 +286,7 @@ impl MoonBeautyShellApp {
                 // images.
                 if let Some(id) = self.clipboard.selected_id {
                     if self.is_standalone {
-                        let rt = tokio::runtime::Runtime::new()
-                            .expect("tokio runtime for clipboard copy");
-                        rt.block_on(async move {
-                            ClipboardOverlay::copy(id).await;
-                        });
-                        std::process::exit(0);
+                        crate::app::helpers::run_then_exit(ClipboardOverlay::copy(id));
                     }
                     self.active_overlay = None;
                     return Command::perform(

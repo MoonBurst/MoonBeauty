@@ -7,9 +7,11 @@
 //!   - `IpcCommand::{DismissLatestNotif, JumpToLatestNotif, ToggleHistory, TestNotification}`
 //!   - `CapsuleAction::ToggleNotificationDnd`
 
+
 #![allow(clippy::collapsible_match)]
 
 use super::*;
+use crate::app::keys::{is_app_focused, focus_notification_app, notification_candidates};
 
 impl MoonBeautyShellApp {
     pub(crate) fn handle_notif(&mut self, msg: NotifMessage) -> Command<Message> {

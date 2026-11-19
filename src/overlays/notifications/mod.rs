@@ -8,6 +8,7 @@
 //! - (implicit) re-exports: overlays/mod.rs pulls NotifMessage + NotificationOverlay
 //!   from here for the main dispatcher
 
+
 pub mod dbus;
 pub mod ui;
 
@@ -19,3 +20,4 @@ pub use ui::{
 };
 
 pub mod cli;
+

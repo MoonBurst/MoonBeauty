@@ -1,106 +1,27 @@
 use super::*;
 
 impl MoonBeautyShellApp {
-    pub fn view(&self) -> Element<'_, Message> {
-        if self.is_notif_surface {
-            let is_right_corner = self.settings.notif_corner.contains("right");
-            let is_top_corner = self.settings.notif_corner.contains("top");
-            let pad_top = if is_top_corner {
-                self.settings.notif_baseline_y as f32
-            } else {
-                0.0
-            };
-            let pad_bottom = if !is_top_corner {
-                self.settings.notif_baseline_y as f32
-            } else {
-                0.0
-            };
-            let pad_right = if is_right_corner {
-                self.settings.notif_margin_x.max(16) as f32
-            } else {
-                0.0
-            };
-            let pad_left = if !is_right_corner {
-                self.settings.notif_margin_x.max(16) as f32
-            } else {
-                0.0
-            };
-            return container(
-                self.notifs
-                    .view_toasts(&self.theme, &self.settings)
-                    .map(Message::Notif),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(if is_right_corner {
-                iced::alignment::Horizontal::Right
-            } else {
-                iced::alignment::Horizontal::Left
-            })
-            .align_y(if is_top_corner {
-                iced::alignment::Vertical::Top
-            } else {
-                iced::alignment::Vertical::Bottom
-            })
-            .padding(Padding {
-                top: pad_top,
-                right: pad_right,
-                bottom: pad_bottom,
-                left: pad_left,
-            })
-            .into();
-        }
+    fn build_notifs_view(&self) -> Element<'_, Message> {
         let is_right_corner = self.settings.notif_corner.contains("right");
         let is_top_corner = self.settings.notif_corner.contains("top");
+        let pad_top = if is_top_corner { self.settings.notif_baseline_y as f32 } else { 0.0 };
+        let pad_bottom = if !is_top_corner { self.settings.notif_baseline_y as f32 } else { 0.0 };
+        let pad_right = if is_right_corner { self.settings.notif_margin_x.max(16) as f32 } else { 0.0 };
+        let pad_left = if !is_right_corner { self.settings.notif_margin_x.max(16) as f32 } else { 0.0 };
+        container(self.notifs.view_toasts(&self.theme, &self.settings).map(Message::Notif))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(if is_right_corner { iced::alignment::Horizontal::Right } else { iced::alignment::Horizontal::Left })
+            .align_y(if is_top_corner { iced::alignment::Vertical::Top } else { iced::alignment::Vertical::Bottom })
+            .padding(Padding { top: pad_top, right: pad_right, bottom: pad_bottom, left: pad_left })
+            .style(|_t| iced::widget::container::Style { background: None, ..Default::default() })
+            .into()
+    }
 
-        let pad_top = if is_top_corner {
-            self.settings.notif_baseline_y as f32
-        } else {
-            0.0
-        };
-        let pad_bottom = if !is_top_corner {
-            self.settings.notif_baseline_y as f32
-        } else {
-            0.0
-        };
-        let pad_right = if is_right_corner {
-            self.settings.notif_margin_x.max(16) as f32
-        } else {
-            0.0
-        };
-        let pad_left = if !is_right_corner {
-            self.settings.notif_margin_x.max(16) as f32
-        } else {
-            0.0
-        };
-
-        let notifs_view = container(
-            self.notifs
-                .view_toasts(&self.theme, &self.settings)
-                .map(Message::Notif),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_x(if is_right_corner {
-            iced::alignment::Horizontal::Right
-        } else {
-            iced::alignment::Horizontal::Left
-        })
-        .align_y(if is_top_corner {
-            iced::alignment::Vertical::Top
-        } else {
-            iced::alignment::Vertical::Bottom
-        })
-        .padding(Padding {
-            top: pad_top,
-            right: pad_right,
-            bottom: pad_bottom,
-            left: pad_left,
-        })
-        .style(|_t| iced::widget::container::Style {
-            background: None,
-            ..Default::default()
-        });
+    pub fn view(&self) -> Element<'_, Message> {
+        if self.is_notif_surface {
+            return self.build_notifs_view();
+        }
 
         let overlay_element: Option<Element<'_, Message>> = match &self.active_overlay {
             Some(OverlayTarget::Launcher) => Some(
@@ -182,7 +103,7 @@ impl MoonBeautyShellApp {
 
         if self.is_standalone {
             if let Some(overlay) = overlay_element {
-                return Stack::new().push(overlay).push(notifs_view).into();
+                return Stack::new().push(overlay).push(self.build_notifs_view()).into();
             } else {
                 eprintln!("[FATAL-EXIT] is_standalone=true but overlay_element=None");
                 eprintln!("[FATAL-EXIT] active_overlay = {:?}", self.active_overlay);

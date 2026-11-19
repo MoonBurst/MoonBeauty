@@ -8,14 +8,13 @@ mod custom;
 mod net_proc;
 use buttons::*;
 
-use iced::widget::canvas::Canvas;
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Stack};
 use iced::{Alignment, Color, Element, Length, Padding, Task, Theme};
-use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
+use iced_layershell::reexport::{KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use std::time::Instant;
 
-use crate::bar::unified::{BorgBackend, BorgStatus, PodmanBackend, PodmanStatus};
+use crate::libraries::backend::unified::{borg::{BorgBackend, BorgStatus}, podman::{PodmanBackend, PodmanStatus}, checks::UnifiedItemStatus};
 use crate::libraries::backend::system::ProcessItem;
 use crate::libraries::backend::{ClockBackend, MprisTrack, SystemCollector};
 use crate::libraries::config::theme::ShellTheme;
@@ -23,7 +22,7 @@ use crate::libraries::config::ShellSettings;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
 use crate::libraries::style::TextExt;
 
-use crate::overlays::tooltip_common::{slanted_row, KillButtonShape};
+use crate::overlays::tooltip_common::{layer_anchor_and_margin, slanted_row, TooltipEnv};
 
 const W_START: f32 = 130.0;
 const AUTO_MS: u128 = 15_000;
@@ -35,7 +34,7 @@ pub enum InfoData {
     Unified(
         PodmanStatus,
         BorgStatus,
-        Vec<crate::bar::unified::UnifiedItemStatus>,
+        Vec<UnifiedItemStatus>,
     ),
     Net(crate::libraries::backend::NetMetrics),
     Clock(Vec<crate::libraries::backend::WorldZoneColumn>),
@@ -110,17 +109,7 @@ impl App {
     fn new_app() -> (Self, Task<Message>) {
         crate::libraries::process::install_sigterm_handler();
         let mode = std::env::var("MBS_INFO_MODE").unwrap_or_else(|_| "custom".into());
-        let cx: i32 = std::env::var("MBS_CAPSULE_CX")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(200);
-        let sw: i32 = std::env::var("MBS_SCREEN_W")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1920);
-        let grow_right = std::env::var("MBS_GROW_RIGHT")
-            .map(|v| v == "1")
-            .unwrap_or_else(|_| cx < sw / 2);
+        let env = TooltipEnv::from_env(W_START);
         let w: u32 = std::env::var("MBS_TOOLTIP_W")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -133,30 +122,6 @@ impl App {
         eprintln!("[info_tooltip-h] MBS_TOOLTIP_H = {}", h);
         let drop_ms = s.tooltip_drop_ms as f32;
         let expand_ms = s.tooltip_expand_ms as f32;
-        let w_start: f32 = std::env::var("MBS_CAPSULE_W")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(W_START);
-        let sl = std::env::var("MBS_SLANT_L")
-            .ok()
-            .map(|s| {
-                if s == "R" {
-                    SlantSide::Right
-                } else {
-                    SlantSide::Left
-                }
-            })
-            .unwrap_or(SlantSide::Left);
-        let sr = std::env::var("MBS_SLANT_R")
-            .ok()
-            .map(|s| {
-                if s == "R" {
-                    SlantSide::Right
-                } else {
-                    SlantSide::Left
-                }
-            })
-            .unwrap_or(SlantSide::Left);
 
         let settings = ShellSettings::load();
         let theme = ShellTheme::from_settings(&settings);
@@ -164,11 +129,11 @@ impl App {
             opened: Instant::now(),
             mode: mode.clone(),
             data: None,
-            grow_right,
+            grow_right: env.grow_right,
             w,
-            w_start,
-            slant_l: sl,
-            slant_r: sr,
+            w_start: env.w_start,
+            slant_l: env.slant_l,
+            slant_r: env.slant_r,
             h,
             drop_ms,
             expand_ms,
@@ -405,7 +370,7 @@ impl App {
             Message::PodmanRestart(cname) => {
                 return Task::perform(
                     async move {
-                        crate::bar::unified::PodmanBackend::restart(&cname).await;
+                        crate::libraries::backend::unified::podman::PodmanBackend::restart(&cname).await;
                     },
                     |_| Message::Dismiss,
                 );
@@ -416,7 +381,7 @@ impl App {
                     let mode = self.mode.clone();
                     return Task::perform(
                         async move {
-                            if let Err(e) = crate::bar::unified::checks::toggle_item(&item).await {
+                            if let Err(e) = crate::libraries::backend::unified::checks::toggle_item(&item).await {
                                 eprintln!("[unified] toggle '{}' failed: {}", item.name, e);
                             }
                             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -789,52 +754,8 @@ pub fn run() -> Result<(), iced_layershell::Error> {
         .unwrap_or(s.tooltip_height_px);
     eprintln!("[info_tooltip-h] MBS_TOOLTIP_H = {}", h);
 
-    let cx: i32 = std::env::var("MBS_CAPSULE_CX")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(200);
-    let sw: i32 = std::env::var("MBS_SCREEN_W")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1920);
-    let cap_w: f32 = std::env::var("MBS_CAPSULE_W")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(100.0);
-    let grow_right = cx < sw / 2;
-
-    let bar_h = s.bar_height as i32;
-    let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
-    let half_cap = (cap_w / 2.0) as i32;
-
-    // Finding 76: per-capsule bias (batch-76 missed this file — anchor
-    // used moonbeauty:: but needed crate:: prefix).
-    // Finding 77: global offsets auto-scale from slant_width.
-    let (bias_l, bias_r) = crate::bar::tooltip_spawn::read_offset_extra();
-    let adjust_left = s.effective_tooltip_offset_left() + bias_l;
-    let adjust_right = s.effective_tooltip_offset_right() + bias_r;
-
-    // Clock is the keystone — center the window on the capsule, so the
-    // octagon grows symmetrically outward from the clock's position.
-    let is_clock = std::env::var("MBS_INFO_MODE")
-        .map(|m| m == "clock")
-        .unwrap_or(false);
-
-    let (anchor, margin) = if is_clock {
-        // Left-anchor with margin = cx - w/2, so window center = cx.
-        let margin_left = (cx - (w as i32) / 2).max(0);
-        (Anchor::Top | Anchor::Left, (margin_top, 0, 0, margin_left))
-    } else if grow_right {
-        (
-            Anchor::Top | Anchor::Left,
-            (margin_top, 0, 0, (cx - half_cap + adjust_left).max(0)),
-        )
-    } else {
-        (
-            Anchor::Top | Anchor::Right,
-            (margin_top, (sw - cx - half_cap + adjust_right).max(0), 0, 0),
-        )
-    };
+    let is_clock = std::env::var("MBS_INFO_MODE").map(|m| m == "clock").unwrap_or(false);
+    let (anchor, margin) = layer_anchor_and_margin(&s, w, is_clock);
 
     let layer = LayerShellSettings {
         size: Some((w, h)),
@@ -877,7 +798,7 @@ async fn fetch_data(mode: String) -> InfoData {
             let p = PodmanBackend::poll().await;
             let b = BorgBackend::poll().await;
             let s = ShellSettings::load();
-            let items = crate::bar::unified::checks::check_unified_items(&s.unified_items).await;
+            let items = crate::libraries::backend::unified::checks::check_unified_items(&s.unified_items).await;
             InfoData::Unified(p, b, items)
         }
         "net" => {

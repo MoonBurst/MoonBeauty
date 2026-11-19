@@ -174,62 +174,50 @@ pub(super) fn render_expanded<'a, Message: 'static + Clone>(
             }
         });
 
+    let mk_fallback = |item: &crate::bar::tray::TrayItem| -> Element<'a, Message> {
+        let initial = item
+            .title
+            .chars()
+            .next()
+            .or_else(|| item.id.chars().next())
+            .unwrap_or('?')
+            .to_uppercase()
+            .to_string();
+        container(text(initial).size(icon_size * 0.6).color(fallback_fg).bold())
+            .width(Length::Fixed(icon_size))
+            .height(Length::Fixed(icon_size))
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .style(move |_t| container::Style {
+                background: Some(iced::Background::Color(fallback_bg)),
+                border: iced::Border {
+                    color: fallback_border,
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+    };
+
     let mut icons_row = Row::new().spacing(spacing).align_y(Alignment::Center);
     for item in items.iter().take(shown) {
-        let icon_elem: Element<'a, Message> = if let Some(p) = &item.icon_path {
-            let exists = std::path::Path::new(p).exists();
-            if exists && p.ends_with(".svg") {
+        let icon_elem: Element<'a, Message> = match &item.icon_path {
+            Some(p) if std::path::Path::new(p).exists() && p.ends_with(".svg") => {
                 iced::widget::svg(cached_svg_handle(p))
                     .width(Length::Fixed(icon_size))
                     .height(Length::Fixed(icon_size))
                     .into()
-            } else if exists {
-                if let Some(handle) = cached_rgba_handle(p) {
+            }
+            Some(p) if std::path::Path::new(p).exists() => cached_rgba_handle(p)
+                .map(|handle| {
                     iced::widget::image(handle)
                         .width(Length::Fixed(icon_size))
                         .height(Length::Fixed(icon_size))
                         .into()
-                } else {
-                    let initial = item.title.chars().next().or_else(|| item.id.chars().next()).unwrap_or('?').to_uppercase().to_string();
-                    container(text(initial).size(icon_size * 0.6).color(fallback_fg).bold())
-                        .width(Length::Fixed(icon_size))
-                        .height(Length::Fixed(icon_size))
-                        .center_x(Length::Fill)
-                        .center_y(Length::Fill)
-                        .style(move |_t| container::Style {
-                            background: Some(iced::Background::Color(fallback_bg)),
-                            border: iced::Border { color: fallback_border, width: 1.0, radius: 4.0.into() },
-                            ..Default::default()
-                        })
-                        .into()
-                }
-            } else {
-                let initial = item.title.chars().next().or_else(|| item.id.chars().next()).unwrap_or('?').to_uppercase().to_string();
-                container(text(initial).size(icon_size * 0.6).color(fallback_fg).bold())
-                    .width(Length::Fixed(icon_size))
-                    .height(Length::Fixed(icon_size))
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill)
-                    .style(move |_t| container::Style {
-                        background: Some(iced::Background::Color(fallback_bg)),
-                        border: iced::Border { color: fallback_border, width: 1.0, radius: 4.0.into() },
-                        ..Default::default()
-                    })
-                    .into()
-            }
-        } else {
-            let initial = item.title.chars().next().or_else(|| item.id.chars().next()).unwrap_or('?').to_uppercase().to_string();
-            container(text(initial).size(icon_size * 0.6).color(fallback_fg).bold())
-                .width(Length::Fixed(icon_size))
-                .height(Length::Fixed(icon_size))
-                .center_x(Length::Fill)
-                .center_y(Length::Fill)
-                .style(move |_t| container::Style {
-                    background: Some(iced::Background::Color(fallback_bg)),
-                    border: iced::Border { color: fallback_border, width: 1.0, radius: 4.0.into() },
-                    ..Default::default()
                 })
-                .into()
+                .unwrap_or_else(|| mk_fallback(item)),
+            _ => mk_fallback(item),
         };
 
         let activate_item = item.clone();

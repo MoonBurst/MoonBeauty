@@ -5,7 +5,7 @@ impl App {
         &'a self,
         podman: &'a PodmanStatus,
         borg: &'a BorgStatus,
-        custom_items: &'a Vec<crate::bar::unified::UnifiedItemStatus>,
+        custom_items: &'a Vec<crate::libraries::backend::unified::checks::UnifiedItemStatus>,
         mut col: iced::widget::Column<'a, Message>,
         y_ref: &mut f32,
         t: &ShellTheme,
