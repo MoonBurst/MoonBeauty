@@ -173,27 +173,13 @@ impl MoonBeautyShellApp {
 
         let rng_sub = if matches!(self.active_overlay, Some(OverlayTarget::Rng)) {
             iced::event::listen_with(|event, _status, _window| {
-                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event
+                let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                    key, modifiers, ..
+                }) = event
                 else {
                     return None;
                 };
-                use iced::keyboard::{key::Named, Key};
-                match key {
-                    Key::Named(Named::Enter) => Some(Message::Rng(RngMessage::ExecuteRoll)),
-                    Key::Named(Named::ArrowLeft) | Key::Named(Named::Tab)
-                        if !iced::keyboard::Modifiers::default().shift() =>
-                    {
-                        Some(Message::Rng(RngMessage::CycleFieldPrev))
-                    }
-                    Key::Named(Named::ArrowRight) | Key::Named(Named::Tab) => {
-                        Some(Message::Rng(RngMessage::CycleFieldNext))
-                    }
-                    Key::Named(Named::ArrowUp) => Some(Message::Rng(RngMessage::AdjustField(true))),
-                    Key::Named(Named::ArrowDown) => {
-                        Some(Message::Rng(RngMessage::AdjustField(false)))
-                    }
-                    _ => None,
-                }
+                moonbeauty::overlays::rng::resolve_rng_key(&key, modifiers).map(Message::Rng)
             })
         } else {
             iced::Subscription::none()

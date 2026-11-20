@@ -197,7 +197,12 @@ impl RngOverlay {
             }
             RngMessage::SetStrength(n) => self.strength = n.clamp(-100, 100),
             RngMessage::SetFlatMod(n) => self.flat_mod = n.clamp(-100, 100),
-            RngMessage::SetKeepMode(m) => self.keep_mode = m,
+            RngMessage::SetKeepMode(m) => {
+                self.keep_mode = m;
+                if m == KeepMode::All && self.active_field >= 3 {
+                    self.active_field = 2;
+                }
+            }
             RngMessage::SetKeepN(n) => self.keep_n = n.clamp(1, self.dice_count.max(1)),
             RngMessage::SelectSides(s) => self.selected_sides = s,
             RngMessage::ExecuteRoll => self.roll(),
@@ -664,5 +669,105 @@ impl RngOverlay {
             .center_y(Length::Fill)
             .style(|_t| iced::widget::container::Style::default())
             .into()
+    }
+}
+
+pub fn resolve_rng_key(
+    key: &iced::keyboard::Key,
+    modifiers: iced::keyboard::Modifiers,
+) -> Option<RngMessage> {
+    use iced::keyboard::{key::Named, Key};
+    match key {
+        Key::Named(Named::Enter) => Some(RngMessage::ExecuteRoll),
+        Key::Named(Named::ArrowLeft) => Some(RngMessage::CycleFieldPrev),
+        Key::Named(Named::ArrowRight) => Some(RngMessage::CycleFieldNext),
+        Key::Named(Named::Tab) if modifiers.shift() => Some(RngMessage::CycleFieldPrev),
+        Key::Named(Named::Tab) => Some(RngMessage::CycleFieldNext),
+        Key::Named(Named::ArrowUp) => Some(RngMessage::AdjustField(true)),
+        Key::Named(Named::ArrowDown) => Some(RngMessage::AdjustField(false)),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_rng_key, KeepMode, RngMessage, RngOverlay};
+    use iced::keyboard::{key::Named, Key, Modifiers};
+
+    #[test]
+    fn tab_advances_forward_and_shift_tab_goes_backward() {
+        assert!(matches!(
+            resolve_rng_key(&Key::Named(Named::Tab), Modifiers::default()),
+            Some(RngMessage::CycleFieldNext)
+        ));
+        assert!(matches!(
+            resolve_rng_key(&Key::Named(Named::Tab), Modifiers::SHIFT),
+            Some(RngMessage::CycleFieldPrev)
+        ));
+        assert!(matches!(
+            resolve_rng_key(&Key::Named(Named::ArrowLeft), Modifiers::default()),
+            Some(RngMessage::CycleFieldPrev)
+        ));
+        assert!(matches!(
+            resolve_rng_key(&Key::Named(Named::ArrowRight), Modifiers::default()),
+            Some(RngMessage::CycleFieldNext)
+        ));
+        assert!(matches!(
+            resolve_rng_key(&Key::Named(Named::ArrowUp), Modifiers::default()),
+            Some(RngMessage::AdjustField(true))
+        ));
+        assert!(matches!(
+            resolve_rng_key(&Key::Named(Named::ArrowDown), Modifiers::default()),
+            Some(RngMessage::AdjustField(false))
+        ));
+        assert!(matches!(
+            resolve_rng_key(&Key::Named(Named::Enter), Modifiers::default()),
+            Some(RngMessage::ExecuteRoll)
+        ));
+    }
+
+    #[test]
+    fn switching_to_keep_all_clamps_active_field() {
+        let mut rng = RngOverlay::new();
+        rng.update(RngMessage::SetKeepMode(KeepMode::Highest));
+        rng.active_field = 3;
+        rng.update(RngMessage::SetKeepMode(KeepMode::All));
+        assert_eq!(rng.active_field, 2);
+    }
+
+    #[test]
+    fn cycle_fields_wraps_for_all_and_keep_modes() {
+        let mut rng = RngOverlay::new();
+        rng.update(RngMessage::CycleFieldPrev);
+        assert_eq!(rng.active_field, 2);
+        rng.update(RngMessage::CycleFieldNext);
+        assert_eq!(rng.active_field, 0);
+
+        rng.update(RngMessage::SetKeepMode(KeepMode::Highest));
+        rng.update(RngMessage::CycleFieldPrev);
+        assert_eq!(rng.active_field, 3);
+        rng.update(RngMessage::CycleFieldNext);
+        assert_eq!(rng.active_field, 0);
+    }
+
+    #[test]
+    fn advantage_roll_keeps_highest_n_plus_flat_mod() {
+        let mut rng = RngOverlay::new();
+        rng.update(RngMessage::SelectSides(20));
+        rng.update(RngMessage::SetDiceCount(4));
+        rng.update(RngMessage::SetKeepMode(KeepMode::Highest));
+        rng.update(RngMessage::SetKeepN(2));
+        rng.update(RngMessage::SetFlatMod(3));
+        rng.update(RngMessage::ExecuteRoll);
+
+        assert_eq!(rng.last_rolls.len(), 4);
+        let kept: Vec<i32> = rng
+            .last_rolls
+            .iter()
+            .filter(|(_, k)| *k)
+            .map(|(v, _)| v.parse::<i32>().unwrap())
+            .collect();
+        assert_eq!(kept.len(), 2);
+        assert_eq!(rng.last_total, kept.iter().sum::<i32>() + 3);
     }
 }
