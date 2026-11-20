@@ -10,29 +10,25 @@ use crate::libraries::ipc::IpcCommand;
 use crate::libraries::ipc::send_ipc_sync;
 
 pub fn run(args: &[String]) {
-    // Notification CLI actions
-    if args.iter().any(|a| a == "--activate-latest-notif") {
-        let cmd_path =
-            crate::libraries::process::mbs_runtime_dir().join("moonbeauty-notif-cmd");
-        match crate::libraries::process::private_write_file(&cmd_path, b"activate-latest") {
-            Ok(_) => std::process::exit(0),
-            Err(e) => {
-                eprintln!("[activate-latest] write {:?}: {e}", cmd_path);
-                std::process::exit(1);
-            }
-        }
-    }
-    if args.iter().any(|a| a == "--dismiss-notif") {
+    fn write_notif_cmd(cmd: &[u8], tag: &str) -> ! {
         let cmd_path =
             crate::libraries::process::mbs_runtime_dir().join("moonbeauty-notif-cmd");
         let tmp_path = cmd_path.with_extension("tmp");
-        if crate::libraries::process::private_write_file(&tmp_path, b"dismiss").is_ok() {
-            let _ = std::fs::rename(&tmp_path, &cmd_path);
-            std::process::exit(0);
-        } else {
-            eprintln!("[dismiss-notif] failed to write to {:?}", tmp_path);
+        if let Err(e) = crate::libraries::process::private_write_file(&tmp_path, cmd)
+            .and_then(|_| std::fs::rename(&tmp_path, &cmd_path))
+        {
+            eprintln!("[{tag}] failed to write {:?}: {e}", cmd_path);
             std::process::exit(1);
         }
+        std::process::exit(0);
+    }
+
+    // Notification CLI actions
+    if args.iter().any(|a| a == "--activate-latest-notif") {
+        write_notif_cmd(b"activate-latest", "activate-latest");
+    }
+    if args.iter().any(|a| a == "--dismiss-notif") {
+        write_notif_cmd(b"dismiss", "dismiss-notif");
     }
     if args.iter().any(|a| a == "--notif-history") {
         match send_ipc_sync(&IpcCommand::ToggleHistory) {

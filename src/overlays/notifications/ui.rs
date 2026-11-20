@@ -637,6 +637,9 @@ impl NotificationOverlay {
     }
 
     fn save_history_immediate(&self) {
+        if cfg!(test) {
+            return;
+        }
         let path = Self::history_path();
         if let Ok(data) = serde_json::to_string_pretty(&self.history) {
             let tmp = path.with_extension("tmp");
@@ -647,6 +650,18 @@ impl NotificationOverlay {
                 let _ = fs::rename(tmp, path);
             }
         }
+    }
+
+    pub fn push_to_history(&mut self, item: NotificationToast) {
+        self.history.insert(0, item);
+        if self.history.len() > 80 {
+            self.history.truncate(80);
+        }
+        self.mark_history_dirty();
+    }
+
+    pub fn latest_active_toast(&self) -> Option<NotificationToast> {
+        self.active_toasts.last().cloned()
     }
 
     pub fn push_notification(
@@ -800,11 +815,7 @@ impl NotificationOverlay {
                 "[dnd] holding notification back while paused: {:?}",
                 summary
             );
-            self.history.insert(0, item.clone());
-            if self.history.len() > 80 {
-                self.history.truncate(500);
-            }
-            self.mark_history_dirty();
+            self.push_to_history(item.clone());
             let mut held = load_held_notifs();
             held.push(item);
             save_held_notifs(&held);
@@ -830,11 +841,7 @@ impl NotificationOverlay {
             );
         }
 
-        self.history.insert(0, item);
-        if self.history.len() > 80 {
-            self.history.truncate(500);
-        }
-        self.mark_history_dirty();
+        self.push_to_history(item);
     }
 
     pub fn play_sound(path: String, volume: u32) {
@@ -2291,4 +2298,58 @@ fn read_active_count_uncached() -> usize {
         .ok()
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NotificationOverlay, NotificationToast};
+    use std::time::Instant;
+
+    fn toast(id: u32) -> NotificationToast {
+        NotificationToast {
+            id,
+            app_name: "TestApp".into(),
+            summary: format!("Summary {}", id),
+            body: "Body".into(),
+            timestamp: "12:00 PM".into(),
+            is_read: false,
+            is_urgent: false,
+            border_color: "#f7f700".into(),
+            text_color: "#f7f700".into(),
+            avatar_path: None,
+            desktop_entry: None,
+            actions: Vec::new(),
+            created_at: Instant::now(),
+            exit_started_at: None,
+            hold_reset_at: None,
+            slot_shift_start: None,
+            tts_summary: String::new(),
+            tts_body: String::new(),
+            tts_readout: None,
+            tts_command: None,
+            tts_pending: false,
+            tts_spoken: false,
+        }
+    }
+
+    #[test]
+    fn push_to_history_truncates_at_80() {
+        let mut ov = NotificationOverlay::empty();
+        for id in 1..=85 {
+            ov.push_to_history(toast(id));
+        }
+        assert_eq!(ov.history.len(), 80);
+        assert_eq!(ov.history.first().unwrap().id, 85);
+        assert_eq!(ov.history.last().unwrap().id, 6);
+        assert!(ov.history_dirty);
+    }
+
+    #[test]
+    fn latest_active_toast_returns_newest_not_oldest() {
+        let mut ov = NotificationOverlay::empty();
+        ov.active_toasts.push(toast(10));
+        ov.active_toasts.push(toast(20));
+        ov.active_toasts.push(toast(30));
+        assert_eq!(ov.latest_active_toast().unwrap().id, 30);
+    }
 }

@@ -14,6 +14,34 @@ use super::*;
 use crate::app::keys::{is_app_focused, focus_notification_app, notification_candidates};
 
 impl MoonBeautyShellApp {
+    fn activate_toast(
+        &mut self,
+        t: moonbeauty::overlays::notifications::NotificationToast,
+        tag: &'static str,
+    ) {
+        let app = t.app_name.clone();
+        let entry = t.desktop_entry.clone();
+        let nid = t.id;
+        self.notifs.update(NotifMessage::DismissToast(nid));
+        std::thread::spawn(move || {
+            moonbeauty::overlays::notifications::emit_action_invoked(nid, "default");
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            let matches = notification_candidates(&app, entry.as_deref());
+            if !is_app_focused(&matches) {
+                let ok = focus_notification_app(&app, entry.as_deref());
+                moonbeauty::dbg_log!(
+                    "[{}] fallback app={:?} entry={:?} ok={}",
+                    tag,
+                    app,
+                    entry,
+                    ok
+                );
+            } else {
+                moonbeauty::dbg_log!("[{}] client self-focused app={:?}", tag, app);
+            }
+        });
+    }
+
     pub(crate) fn handle_notif(&mut self, msg: NotifMessage) -> Command<Message> {
         match msg {
             NotifMessage::DismissDrawer => {
@@ -60,29 +88,7 @@ impl MoonBeautyShellApp {
                     .find(|t| t.id == id)
                     .cloned()
                 {
-                    let app = t.app_name.clone();
-                    let entry = t.desktop_entry.clone();
-                    let nid = t.id;
-                    self.notifs.update(NotifMessage::DismissToast(id));
-                    std::thread::spawn(move || {
-                        moonbeauty::overlays::notifications::emit_action_invoked(nid, "default");
-                        std::thread::sleep(std::time::Duration::from_millis(200));
-                        let matches = notification_candidates(&app, entry.as_deref());
-                        if !is_app_focused(&matches) {
-                            let ok = focus_notification_app(&app, entry.as_deref());
-                            moonbeauty::dbg_log!(
-                                "[activate-toast] fallback app={:?} entry={:?} ok={}",
-                                app,
-                                entry,
-                                ok
-                            );
-                        } else {
-                            moonbeauty::dbg_log!(
-                                "[activate-toast] client self-focused app={:?}",
-                                app
-                            );
-                        }
-                    });
+                    self.activate_toast(t, "activate-toast");
                 }
             }
             _ => self.notifs.update(msg),
@@ -148,32 +154,8 @@ impl MoonBeautyShellApp {
                         }
                     }
                     "activate-latest" => {
-                        if let Some(t) = self.notifs.active_toasts.first().cloned() {
-                            let app = t.app_name.clone();
-                            let entry = t.desktop_entry.clone();
-                            let nid = t.id;
-                            self.notifs.update(NotifMessage::DismissToast(t.id));
-                            std::thread::spawn(move || {
-                                moonbeauty::overlays::notifications::emit_action_invoked(
-                                    nid, "default",
-                                );
-                                std::thread::sleep(std::time::Duration::from_millis(200));
-                                let matches = notification_candidates(&app, entry.as_deref());
-                                if !is_app_focused(&matches) {
-                                    let ok = focus_notification_app(&app, entry.as_deref());
-                                    moonbeauty::dbg_log!(
-                                        "[activate-latest] fallback app={:?} entry={:?} ok={}",
-                                        app,
-                                        entry,
-                                        ok
-                                    );
-                                } else {
-                                    moonbeauty::dbg_log!(
-                                        "[activate-latest] client self-focused app={:?}",
-                                        app
-                                    );
-                                }
-                            });
+                        if let Some(t) = self.notifs.latest_active_toast() {
+                            self.activate_toast(t, "activate-latest");
                         } else {
                             eprintln!("[activate-latest] no active toast");
                         }
