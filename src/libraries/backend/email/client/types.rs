@@ -17,4 +17,5 @@ pub struct ParsedEmail {
     pub text: String,
     pub images: Vec<std::path::PathBuf>,
     pub attachments: Vec<(String, Vec<u8>)>,
+    pub links: Vec<(String, String)>,
 }

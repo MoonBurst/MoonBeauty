@@ -135,6 +135,9 @@ pub fn handle_email_keypress(
         if modifiers.control() && c.to_lowercase() == "o" {
             return Some(Message::Email(EmailMessage::AddAttachment));
         }
+        if modifiers.control() && c.to_lowercase() == "f" {
+            return Some(Message::Email(EmailMessage::OpenSearch));
+        }
     }
     if key == Key::Named(Named::Tab) {
         return Some(Message::ComposeTabPressed(modifiers.shift()));

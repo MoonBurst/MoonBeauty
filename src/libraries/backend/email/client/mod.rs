@@ -493,34 +493,235 @@ pub fn save_draft_sync(to: &str, subject: &str, body: &str) -> Result<(), String
     Ok(())
 }
 
-pub fn delete_draft(id: &str) -> Result<(), String> {
-    let num = id.strip_prefix("draft_").ok_or_else(|| "invalid draft id".to_string())?.parse::<usize>().map_err(|_| "invalid draft number".to_string())?;
-    let path = drafts_path();
-    let Ok(content) = std::fs::read_to_string(&path) else {
-        return Err("could not read drafts file".into());
+fn split_draft_chunks(content: &str) -> Vec<String> {
+    content
+        .split("\n---\n")
+        .map(|s| s.strip_suffix("\n---").unwrap_or(s).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn parse_draft_chunk(chunk: &str) -> (String, String, String) {
+    let mut to = String::new();
+    let mut subject = String::new();
+    let mut body_lines = Vec::new();
+    let mut in_body = false;
+    for line in chunk.lines() {
+        if !in_body && line.starts_with("To: ") {
+            to = line[4..].to_string();
+        } else if !in_body && line.starts_with("Subject: ") {
+            subject = line[9..].to_string();
+            in_body = true;
+        } else if in_body {
+            body_lines.push(line);
+        }
+    }
+    (to, subject, body_lines.join("\n").trim().to_string())
+}
+
+fn load_drafts_from_str(content: &str) -> Vec<NativeEnvelope> {
+    let mut envs: Vec<NativeEnvelope> = split_draft_chunks(content)
+        .into_iter()
+        .enumerate()
+        .map(|(idx, chunk)| {
+            let (to, subject, _) = parse_draft_chunk(&chunk);
+            NativeEnvelope {
+                id: format!("draft_{}", idx),
+                subject,
+                sender: to.clone(),
+                sender_email: to,
+                is_starred: false,
+                is_read: true,
+            }
+        })
+        .collect();
+    envs.reverse();
+    envs
+}
+
+fn decode_basic_html_entities(s: &str) -> String {
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&#x27;", "'")
+        .replace("&apos;", "'")
+        .replace("&nbsp;", " ")
+}
+
+fn strip_html_tags(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    decode_basic_html_entities(&out)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn is_safe_http_url(url: &str) -> bool {
+    let u = url.trim();
+    if u.len() > 2048 || u.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return false;
+    }
+    let lower = u.to_ascii_lowercase();
+    lower.starts_with("https://") || lower.starts_with("http://")
+}
+
+pub fn extract_links(html: Option<&str>, text: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut seen = std::collections::HashSet::<String>::new();
+    const MAX_LINKS: usize = 50;
+
+    let mut push_link = |label: String, raw_url: String| {
+        if out.len() >= MAX_LINKS {
+            return;
+        }
+        let url = decode_basic_html_entities(raw_url.trim());
+        if !is_safe_http_url(&url) {
+            return;
+        }
+        if seen.insert(url.clone()) {
+            let clean_label = if label.is_empty() || label == url {
+                String::new()
+            } else {
+                label.chars().take(80).collect()
+            };
+            out.push((clean_label, url));
+        }
     };
 
-    // Split into chunks by the exact delimiter
-    let mut chunks: Vec<String> = content.split("\n---\n")
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| s.trim().to_string())
-        .collect();
+    if let Some(h) = html {
+        let lower = h.to_ascii_lowercase();
+        let mut pos = 0usize;
+        while let Some(rel_start) = lower[pos..].find("<a") {
+            let tag_start = pos + rel_start;
+            let after_a = tag_start + 2;
+            let next_ch = lower[after_a..].chars().next();
+            if !matches!(next_ch, Some(c) if c.is_whitespace() || c == '>') {
+                pos = after_a;
+                continue;
+            }
+            let Some(rel_end) = lower[after_a..].find('>') else {
+                break;
+            };
+            let tag_end = after_a + rel_end;
+            let attrs = &h[after_a..tag_end];
+            let attrs_lower = &lower[after_a..tag_end];
 
-    // Since load_drafts reverses the list, draft_0 is the last chunk in the file
-    if num >= chunks.len() {
-        return Err(format!("draft index {} out of bounds (len: {})", num, chunks.len()));
+            let mut href_val: Option<String> = None;
+            let mut search_at = 0usize;
+            while let Some(h_rel) = attrs_lower[search_at..].find("href") {
+                let h_idx = search_at + h_rel;
+                let prev_ok = h_idx == 0
+                    || attrs_lower[..h_idx]
+                        .chars()
+                        .next_back()
+                        .is_some_and(|c| c.is_whitespace());
+                let rest = &attrs[h_idx + 4..];
+                let rest_trimmed = rest.trim_start();
+                if prev_ok && rest_trimmed.starts_with('=') {
+                    let after_eq = rest_trimmed[1..].trim_start();
+                    if let Some(quoted) = after_eq.strip_prefix('"') {
+                        if let Some(q_end) = quoted.find('"') {
+                            href_val = Some(quoted[..q_end].to_string());
+                        }
+                    } else if let Some(quoted) = after_eq.strip_prefix('\'') {
+                        if let Some(q_end) = quoted.find('\'') {
+                            href_val = Some(quoted[..q_end].to_string());
+                        }
+                    } else {
+                        let end = after_eq
+                            .find(|c: char| c.is_whitespace() || c == '>')
+                            .unwrap_or(after_eq.len());
+                        href_val = Some(after_eq[..end].to_string());
+                    }
+                    break;
+                }
+                search_at = h_idx + 4;
+            }
+
+            let close_start = lower[tag_end + 1..]
+                .find("</a>")
+                .map(|r| tag_end + 1 + r);
+            if let Some(url) = href_val {
+                let label = if let Some(cs) = close_start {
+                    strip_html_tags(&h[tag_end + 1..cs])
+                } else {
+                    String::new()
+                };
+                push_link(label, url);
+            }
+            pos = close_start.map(|cs| cs + 4).unwrap_or(tag_end + 1);
+        }
     }
-    let idx = chunks.len() - 1 - num;
-    chunks.remove(idx);
 
+    for token in text.split_whitespace() {
+        let trimmed = token
+            .trim_start_matches(['<', '(', '[', '"', '\''])
+            .trim_end_matches(['>', ')', ']', '"', '\'', '.', ',', ';']);
+        let low = trimmed.to_ascii_lowercase();
+        if low.starts_with("https://") || low.starts_with("http://") {
+            push_link(String::new(), trimmed.to_string());
+        }
+    }
+
+    out
+}
+
+fn read_draft_from_str(content: &str, id: &str) -> Option<ParsedEmail> {
+    let num = id.strip_prefix("draft_")?.parse::<usize>().ok()?;
+    let chunks = split_draft_chunks(content);
+    let chunk = chunks.get(num)?;
+    let (_, _, text) = parse_draft_chunk(chunk);
+    let links = extract_links(None, &text);
+    Some(ParsedEmail {
+        text,
+        images: Vec::new(),
+        attachments: Vec::new(),
+        links,
+    })
+}
+
+fn delete_draft_from_str(content: &str, id: &str) -> Result<String, String> {
+    let num = id
+        .strip_prefix("draft_")
+        .ok_or_else(|| "invalid draft id".to_string())?
+        .parse::<usize>()
+        .map_err(|_| "invalid draft number".to_string())?;
+    let mut chunks = split_draft_chunks(content);
+    if num >= chunks.len() {
+        return Err(format!(
+            "draft index {} out of bounds (len: {})",
+            num,
+            chunks.len()
+        ));
+    }
+    chunks.remove(num);
     let mut new_content = String::new();
     for chunk in chunks {
         new_content.push_str(&chunk);
         new_content.push_str("\n---\n");
     }
-    
-    std::fs::write(&path, new_content).map_err(|e| e.to_string())?;
-    println!("[draft] successfully deleted draft_{}", num);
+    Ok(new_content)
+}
+
+pub fn delete_draft(id: &str) -> Result<(), String> {
+    let path = drafts_path();
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return Err("could not read drafts file".into());
+    };
+    let new_content = delete_draft_from_str(&content, id)?;
+    secure_write(&path, new_content.as_bytes()).map_err(|e| e.to_string())?;
+    println!("[draft] successfully deleted {}", id);
     Ok(())
 }
 
@@ -529,61 +730,13 @@ pub fn load_drafts() -> Vec<NativeEnvelope> {
     let Ok(content) = std::fs::read_to_string(&path) else {
         return Vec::new();
     };
-    let mut envs = Vec::new();
-    let mut current_id = 0;
-
-    for chunk in content.split("\n---\n") {
-        if chunk.trim().is_empty() { continue; }
-        let mut to = String::new();
-        let mut subject = String::new();
-        for line in chunk.lines() {
-            if line.starts_with("To: ") { to = line[4..].to_string(); }
-            else if line.starts_with("Subject: ") { subject = line[9..].to_string(); }
-        }
-        envs.push(NativeEnvelope {
-            id: format!("draft_{}", current_id),
-            subject: subject.clone(),
-            sender: to.clone(),
-            sender_email: to.clone(),
-            is_starred: false,
-            is_read: true,
-        });
-        current_id += 1;
-    }
-    envs.reverse();
-    envs
+    load_drafts_from_str(&content)
 }
 
-fn read_draft(id: &str) -> Option<ParsedEmail> {
-    let num = id.strip_prefix("draft_")?.parse::<usize>().ok()?;
+pub fn read_draft(id: &str) -> Option<ParsedEmail> {
     let path = drafts_path();
     let content = std::fs::read_to_string(&path).ok()?;
-
-    let mut bodies = Vec::new();
-    let mut current_body = String::new();
-    let mut in_body = false;
-
-    for line in content.lines() {
-        if line.starts_with("To: ") {
-            in_body = false;
-            current_body.clear();
-        } else if line.starts_with("Subject: ") {
-            in_body = true;
-        } else if line.trim() == "---" {
-            bodies.push(current_body.trim().to_string());
-            in_body = false;
-        } else if in_body {
-            current_body.push_str(line);
-            current_body.push('\n');
-        }
-    }
-    if in_body {
-        bodies.push(current_body.trim().to_string());
-    }
-
-    bodies.reverse();
-    let text = bodies.get(num)?.clone();
-    Some(ParsedEmail { text, images: Vec::new(), attachments: Vec::new() })
+    read_draft_from_str(&content, id)
 }
 
 pub async fn fetch_envelopes(folder: &str) -> Result<Vec<NativeEnvelope>, String> {
@@ -915,6 +1068,7 @@ pub async fn read_message(id: &str, folder: &str) -> ParsedEmail {
                     ),
                     images: Vec::new(),
                     attachments: Vec::new(),
+                    links: Vec::new(),
                 };
             }
             std::fs::read(&cache_file).unwrap_or_default()
@@ -930,6 +1084,7 @@ pub async fn read_message(id: &str, folder: &str) -> ParsedEmail {
                             ),
                             images: Vec::new(),
                             attachments: Vec::new(),
+                            links: Vec::new(),
                         };
                     }
                     let _ = secure_write(&cache_file, &b);
@@ -940,6 +1095,7 @@ pub async fn read_message(id: &str, folder: &str) -> ParsedEmail {
                         text: format!("Failed to fetch message: {}", e),
                         images: Vec::new(),
                         attachments: Vec::new(),
+                        links: Vec::new(),
                     }
                 }
             }
@@ -949,17 +1105,18 @@ pub async fn read_message(id: &str, folder: &str) -> ParsedEmail {
         text: String::new(),
         images: Vec::new(),
         attachments: Vec::new(),
+        links: Vec::new(),
     };
 
     if let Some(parsed) = mail_parser::MessageParser::default().parse(&bytes) {
-        // 1. Extract Text
+        // 1. Extract Text & HTML (always scan HTML for links even when plain text exists)
+        let html_body = parsed.body_html(0).map(|h| h.to_string());
         if let Some(t) = parsed.body_text(0) {
             parsed_email.text = t.to_string();
         }
 
         if parsed_email.text.trim().is_empty() {
-            if let Some(h) = parsed.body_html(0) {
-                let h_str = h.to_string();
+            if let Some(ref h_str) = html_body {
                 // Use a very wide wrap so html2text does not hard-wrap at 80.
                 // The `text` widget handles actual pixel-width wrapping at
                 // render time; doing both produces mid-word breaks in URLs.
@@ -1077,6 +1234,7 @@ pub async fn read_message(id: &str, folder: &str) -> ParsedEmail {
             parsed_email.text.truncate(cut);
             parsed_email.text.push_str("\n\n[... body truncated at 1 MB ...]");
         }
+        parsed_email.links = extract_links(html_body.as_deref(), &parsed_email.text);
         return parsed_email;
     }
     parsed_email.text = "Failed to parse message.".into();
@@ -1505,5 +1663,58 @@ mod cache_dir_tests {
             root.join("[Gmail]/Starred")
         );
         assert_eq!(get_cache_dir_with_root(root, "INBOX"), root.join("INBOX"));
+    }
+}
+
+#[cfg(test)]
+mod draft_tests {
+    use super::{delete_draft_from_str, load_drafts_from_str, read_draft_from_str};
+
+    #[test]
+    fn drafts_id_matches_body_and_delete_newest_first() {
+        let raw = concat!(
+            "To: old@example.com\nSubject: Older\nBody old\n---\n",
+            "To: new@example.com\nSubject: Newer\n----\nTo: quoted@example.com\nSubject: Quoted\nBody new\n---\n",
+        );
+        let envs = load_drafts_from_str(raw);
+        assert_eq!(envs.len(), 2);
+        assert_eq!(envs[0].id, "draft_1");
+        assert_eq!(envs[0].subject, "Newer");
+        assert_eq!(envs[1].id, "draft_0");
+        assert_eq!(envs[1].subject, "Older");
+
+        let newer = read_draft_from_str(raw, &envs[0].id).unwrap();
+        assert_eq!(newer.text, "----\nTo: quoted@example.com\nSubject: Quoted\nBody new");
+
+        let older = read_draft_from_str(raw, &envs[1].id).unwrap();
+        assert_eq!(older.text, "Body old");
+
+        let after_delete = delete_draft_from_str(raw, &envs[0].id).unwrap();
+        let remaining = load_drafts_from_str(&after_delete);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].subject, "Older");
+        assert_eq!(
+            read_draft_from_str(&after_delete, &remaining[0].id).unwrap().text,
+            "Body old"
+        );
+    }
+
+    #[test]
+    fn extract_links_finds_html_and_text_links_and_blocks_unsafe_schemes() {
+        let html = r#"
+            <p>Confirm below:</p>
+            <a href="https://example.com/verify?a=1&amp;b=2">Verify <b>Email</b></a>
+            <a href="javascript:alert(1)">Bad</a>
+            <a href="file:///etc/passwd">Local</a>
+        "#;
+        let text = "Confirm below. Also visit https://docs.example.org/help.";
+        let links = super::extract_links(Some(html), text);
+        assert_eq!(
+            links,
+            vec![
+                ("Verify Email".to_string(), "https://example.com/verify?a=1&b=2".to_string()),
+                ("".to_string(), "https://docs.example.org/help".to_string()),
+            ]
+        );
     }
 }

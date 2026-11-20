@@ -9,27 +9,48 @@ use iced::Task as Command;
 use moonbeauty::overlays::email::EmailMessage;
 
 impl MoonBeautyShellApp {
+    fn email_post_remove_commands(&mut self, next_id: Option<String>) -> Vec<Command<Message>> {
+        let mut cmds = Vec::new();
+        if let Some(id) = next_id {
+            cmds.push(self.handle_email(EmailMessage::SelectMail(id)));
+        }
+        let vis_pos = self
+            .email
+            .visible_envelopes()
+            .iter()
+            .position(|(i, _)| *i == self.email.selected_index)
+            .unwrap_or(0);
+        let scroll_y = (vis_pos as f32 * 64.0 - 180.0).max(0.0);
+        cmds.push(iced::widget::operation::scroll_to(
+            iced::widget::Id::new("email_mail_list"),
+            iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: scroll_y },
+        ));
+        cmds
+    }
+
     pub(crate) fn handle_email(&mut self, msg: EmailMessage) -> Command<Message> {
         match msg {
             EmailMessage::Dismiss => {
+                if self.email.is_searching {
+                    return self.handle_email(EmailMessage::CloseSearch);
+                }
                 if self.email.fullscreen_read {
                     self.email.fullscreen_read = false;
                     return Command::none();
                 }
                 if self.email.is_composing {
-                    let to = self.email.compose_to.clone();
-                    let sub = self.email.compose_subject.clone();
-                    let body = self.email.compose_body.text();
                     self.email.update(EmailMessage::CancelCompose);
-                    return Command::perform(
-                        async move {
-                            moonbeauty::libraries::backend::email::client::save_draft(
-                                &to, &sub, &body,
-                            )
-                            .await
-                        },
-                        |_| Message::Email(EmailMessage::DraftSaved),
-                    );
+                    if self.email.active_folder == "Drafts" {
+                        if let Some(id) = self
+                            .email
+                            .envelopes
+                            .get(self.email.selected_index)
+                            .map(|m| m.id.clone())
+                        {
+                            return self.handle_email(EmailMessage::SelectMail(id));
+                        }
+                    }
+                    return Command::none();
                 } else {
                     if self.is_standalone {
                         std::process::exit(0);
@@ -94,6 +115,74 @@ impl MoonBeautyShellApp {
                 let folder = self.email.folders[next_idx].clone();
                 return self.handle_email(EmailMessage::SelectFolder(folder));
             }
+            EmailMessage::OpenSearch => {
+                if self.email.is_composing || self.email.is_logging_in || self.email.is_adding_folder {
+                    return Command::none();
+                }
+                self.email.update(EmailMessage::OpenSearch);
+                return iced::widget::operation::focus(moonbeauty::overlays::email::EMAIL_SEARCH_ID)
+                    .map(Message::Email);
+            }
+            EmailMessage::SearchChanged(_) => {
+                self.email.update(msg);
+                let vis_indices: Vec<usize> = self
+                    .email
+                    .visible_envelopes()
+                    .into_iter()
+                    .map(|(i, _)| i)
+                    .collect();
+                let mut cmds = Vec::new();
+                if let Some(&first_idx) = vis_indices.first() {
+                    if !vis_indices.contains(&self.email.selected_index) {
+                        self.email.selected_index = first_idx;
+                        if let Some(id) = self.email.envelopes.get(first_idx).map(|m| m.id.clone()) {
+                            cmds.push(self.handle_email(EmailMessage::SelectMail(id)));
+                        }
+                    }
+                    let vis_pos = vis_indices
+                        .iter()
+                        .position(|&i| i == self.email.selected_index)
+                        .unwrap_or(0);
+                    let scroll_y = (vis_pos as f32 * 64.0 - 180.0).max(0.0);
+                    cmds.push(iced::widget::operation::scroll_to(
+                        iced::widget::Id::new("email_mail_list"),
+                        iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: scroll_y },
+                    ));
+                } else {
+                    self.email.active_mail_id = None;
+                    self.email.parsed_email = None;
+                }
+                return Command::batch(cmds);
+            }
+            EmailMessage::CloseSearch => {
+                self.email.update(EmailMessage::CloseSearch);
+                let mut cmds = Vec::new();
+                if self.email.active_mail_id.is_none() {
+                    if let Some(id) = self
+                        .email
+                        .envelopes
+                        .get(self.email.selected_index)
+                        .map(|m| m.id.clone())
+                    {
+                        cmds.push(self.handle_email(EmailMessage::SelectMail(id)));
+                    }
+                }
+                let scroll_y = (self.email.selected_index as f32 * 64.0 - 180.0).max(0.0);
+                cmds.push(iced::widget::operation::scroll_to(
+                    iced::widget::Id::new("email_mail_list"),
+                    iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: scroll_y },
+                ));
+                return Command::batch(cmds);
+            }
+            EmailMessage::OpenLink(url) => {
+                let lower = url.trim().to_ascii_lowercase();
+                if lower.starts_with("https://") || lower.starts_with("http://") {
+                    let _ = moonbeauty::libraries::process::spawn_and_reap(
+                        std::process::Command::new("xdg-open").arg(url.trim()),
+                    );
+                }
+                return Command::none();
+            }
             EmailMessage::SelectMailNext | EmailMessage::SelectMailPrev => {
                 if self.email.is_composing || self.email.is_logging_in || self.email.is_adding_folder {
                     return Command::none();
@@ -108,7 +197,13 @@ impl MoonBeautyShellApp {
                 {
                     cmds.push(self.handle_email(EmailMessage::SelectMail(id)));
                 }
-                let scroll_y = (self.email.selected_index as f32 * 64.0 - 180.0).max(0.0);
+                let vis_pos = self
+                    .email
+                    .visible_envelopes()
+                    .iter()
+                    .position(|(i, _)| *i == self.email.selected_index)
+                    .unwrap_or(0);
+                let scroll_y = (vis_pos as f32 * 64.0 - 180.0).max(0.0);
                 cmds.push(iced::widget::operation::scroll_to(
                     iced::widget::Id::new("email_mail_list"),
                     iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: scroll_y },
@@ -119,15 +214,47 @@ impl MoonBeautyShellApp {
                 if self.email.is_composing || self.email.is_logging_in || self.email.is_adding_folder {
                     return Command::none();
                 }
+                if !self
+                    .email
+                    .visible_envelopes()
+                    .iter()
+                    .any(|(i, _)| *i == self.email.selected_index)
+                {
+                    return Command::none();
+                }
+                if self.email.fullscreen_read {
+                    return self.handle_email(EmailMessage::ReplySelected);
+                }
                 if let Some(mail) = self.email.envelopes.get(self.email.selected_index).cloned() {
+                    if mail.id.starts_with("draft_") || self.email.active_folder == "Drafts" {
+                        return self.handle_email(EmailMessage::EditDraft(mail.id));
+                    }
                     let already_loaded = self.email.active_mail_id.as_deref() == Some(mail.id.as_str())
                         && self.email.parsed_email.is_some();
                     if already_loaded {
-                        self.email.fullscreen_read = !self.email.fullscreen_read;
+                        self.email.fullscreen_read = true;
                     } else {
                         return self.handle_email(EmailMessage::SelectMail(mail.id));
                     }
                 }
+            }
+            EmailMessage::EditDraft(_) => {
+                self.email.update(msg);
+                let target_id = if self.email.compose_to.is_empty() {
+                    moonbeauty::overlays::email::COMPOSE_TO_ID
+                } else {
+                    moonbeauty::overlays::email::COMPOSE_BODY_ID
+                };
+                return iced::widget::operation::focus(target_id).map(Message::Email);
+            }
+            EmailMessage::ReplySelected => {
+                self.email.update(EmailMessage::ReplySelected);
+                let target_id = if self.email.compose_to.is_empty() {
+                    moonbeauty::overlays::email::COMPOSE_TO_ID
+                } else {
+                    moonbeauty::overlays::email::COMPOSE_BODY_ID
+                };
+                return iced::widget::operation::focus(target_id).map(Message::Email);
             }
             EmailMessage::SendMail => {
                 let to = self.email.compose_to.clone();
@@ -172,6 +299,7 @@ impl MoonBeautyShellApp {
                                 text: "✓ Message sent.".into(),
                                 images: Vec::new(),
                                 attachments: Vec::new(),
+                                links: Vec::new(),
                             },
                         )),
                         Err(e) => Message::Email(EmailMessage::MessageLoaded(
@@ -179,6 +307,7 @@ impl MoonBeautyShellApp {
                                 text: format!("✗ Send failed: {}", e),
                                 images: Vec::new(),
                                 attachments: Vec::new(),
+                                links: Vec::new(),
                             },
                         )),
                     },
@@ -244,15 +373,25 @@ impl MoonBeautyShellApp {
                 }
             }
             EmailMessage::ToggleStar => {
+                if !self
+                    .email
+                    .visible_envelopes()
+                    .iter()
+                    .any(|(i, _)| *i == self.email.selected_index)
+                {
+                    return Command::none();
+                }
                 if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
                     let id = mail.id.clone();
                     let folder = self.email.active_folder.clone();
+                    let source = moonbeauty::libraries::backend::email::local_sort::source_folder_for(&id, &folder)
+                        .unwrap_or_else(|| folder.clone());
                     let star = !mail.is_starred;
                     self.email.update(EmailMessage::ToggleStar);
                     return Command::perform(
                         async move {
                             moonbeauty::libraries::backend::email::client::toggle_star(
-                                &id, &folder, star,
+                                &id, &source, star,
                             )
                             .await
                         },
@@ -264,6 +403,17 @@ impl MoonBeautyShellApp {
                 }
             }
             EmailMessage::DeleteSelected => {
+                if self.email.is_composing || self.email.is_logging_in || self.email.is_adding_folder {
+                    return Command::none();
+                }
+                let vis_pos = self
+                    .email
+                    .visible_envelopes()
+                    .iter()
+                    .position(|(i, _)| *i == self.email.selected_index);
+                if vis_pos.is_none() {
+                    return Command::none();
+                }
                 if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
                     if mail.is_starred {
                         self.email.imap_error =
@@ -272,6 +422,8 @@ impl MoonBeautyShellApp {
                         let id = mail.id.clone();
                         let mail_clone = mail.clone();
                         let folder = self.email.active_folder.clone();
+                        let source = moonbeauty::libraries::backend::email::local_sort::source_folder_for(&id, &folder)
+                            .unwrap_or_else(|| folder.clone());
 
                         if folder == "Drafts" {
                             if let Err(e) = moonbeauty::libraries::backend::email::client::delete_draft(&id) {
@@ -279,29 +431,31 @@ impl MoonBeautyShellApp {
                                 return Command::none();
                             }
                             self.email.envelopes = moonbeauty::libraries::backend::email::client::load_drafts();
-                            if self.email.selected_index >= self.email.envelopes.len() && !self.email.envelopes.is_empty() {
-                                self.email.selected_index = self.email.envelopes.len() - 1;
-                            }
-                            self.email.parsed_email = None;
-                            self.email.active_mail_id = None;
-                            return Command::none();
+                            self.email.parsed_cache.clear();
+                            let next_id = self.email.select_after_removal(vis_pos);
+                            let cmds = self.email_post_remove_commands(next_id);
+                            return Command::batch(cmds);
                         }
 
                         self.email.envelopes.remove(self.email.selected_index);
-                        if self.email.selected_index >= self.email.envelopes.len()
-                            && !self.email.envelopes.is_empty()
-                        {
-                            self.email.selected_index = self.email.envelopes.len() - 1;
-                        }
-                        self.email.parsed_email = None;
-                        self.email.active_mail_id = None;
+                        let next_id = self.email.select_after_removal(vis_pos);
+                        let mut cmds = self.email_post_remove_commands(next_id);
 
                         moonbeauty::libraries::backend::email::client::save_index(
                             &folder,
                             &self.email.envelopes,
                         );
+                        if source != folder {
+                            let mut src_envs =
+                                moonbeauty::libraries::backend::email::client::load_index(&source);
+                            src_envs.retain(|e| e.id != id);
+                            moonbeauty::libraries::backend::email::client::save_index(
+                                &source,
+                                &src_envs,
+                            );
+                        }
 
-                        let is_trash = folder == "Trash";
+                        let is_trash = folder == "Trash" || source == "Trash";
 
                         if !is_trash {
                             let mut trash_envs =
@@ -313,16 +467,16 @@ impl MoonBeautyShellApp {
                             );
                         }
 
-                        return Command::perform(
+                        cmds.push(Command::perform(
                             async move {
                                 if is_trash {
                                     moonbeauty::libraries::backend::email::client::delete_message(
-                                        &id, &folder,
+                                        &id, &source,
                                     )
                                     .await
                                 } else {
                                     moonbeauty::libraries::backend::email::client::move_to_trash(
-                                        &id, &folder,
+                                        &id, &source,
                                     )
                                     .await
                                 }
@@ -331,7 +485,8 @@ impl MoonBeautyShellApp {
                                 Ok(_) => Message::Email(EmailMessage::SyncDone),
                                 Err(e) => Message::Email(EmailMessage::Error(e)),
                             },
-                        );
+                        ));
+                        return Command::batch(cmds);
                     }
                 }
             }
@@ -378,25 +533,39 @@ impl MoonBeautyShellApp {
                 }
             }
             EmailMessage::MarkSpam => {
+                let vis_pos = self
+                    .email
+                    .visible_envelopes()
+                    .iter()
+                    .position(|(i, _)| *i == self.email.selected_index);
+                if vis_pos.is_none() {
+                    return Command::none();
+                }
                 if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
                     let id = mail.id.clone();
                     let folder = self.email.active_folder.clone();
+                    let source = moonbeauty::libraries::backend::email::local_sort::source_folder_for(&id, &folder)
+                        .unwrap_or_else(|| folder.clone());
                     self.email.envelopes.remove(self.email.selected_index);
-                    if self.email.selected_index >= self.email.envelopes.len()
-                        && !self.email.envelopes.is_empty()
-                    {
-                        self.email.selected_index = self.email.envelopes.len() - 1;
-                    }
-                    self.email.parsed_email = None;
-                    self.email.active_mail_id = None;
+                    let next_id = self.email.select_after_removal(vis_pos);
+                    let mut cmds = self.email_post_remove_commands(next_id);
                     moonbeauty::libraries::backend::email::client::save_index(
                         &folder,
                         &self.email.envelopes,
                     );
-                    return Command::perform(
+                    if source != folder {
+                        let mut src_envs =
+                            moonbeauty::libraries::backend::email::client::load_index(&source);
+                        src_envs.retain(|e| e.id != id);
+                        moonbeauty::libraries::backend::email::client::save_index(
+                            &source,
+                            &src_envs,
+                        );
+                    }
+                    cmds.push(Command::perform(
                         async move {
                             moonbeauty::libraries::backend::email::client::move_to_spam(
-                                &id, &folder,
+                                &id, &source,
                             )
                             .await
                         },
@@ -404,25 +573,29 @@ impl MoonBeautyShellApp {
                             Ok(_) => Message::Email(EmailMessage::SyncDone),
                             Err(e) => Message::Email(EmailMessage::Error(e)),
                         },
-                    );
+                    ));
+                    return Command::batch(cmds);
                 }
             }
             EmailMessage::MarkNotSpam => {
+                let vis_pos = self
+                    .email
+                    .visible_envelopes()
+                    .iter()
+                    .position(|(i, _)| *i == self.email.selected_index);
+                if vis_pos.is_none() {
+                    return Command::none();
+                }
                 if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
                     let id = mail.id.clone();
                     self.email.envelopes.remove(self.email.selected_index);
-                    if self.email.selected_index >= self.email.envelopes.len()
-                        && !self.email.envelopes.is_empty()
-                    {
-                        self.email.selected_index = self.email.envelopes.len() - 1;
-                    }
-                    self.email.parsed_email = None;
-                    self.email.active_mail_id = None;
+                    let next_id = self.email.select_after_removal(vis_pos);
+                    let mut cmds = self.email_post_remove_commands(next_id);
                     moonbeauty::libraries::backend::email::client::save_index(
                         "Spam",
                         &self.email.envelopes,
                     );
-                    return Command::perform(
+                    cmds.push(Command::perform(
                         async move {
                             moonbeauty::libraries::backend::email::client::mark_not_spam(&id).await
                         },
@@ -430,7 +603,8 @@ impl MoonBeautyShellApp {
                             Ok(_) => Message::Email(EmailMessage::SyncDone),
                             Err(e) => Message::Email(EmailMessage::Error(e)),
                         },
-                    );
+                    ));
+                    return Command::batch(cmds);
                 }
             }
             EmailMessage::SaveContact => {
