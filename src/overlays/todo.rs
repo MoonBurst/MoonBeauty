@@ -113,7 +113,7 @@ impl TodoOverlay {
         }
     }
 
-    fn visible_task_ids(&self) -> Vec<u64> {
+    pub fn visible_task_ids(&self) -> Vec<u64> {
         self.db
             .todos
             .iter()
@@ -160,6 +160,9 @@ impl TodoOverlay {
     }
 
     pub fn save(&self) {
+        if cfg!(test) {
+            return;
+        }
         let path = Self::storage_path();
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
@@ -193,6 +196,11 @@ impl TodoOverlay {
                 {
                     self.db.categories.push(clean.to_string());
                     self.active_category = clean.to_string();
+                    self.selected_task_id = None;
+                    if self.editing_task_id.is_some() {
+                        self.editing_task_id = None;
+                        self.new_task_text.clear();
+                    }
                     self.save();
                 }
             }
@@ -200,7 +208,26 @@ impl TodoOverlay {
                 if name != "Inbox" {
                     self.db.categories.retain(|c| c != &name);
                     self.db.todos.retain(|t| t.category != name);
-                    self.active_category = "Inbox".into();
+                    if self.active_category == name {
+                        self.active_category = "Inbox".into();
+                        self.selected_task_id = None;
+                        if self.editing_task_id.is_some() {
+                            self.editing_task_id = None;
+                            self.new_task_text.clear();
+                        }
+                    } else {
+                        if let Some(id) = self.selected_task_id {
+                            if !self.visible_task_ids().contains(&id) {
+                                self.selected_task_id = None;
+                            }
+                        }
+                        if let Some(id) = self.editing_task_id {
+                            if !self.db.todos.iter().any(|t| t.id == id) {
+                                self.editing_task_id = None;
+                                self.new_task_text.clear();
+                            }
+                        }
+                    }
                     self.save();
                 }
             }
@@ -303,7 +330,7 @@ impl TodoOverlay {
                 self.save();
             }
             TodoMessage::CategoryPrev => {
-                if !self.new_task_text.is_empty() {
+                if !self.new_task_text.is_empty() || self.editing_task_id.is_some() {
                     return;
                 }
                 let n = self.db.categories.len();
@@ -315,11 +342,12 @@ impl TodoOverlay {
                         .position(|c| c == &self.active_category)
                     {
                         self.active_category = self.db.categories[(idx + n - 1) % n].clone();
+                        self.selected_task_id = None;
                     }
                 }
             }
             TodoMessage::CategoryNext => {
-                if !self.new_task_text.is_empty() {
+                if !self.new_task_text.is_empty() || self.editing_task_id.is_some() {
                     return;
                 }
                 let n = self.db.categories.len();
@@ -331,6 +359,7 @@ impl TodoOverlay {
                         .position(|c| c == &self.active_category)
                     {
                         self.active_category = self.db.categories[(idx + 1) % n].clone();
+                        self.selected_task_id = None;
                     }
                 }
             }
@@ -340,6 +369,11 @@ impl TodoOverlay {
                     TodoFilter::Active => TodoFilter::All,
                     TodoFilter::Completed => TodoFilter::Active,
                 };
+                if let Some(id) = self.selected_task_id {
+                    if !self.visible_task_ids().contains(&id) {
+                        self.selected_task_id = None;
+                    }
+                }
             }
             TodoMessage::FilterNext => {
                 self.filter = match self.filter {
@@ -347,8 +381,16 @@ impl TodoOverlay {
                     TodoFilter::Active => TodoFilter::Completed,
                     TodoFilter::Completed => TodoFilter::All,
                 };
+                if let Some(id) = self.selected_task_id {
+                    if !self.visible_task_ids().contains(&id) {
+                        self.selected_task_id = None;
+                    }
+                }
             }
             TodoMessage::TaskSelectPrev => {
+                if !self.new_task_text.is_empty() || self.editing_task_id.is_some() {
+                    return;
+                }
                 let visible = self.visible_task_ids();
                 if visible.is_empty() {
                     return;
@@ -730,5 +772,85 @@ impl TodoOverlay {
             .center_x(Length::Fill)
             .center_y(Length::Fill)
             .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TodoFilter, TodoItem, TodoMessage, TodoOverlay};
+
+    fn seeded_todo() -> TodoOverlay {
+        let mut ov = TodoOverlay::empty();
+        ov.db.categories = vec!["Inbox".into(), "Work".into()];
+        ov.db.todos = vec![
+            TodoItem { id: 1, task: "Inbox A".into(), completed: false, category: "Inbox".into() },
+            TodoItem { id: 2, task: "Inbox B".into(), completed: true, category: "Inbox".into() },
+            TodoItem { id: 3, task: "Work A".into(), completed: false, category: "Work".into() },
+        ];
+        ov
+    }
+
+    #[test]
+    fn task_select_prev_respects_typing_and_edit_guards() {
+        let mut ov = seeded_todo();
+        ov.selected_task_id = Some(2);
+
+        ov.new_task_text = "draft".into();
+        ov.update(TodoMessage::TaskSelectPrev);
+        assert_eq!(ov.selected_task_id, Some(2));
+
+        ov.new_task_text.clear();
+        ov.editing_task_id = Some(2);
+        ov.update(TodoMessage::TaskSelectPrev);
+        assert_eq!(ov.selected_task_id, Some(2));
+
+        ov.editing_task_id = None;
+        ov.update(TodoMessage::TaskSelectPrev);
+        assert_eq!(ov.selected_task_id, Some(1));
+    }
+
+    #[test]
+    fn category_prev_next_clears_selection_and_respects_edit_guard() {
+        let mut ov = seeded_todo();
+        ov.selected_task_id = Some(1);
+        ov.update(TodoMessage::CategoryNext);
+        assert_eq!(ov.active_category, "Work");
+        assert_eq!(ov.selected_task_id, None);
+
+        ov.selected_task_id = Some(3);
+        ov.editing_task_id = Some(3);
+        ov.update(TodoMessage::CategoryPrev);
+        assert_eq!(ov.active_category, "Work");
+
+        ov.editing_task_id = None;
+        ov.update(TodoMessage::CategoryPrev);
+        assert_eq!(ov.active_category, "Inbox");
+        assert_eq!(ov.selected_task_id, None);
+    }
+
+    #[test]
+    fn filter_prev_next_clears_hidden_selection() {
+        let mut ov = seeded_todo();
+        ov.selected_task_id = Some(1); // active task
+        ov.update(TodoMessage::FilterPrev); // All -> Completed
+        assert_eq!(ov.filter, TodoFilter::Completed);
+        assert_eq!(ov.selected_task_id, None);
+
+        ov.selected_task_id = Some(2); // completed task
+        ov.update(TodoMessage::FilterPrev); // Completed -> Active
+        assert_eq!(ov.filter, TodoFilter::Active);
+        assert_eq!(ov.selected_task_id, None);
+    }
+
+    #[test]
+    fn delete_category_clears_stale_selection_and_edit() {
+        let mut ov = seeded_todo();
+        ov.update(TodoMessage::SelectCategory("Work".into()));
+        ov.update(TodoMessage::EditTask(3));
+        ov.update(TodoMessage::DeleteCategory("Work".into()));
+        assert_eq!(ov.active_category, "Inbox");
+        assert_eq!(ov.selected_task_id, None);
+        assert_eq!(ov.editing_task_id, None);
+        assert!(ov.new_task_text.is_empty());
     }
 }

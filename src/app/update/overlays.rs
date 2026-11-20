@@ -84,19 +84,7 @@ impl MoonBeautyShellApp {
                 self.todo.update(msg);
                 if let Some(sel_id) = self.todo.selected_task_id {
                     // Scroll to selected task using row height of ~40px.
-                    let visible: Vec<u64> = self
-                        .todo
-                        .db
-                        .todos
-                        .iter()
-                        .filter(|t| t.category == self.todo.active_category)
-                        .filter(|t| match self.todo.filter {
-                            moonbeauty::overlays::todo::TodoFilter::All => true,
-                            moonbeauty::overlays::todo::TodoFilter::Active => !t.completed,
-                            moonbeauty::overlays::todo::TodoFilter::Completed => t.completed,
-                        })
-                        .map(|t| t.id)
-                        .collect();
+                    let visible = self.todo.visible_task_ids();
                     let idx = visible.iter().position(|v| *v == sel_id).unwrap_or(0);
                     return iced::widget::operation::scroll_to(
                         iced::widget::Id::new("todo_list"),
