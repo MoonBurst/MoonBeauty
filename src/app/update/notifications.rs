@@ -148,13 +148,13 @@ impl MoonBeautyShellApp {
                 let _ = std::fs::remove_file(&cmd_path);
                 match cmd.trim() {
                     "dismiss" => {
-                        // Dismiss the newest toast (.last()), not the oldest (.first())
-                        if let Some(last) = self.notifs.active_toasts.last().cloned() {
-                            self.notifs.update(NotifMessage::DismissToast(last.id));
+                        // Dismiss the oldest active toast first so newer ones remain visible
+                        if let Some(oldest) = self.notifs.oldest_active_toast() {
+                            self.notifs.update(NotifMessage::DismissToast(oldest.id));
                         }
                     }
                     "activate-latest" => {
-                        if let Some(t) = self.notifs.latest_active_toast() {
+                        if let Some(t) = self.notifs.oldest_active_toast() {
                             self.activate_toast(t, "activate-latest");
                         } else {
                             eprintln!("[activate-latest] no active toast");

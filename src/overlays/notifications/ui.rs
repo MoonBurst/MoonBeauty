@@ -660,8 +660,11 @@ impl NotificationOverlay {
         self.mark_history_dirty();
     }
 
-    pub fn latest_active_toast(&self) -> Option<NotificationToast> {
-        self.active_toasts.last().cloned()
+    pub fn oldest_active_toast(&self) -> Option<NotificationToast> {
+        self.active_toasts
+            .iter()
+            .find(|t| t.exit_started_at.is_none())
+            .cloned()
     }
 
     pub fn push_notification(
@@ -1341,14 +1344,10 @@ impl NotificationOverlay {
             settings.notif_card_width as f32 + 2.0 * settings.notif_margin_x as f32 + 100.0;
         let strip_margin = settings.notif_margin_x as f32;
 
-        // Iterate forward: oldest pushed first (bottom z-order), newest
-        // pushed last (top z-order). Combined with y_pos below
-        // (i=0 → lowest on screen, i=N-1 → highest), the newest toast
-        // ends up at the visual top AND the highest z-order. Standard
-        // notification-stack layout: newest fully readable on top,
-        // older ones tucked behind/below. Clicking overlap hits the
-        // newest toast, and hotkeys targeting .last() correctly resolve
-        // to what's visually accessible.
+        // Iterate in reverse: newest pushed first (bottom z-order, tucked
+        // behind/above), oldest pushed last (top z-order, front card in view).
+        // As the oldest toast expires or is dismissed, newer toasts drop down
+        // into the front slot.
         for (i, toast) in ordered.into_iter().rev() {
             let id = toast.id;
             let border_c = hex_to_color(&toast.border_color);
@@ -2345,11 +2344,14 @@ mod tests {
     }
 
     #[test]
-    fn latest_active_toast_returns_newest_not_oldest() {
+    fn oldest_active_toast_returns_front_non_exiting_toast() {
         let mut ov = NotificationOverlay::empty();
         ov.active_toasts.push(toast(10));
         ov.active_toasts.push(toast(20));
         ov.active_toasts.push(toast(30));
-        assert_eq!(ov.latest_active_toast().unwrap().id, 30);
+        assert_eq!(ov.oldest_active_toast().unwrap().id, 10);
+
+        ov.active_toasts[0].exit_started_at = Some(Instant::now());
+        assert_eq!(ov.oldest_active_toast().unwrap().id, 20);
     }
 }

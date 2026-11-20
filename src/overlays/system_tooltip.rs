@@ -112,10 +112,7 @@ impl App {
 
         // Start on whichever GPU the user selected in Settings.
         let selected_gpu = if target == "gpu" {
-            gpu_list
-                .iter()
-                .position(|g| g.card_id == s.gpu_selected_id)
-                .unwrap_or(0)
+            select_gpu_index(&gpu_list, &s.gpu_selected_id)
         } else {
             0
         };
@@ -124,7 +121,7 @@ impl App {
             selected_gpu, s.gpu_selected_id
         );
 
-        let settings = ShellSettings::load();
+        let settings = s;
         let theme = ShellTheme::from_settings(&settings);
         let app = Self {
             opened: Instant::now(),
@@ -151,7 +148,7 @@ impl App {
                 Message::Loaded(Data::Cpu(d))
             })
         } else if target == "gpu" {
-            let info = app.gpu_list.first().cloned().unwrap_or_default();
+            let info = app.gpu_list.get(app.selected_gpu).cloned().unwrap_or_default();
             Task::perform(
                 async move {
                     // Run the blocking file I/O on a background thread so it
@@ -915,4 +912,38 @@ pub fn run() -> Result<(), iced_layershell::Error> {
         ..Default::default()
     })
     .run()
+}
+
+fn select_gpu_index(gpu_list: &[GpuInfo], selected_id: &str) -> usize {
+    gpu_list
+        .iter()
+        .position(|g| g.card_id == selected_id)
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_gpu_index;
+    use crate::libraries::backend::system::GpuInfo;
+
+    fn gpu(card_id: &str) -> GpuInfo {
+        GpuInfo {
+            card_id: card_id.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn selects_configured_secondary_gpu() {
+        let gpus = vec![gpu("card0"), gpu("card1"), gpu("nvidia0")];
+        assert_eq!(select_gpu_index(&gpus, "card1"), 1);
+        assert_eq!(select_gpu_index(&gpus, "nvidia0"), 2);
+    }
+
+    #[test]
+    fn falls_back_to_zero_when_missing_or_empty() {
+        let gpus = vec![gpu("card0"), gpu("card1")];
+        assert_eq!(select_gpu_index(&gpus, "card99"), 0);
+        assert_eq!(select_gpu_index(&[], "card1"), 0);
+    }
 }
