@@ -35,9 +35,29 @@ impl MoonBeautyShellApp {
             }
             ClipboardMessage::DeleteEntry(id) => {
                 ClipboardOverlay::delete(id);
+                if self.clipboard.selected_id == Some(id) {
+                    if let Some((next_id, _)) = self.clipboard.delete_selected_in_memory() {
+                        return Command::perform(
+                            ClipboardOverlay::load_preview(next_id),
+                            move |(text, image_data)| {
+                                Message::Clipboard(ClipboardMessage::PreviewLoaded {
+                                    id: next_id,
+                                    text,
+                                    image_data,
+                                })
+                            },
+                        );
+                    }
+                } else {
+                    self.clipboard.entries.retain(|e| e.id != id);
+                }
                 return Command::none();
             }
             ClipboardMessage::WipeAll => {
+                self.clipboard.entries.clear();
+                self.clipboard.selected_id = None;
+                self.clipboard.preview_text.clear();
+                self.clipboard.preview_image_data = None;
                 return Command::perform(
                     async move {
                         ClipboardOverlay::wipe().await;
@@ -54,6 +74,26 @@ impl MoonBeautyShellApp {
             }
             ClipboardMessage::SearchChanged(q) => {
                 self.clipboard.search_query = q;
+                let vis = self.clipboard.filtered_ids();
+                if let Some(&first_id) = vis.first() {
+                    if self.clipboard.selected_id.is_none_or(|id| !vis.contains(&id)) {
+                        self.clipboard.selected_id = Some(first_id);
+                        return Command::perform(
+                            ClipboardOverlay::load_preview(first_id),
+                            move |(text, image_data)| {
+                                Message::Clipboard(ClipboardMessage::PreviewLoaded {
+                                    id: first_id,
+                                    text,
+                                    image_data,
+                                })
+                            },
+                        );
+                    }
+                } else {
+                    self.clipboard.selected_id = None;
+                    self.clipboard.preview_text.clear();
+                    self.clipboard.preview_image_data = None;
+                }
             }
             ClipboardMessage::Reloaded(entries) => {
                 self.clipboard.entries = entries;
@@ -139,42 +179,26 @@ impl MoonBeautyShellApp {
                 );
                 if let Some(id) = self.clipboard.selected_id {
                     ClipboardOverlay::delete(id);
-                    let pos = self.clipboard.entries.iter().position(|e| e.id == id);
-
-                    if let Some(idx) = pos {
-                        self.clipboard.entries.remove(idx);
-                        if !self.clipboard.entries.is_empty() {
-                            let next_idx = if idx >= self.clipboard.entries.len() {
-                                self.clipboard.entries.len() - 1
-                            } else {
-                                idx
-                            };
-                            let next_id = self.clipboard.entries[next_idx].id;
-                            self.clipboard.selected_id = Some(next_id);
-                            return Command::batch([
-                                Command::perform(
-                                    ClipboardOverlay::load_preview(next_id),
-                                    move |(text, image_data)| {
-                                        Message::Clipboard(ClipboardMessage::PreviewLoaded {
-                                            id: next_id,
-                                            text,
-                                            image_data,
-                                        })
-                                    },
-                                ),
-                                iced::widget::operation::scroll_to(
-                                    iced::widget::Id::new("clip_list"),
-                                    iced::widget::scrollable::AbsoluteOffset {
-                                        x: 0.0,
-                                        y: (next_idx as f32 * 64.0 - 200.0).max(0.0),
-                                    },
-                                ),
-                            ]);
-                        } else {
-                            self.clipboard.selected_id = None;
-                            self.clipboard.preview_text.clear();
-                            self.clipboard.preview_image_data = None;
-                        }
+                    if let Some((next_id, next_pos)) = self.clipboard.delete_selected_in_memory() {
+                        return Command::batch([
+                            Command::perform(
+                                ClipboardOverlay::load_preview(next_id),
+                                move |(text, image_data)| {
+                                    Message::Clipboard(ClipboardMessage::PreviewLoaded {
+                                        id: next_id,
+                                        text,
+                                        image_data,
+                                    })
+                                },
+                            ),
+                            iced::widget::operation::scroll_to(
+                                iced::widget::Id::new("clip_list"),
+                                iced::widget::scrollable::AbsoluteOffset {
+                                    x: 0.0,
+                                    y: (next_pos as f32 * 64.0 - 200.0).max(0.0),
+                                },
+                            ),
+                        ]);
                     }
                 }
                 return Command::none();

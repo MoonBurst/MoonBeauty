@@ -197,6 +197,7 @@ impl Default for ClipboardOverlay {
 
 impl ClipboardOverlay {
     pub fn filtered_ids(&self) -> Vec<u64> {
+        let q = self.search_query.to_lowercase();
         self.entries
             .iter()
             .filter(|e| match self.filter {
@@ -204,14 +205,32 @@ impl ClipboardOverlay {
                 ClipFilter::Text => !e.is_image,
                 ClipFilter::Images => e.is_image,
             })
-            .filter(|e| {
-                self.search_query.is_empty()
-                    || e.text
-                        .to_lowercase()
-                        .contains(&self.search_query.to_lowercase())
-            })
+            .filter(|e| q.is_empty() || e.text.to_lowercase().contains(&q))
             .map(|e| e.id)
             .collect()
+    }
+
+    /// Remove `selected_id` from `entries` and advance selection within `filtered_ids()`.
+    /// Returns `Some((next_id, next_filtered_pos))` when another visible entry remains.
+    pub fn delete_selected_in_memory(&mut self) -> Option<(u64, usize)> {
+        let id = self.selected_id?;
+        let vis_before = self.filtered_ids();
+        let vis_pos = vis_before.iter().position(|&x| x == id);
+        let pos = self.entries.iter().position(|e| e.id == id)?;
+        self.entries.remove(pos);
+
+        let vis_after = self.filtered_ids();
+        if vis_after.is_empty() {
+            self.selected_id = None;
+            self.preview_text.clear();
+            self.preview_image_data = None;
+            None
+        } else {
+            let next_pos = vis_pos.map(|p| p.min(vis_after.len() - 1)).unwrap_or(0);
+            let next_id = vis_after[next_pos];
+            self.selected_id = Some(next_id);
+            Some((next_id, next_pos))
+        }
     }
 
     pub fn new() -> Self {
@@ -543,22 +562,26 @@ impl ClipboardOverlay {
             .join("clipboard");
         let index_path = dir.join("index.json");
 
-        if let Some(path) = Self::get_file_path(&dir, id) {
-            let _ = std::fs::remove_file(&path);
-        }
-        let _ = std::fs::remove_file(dir.join(format!("{}.preview.png", id)));
-
+        let mut ext_opt: Option<String> = None;
         if let Ok(content) = std::fs::read_to_string(&index_path) {
             if let Ok(mut items) = serde_json::from_str::<Vec<ClipItem>>(&content) {
+                ext_opt = items.iter().find(|i| i.id == id).and_then(|i| i.ext.clone());
                 items.retain(|i| i.id != id);
                 if let Ok(new_json) = serde_json::to_string(&items) {
-                    let _ = crate::libraries::process::private_write_file(
-                        &index_path,
-                        new_json.as_bytes(),
-                    );
+                    let tmp = dir.join("index.json.tmp");
+                    if crate::libraries::process::private_write_file(&tmp, new_json.as_bytes())
+                        .is_ok()
+                    {
+                        let _ = std::fs::rename(&tmp, &index_path);
+                    }
                 }
             }
         }
+
+        if let Some(path) = Self::get_file_path_with_ext(&dir, id, ext_opt.as_deref()) {
+            let _ = std::fs::remove_file(&path);
+        }
+        let _ = std::fs::remove_file(dir.join(format!("{}.preview.png", id)));
     }
 
     pub async fn wipe() {
@@ -1006,3 +1029,59 @@ impl ClipboardOverlay {
 }
 
 pub mod cli;
+
+#[cfg(test)]
+mod tests {
+    use super::{ClipFilter, ClipItem, ClipboardOverlay, Payload};
+
+    fn item(id: u64, text: &str, is_image: bool) -> ClipItem {
+        ClipItem {
+            id,
+            text: text.into(),
+            is_image,
+            content_hash: None,
+            source_path: None,
+            ext: None,
+        }
+    }
+
+    #[test]
+    fn delete_selected_stays_within_filtered_entries() {
+        let mut ov = ClipboardOverlay::new();
+        ov.entries = vec![
+            item(1, "plain text one", false),
+            item(2, "img alpha", true),
+            item(3, "plain text two", false),
+            item(4, "img beta", true),
+            item(5, "img gamma", true),
+        ];
+        ov.filter = ClipFilter::Images;
+        ov.selected_id = Some(4); // middle image (filtered pos 1)
+
+        // Delete middle image -> moves to next image (5), NOT text item (3)
+        assert_eq!(ov.delete_selected_in_memory(), Some((5, 1)));
+        assert_eq!(ov.selected_id, Some(5));
+
+        // Delete last image -> clamps to previous image (2)
+        assert_eq!(ov.delete_selected_in_memory(), Some((2, 0)));
+        assert_eq!(ov.selected_id, Some(2));
+
+        // Delete only remaining image -> clears selection & preview
+        ov.preview_text = "stale".into();
+        assert_eq!(ov.delete_selected_in_memory(), None);
+        assert_eq!(ov.selected_id, None);
+        assert!(ov.preview_text.is_empty());
+        // Text items remain untouched
+        assert_eq!(ov.entries.len(), 2);
+    }
+
+    #[test]
+    fn payload_dispatch_matches_extension() {
+        assert_eq!(Payload::for_extension("png"), Payload::Bytes("image/png"));
+        assert_eq!(Payload::for_extension("PNG"), Payload::Bytes("image/png"));
+        assert_eq!(Payload::for_extension("jpg"), Payload::Bytes("image/jpeg"));
+        assert_eq!(Payload::for_extension("txt"), Payload::Bytes("text/plain;charset=utf-8"));
+        assert_eq!(Payload::for_extension("jxl"), Payload::UriList);
+        assert_eq!(Payload::for_extension("webp"), Payload::UriList);
+    }
+}
