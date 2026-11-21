@@ -43,7 +43,7 @@ pub struct App {
     slant_r: SlantSide,
     items: Vec<TrayItem>,
     loaded: bool,
-    closing_at: Option<Instant>,
+    closing_at: Option<crate::overlays::tooltip_engine::ClosingState>,
     anim_frame: u64,
     // Cached at boot so view() doesn't reload from disk at 60fps
     // during the drop/expand animation.
@@ -54,15 +54,22 @@ pub struct App {
 #[allow(dead_code)]
 impl App {
     fn new_app() -> (Self, Task<Message>) {
+        crate::libraries::process::install_sigterm_handler();
         let env = crate::overlays::tooltip_common::TooltipEnv::from_env(W_START);
         let w: u32 = std::env::var("MBS_TOOLTIP_W")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(380);
         let s = ShellSettings::load();
-        let h = s.tooltip_height_px;
-        let drop_ms = s.tooltip_drop_ms as f32;
-        let expand_ms = s.tooltip_expand_ms as f32;
+        let h = resolve_popup_height(&s);
+        let drop_ms = std::env::var("MBS_TOOLTIP_DROP_MS")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(s.tooltip_drop_ms) as f32;
+        let expand_ms = std::env::var("MBS_TOOLTIP_EXPAND_MS")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(s.tooltip_expand_ms) as f32;
         
 
         let app = Self {
@@ -95,6 +102,25 @@ impl App {
         )
     }
 
+    fn snapshot_for_close(&self) -> crate::overlays::tooltip_engine::ClosingState {
+        let cur = crate::overlays::tooltip_engine::compute(
+            self.opened.elapsed().as_millis() as f32,
+            self.w_start,
+            self.w as f32,
+            self.h as f32,
+            self.theme.slant_width,
+            self.settings.bar_height.max(1) as f32,
+            self.drop_ms,
+            self.expand_ms,
+        );
+        crate::overlays::tooltip_engine::ClosingState {
+            started: Instant::now(),
+            from_w: cur.w,
+            from_h: cur.h,
+            from_opacity: cur.opacity,
+        }
+    }
+
     fn namespace(&self) -> String {
         "mbs-tray-tip".into()
     }
@@ -102,14 +128,19 @@ impl App {
     fn update(&mut self, m: Message) -> Task<Message> {
         match m {
             Message::Tick => {
+                if crate::libraries::process::was_sigterm_signaled()
+                    && self.closing_at.is_none()
+                {
+                    self.closing_at = Some(self.snapshot_for_close());
+                }
                 self.anim_frame = self.anim_frame.wrapping_add(1);
                 let elapsed_ms = self.opened.elapsed().as_millis() as u64;
                 if std::env::var_os("MBS_TICK_DIAG").is_some() {
                     eprintln!("[tick] frame={} elapsed={}ms", self.anim_frame, elapsed_ms);
                 }
 
-                if let Some(t) = self.closing_at {
-                    if t.elapsed().as_millis() > (self.drop_ms * 1.9) as u128 {
+                if let Some(t) = &self.closing_at {
+                    if t.started.elapsed().as_millis() > (self.drop_ms * 3.0) as u128 {
                         std::process::exit(0);
                     }
                 } else if self.opened.elapsed().as_millis() > AUTO_MS {
@@ -123,7 +154,7 @@ impl App {
                         .filter(|n| *n >= 1 && *n <= 100)
                         .unwrap_or(4)
                 } else {
-                    500
+                    100
                 };
 
                 return Task::perform(
@@ -136,35 +167,15 @@ impl App {
                 self.loaded = true;
             }
             Message::Activate(item) => {
-                std::thread::spawn(move || {
-                    let rt = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .ok();
-                    if let Some(rt) = rt {
-                        rt.block_on(async move {
-                            let _ = call_sni_method(&item.bus, &item.path, "Activate").await;
-                        });
-                    }
-                });
-                std::process::exit(0);
+                call_sni_and_exit(&item, "Activate");
             }
             Message::ContextMenu(item) => {
-                std::thread::spawn(move || {
-                    let rt = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .ok();
-                    if let Some(rt) = rt {
-                        rt.block_on(async move {
-                            let _ = call_sni_method(&item.bus, &item.path, "ContextMenu").await;
-                        });
-                    }
-                });
-                std::process::exit(0);
+                call_sni_and_exit(&item, "ContextMenu");
             }
             Message::Dismiss => {
-                self.closing_at = Some(Instant::now());
+                if self.closing_at.is_none() {
+                    self.closing_at = Some(self.snapshot_for_close());
+                }
             }
         }
         Task::none()
@@ -173,12 +184,14 @@ impl App {
     fn view(&self) -> Element<'_, Message> {
         let settings = &self.settings;
         let theme = &self.theme;
-        let anim = if let Some(t) = self.closing_at {
-            crate::overlays::tooltip_engine::compute_close(
-                t.elapsed().as_millis() as f32,
+        let anim = if let Some(t) = &self.closing_at {
+            crate::overlays::tooltip_engine::compute_close_from(
+                t.started.elapsed().as_millis() as f32,
+                t.from_w,
+                t.from_h,
+                t.from_opacity,
                 self.w_start,
                 self.w as f32,
-                self.h as f32,
                 theme.slant_width,
                 settings.bar_height as f32,
                 self.drop_ms,
@@ -346,10 +359,7 @@ pub fn run() -> Result<(), iced_layershell::Error> {
         output
     );
     let s = ShellSettings::load();
-    let h: u32 = std::env::var("MBS_TOOLTIP_H")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(300);
+    let h = resolve_popup_height(&s);
     let w: u32 = std::env::var("MBS_TOOLTIP_W")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -438,4 +448,55 @@ pub fn run() -> Result<(), iced_layershell::Error> {
         ..Default::default()
     })
     .run()
+}
+
+fn resolve_popup_height_from(s: &ShellSettings, env_val: Option<&str>) -> u32 {
+    env_val
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(s.tooltip_height_px)
+}
+
+fn resolve_popup_height(s: &ShellSettings) -> u32 {
+    let env_val = std::env::var("MBS_TOOLTIP_H").ok();
+    resolve_popup_height_from(s, env_val.as_deref())
+}
+
+fn call_sni_and_exit(item: &TrayItem, method: &str) -> ! {
+    if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        rt.block_on(async {
+            let _ = call_sni_method(&item.bus, &item.path, method).await;
+        });
+    }
+    std::process::exit(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_popup_height_from;
+    use crate::libraries::config::ShellSettings;
+
+    #[test]
+    fn popup_height_matches_settings_or_env_override() {
+        let mut s = ShellSettings::default();
+        s.tooltip_height_px = 420;
+        assert_eq!(resolve_popup_height_from(&s, None), 420);
+        assert_eq!(resolve_popup_height_from(&s, Some("bad")), 420);
+        assert_eq!(resolve_popup_height_from(&s, Some("512")), 512);
+    }
+
+    #[test]
+    fn mid_open_close_does_not_snap_above_captured_size() {
+        let mid = crate::overlays::tooltip_engine::compute(
+            90.0, 100.0, 380.0, 420.0, 12.0, 42.0, 180.0, 162.0,
+        );
+        let closed = crate::overlays::tooltip_engine::compute_close_from(
+            0.0, mid.w, mid.h, mid.opacity, 100.0, 380.0, 12.0, 42.0, 180.0,
+        );
+        assert!((closed.w - mid.w).abs() < 0.01);
+        assert!((closed.h - mid.h).abs() < 0.01);
+        assert!((closed.opacity - mid.opacity).abs() < 0.01);
+    }
 }
