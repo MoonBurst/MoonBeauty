@@ -213,6 +213,10 @@ use wayland_protocols::xdg::decoration::zv1::client::{
     zxdg_decoration_manager_v1::ZxdgDecorationManagerV1,
     zxdg_toplevel_decoration_v1::{self, ZxdgToplevelDecorationV1},
 };
+use wayland_protocols::xdg::activation::v1::client::{
+    xdg_activation_token_v1::{self, XdgActivationTokenV1},
+    xdg_activation_v1::XdgActivationV1,
+};
 
 pub use calloop;
 use calloop::{
@@ -935,6 +939,10 @@ pub struct WindowState<T> {
 
     ime_purpose: ImePurpose,
     ime_allowed: bool,
+
+    xdg_activation: Option<XdgActivationV1>,
+    activation_qh: Option<QueueHandle<WindowState<T>>>,
+    last_activation_context: Option<(u32, WlSurface)>,
 }
 
 impl<T> WindowState<T> {
@@ -1460,6 +1468,10 @@ impl<T> Default for WindowState<T> {
             ext_session_lock_manager: None,
             session_lock_requested: false,
             session_lock_ready: false,
+
+            xdg_activation: None,
+            activation_qh: None,
+            last_activation_context: None,
         }
     }
 }
@@ -1734,10 +1746,14 @@ impl<T> Dispatch<wl_keyboard::WlKeyboard, ()> for WindowState<T> {
                 }
             }
             wl_keyboard::Event::Key {
+                serial,
                 state: keystate,
                 key,
                 ..
             } => {
+                if let Some(surf) = state.current_surface.as_ref() {
+                    state.last_activation_context = Some((serial, surf.clone()));
+                }
                 let pressed_state = match keystate {
                     WEnum::Value(KeyState::Pressed) => ElementState::Pressed,
                     WEnum::Value(KeyState::Released) => ElementState::Released,
@@ -1860,6 +1876,7 @@ impl<T> Dispatch<wl_touch::WlTouch, ()> for WindowState<T> {
                 x,
                 y,
             } => {
+                state.last_activation_context = Some((serial, surface.clone()));
                 state.finger_locations.insert(id, (x, y));
                 let surface_id = state.get_id_from_surface(&surface);
                 state
@@ -1895,9 +1912,11 @@ impl<T> Dispatch<wl_touch::WlTouch, ()> for WindowState<T> {
                 }
             }
             wl_touch::Event::Up { serial, time, id } => {
-                let surface_id = state
-                    .active_surfaces
-                    .remove(&Some(id))
+                let removed = state.active_surfaces.remove(&Some(id));
+                if let Some((ref surf, _)) = removed {
+                    state.last_activation_context = Some((serial, surf.clone()));
+                }
+                let surface_id = removed
                     .or_else(|| {
                         log::warn!("finger[{id}] hasn't been down.");
                         None
@@ -2070,6 +2089,9 @@ impl<T> Dispatch<wl_pointer::WlPointer, ()> for WindowState<T> {
                 time,
             } => {
                 let mouse_surface = mouse_surface.cloned();
+                if let Some(ref surf) = mouse_surface {
+                    state.last_activation_context = Some((serial, surf.clone()));
+                }
                 state.update_current_surface(mouse_surface);
                 state.message.push((
                     surface_id,
@@ -2608,6 +2630,27 @@ delegate_noop!(@<T> WindowState<T>: ignore ZwpTextInputManagerV3);
 delegate_noop!(@<T> WindowState<T>: ignore ZwpInputPanelSurfaceV1);
 delegate_noop!(@<T> WindowState<T>: ignore ZwpInputPanelV1);
 
+pub struct ActivationTokenData(pub Mutex<Option<Box<dyn FnOnce(Option<String>) + Send>>>);
+
+impl<T> Dispatch<XdgActivationTokenV1, ActivationTokenData> for WindowState<T> {
+    fn event(
+        _state: &mut Self,
+        proxy: &XdgActivationTokenV1,
+        event: <XdgActivationTokenV1 as Proxy>::Event,
+        data: &ActivationTokenData,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        if let xdg_activation_token_v1::Event::Done { token } = event {
+            if let Some(cb) = data.0.lock().unwrap().take() {
+                cb(Some(token));
+            }
+            proxy.destroy();
+        }
+    }
+}
+
+delegate_noop!(@<T> WindowState<T>: ignore XdgActivationV1);
 delegate_noop!(@<T> WindowState<T>: ignore ZxdgDecorationManagerV1);
 delegate_noop!(@<T> WindowState<T>: ignore ZxdgToplevelDecorationV1);
 delegate_noop!(@<T> WindowState<T>: ignore ExtSessionLockManagerV1);
@@ -2651,6 +2694,8 @@ impl<T: 'static> WindowState<T> {
             .ok();
 
         self.xdg_decoration_manager = decoration_manager;
+        self.xdg_activation = globals.bind::<XdgActivationV1, _, _>(&qh, 1..=1, ()).ok();
+        self.activation_qh = Some(qh.clone());
 
         // ext-session-lock-v1: bind manager, then optionally acquire lock.
         let session_lock_manager = globals
@@ -2877,6 +2922,30 @@ impl<T: 'static> WindowState<T> {
     /// happened on, like tell you this time you do a click, what surface it is on. you can use the
     /// index to get the unit, with [WindowState::get_unit_with_id] if the even is not spical on one surface,
     /// it will return [None].
+    /// Request an xdg_activation_v1 token bound to the seat, surface, and serial
+    /// from the most recent input event. Invokes `callback(None)` if unavailable.
+    pub fn request_activation_token<F>(&self, callback: F)
+    where
+        F: FnOnce(Option<String>) + Send + 'static,
+    {
+        let (Some(activation), Some(qh), Some(seat), Some((serial, surface))) = (
+            self.xdg_activation.as_ref(),
+            self.activation_qh.as_ref(),
+            self.seat.as_ref(),
+            self.last_activation_context.as_ref(),
+        ) else {
+            callback(None);
+            return;
+        };
+        let token = activation.get_activation_token(
+            qh,
+            ActivationTokenData(Mutex::new(Some(Box::new(callback)))),
+        );
+        token.set_serial(*serial, seat);
+        token.set_surface(surface);
+        token.commit();
+    }
+
     /// Different with running, it receiver a receiver
     pub fn running_with_proxy<F, Message>(
         self,

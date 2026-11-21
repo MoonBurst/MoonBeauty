@@ -11,35 +11,55 @@
 #![allow(clippy::collapsible_match)]
 
 use super::*;
-use crate::app::keys::{is_app_focused, focus_notification_app, notification_candidates};
 
 impl MoonBeautyShellApp {
-    fn activate_toast(
+    fn trigger_toast_handshake(
         &mut self,
         t: moonbeauty::overlays::notifications::NotificationToast,
-        tag: &'static str,
-    ) {
-        let app = t.app_name.clone();
-        let entry = t.desktop_entry.clone();
+        action_key: Option<String>,
+    ) -> Command<Message> {
         let nid = t.id;
-        self.notifs.update(NotifMessage::DismissToast(nid));
-        std::thread::spawn(move || {
-            moonbeauty::overlays::notifications::emit_action_invoked(nid, "default");
-            std::thread::sleep(std::time::Duration::from_millis(200));
-            let matches = notification_candidates(&app, entry.as_deref());
-            if !is_app_focused(&matches) {
-                let ok = focus_notification_app(&app, entry.as_deref());
-                moonbeauty::dbg_log!(
-                    "[{}] fallback app={:?} entry={:?} ok={}",
-                    tag,
-                    app,
-                    entry,
-                    ok
-                );
-            } else {
-                moonbeauty::dbg_log!("[{}] client self-focused app={:?}", tag, app);
+        let is_resident = t.is_resident;
+        let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
+        let tx = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
+        let cb = iced_layershell::actions::ActivationCallback::new(move |token| {
+            if let Ok(mut guard) = tx.lock() {
+                if let Some(sender) = guard.take() {
+                    let _ = sender.send(token);
+                }
             }
         });
+
+        let handshake_task = Command::perform(
+            async move {
+                // Step 1: Wait for the xdg_activation_v1 token minted from the click event.
+                let token =
+                    match tokio::time::timeout(std::time::Duration::from_millis(500), rx).await {
+                        Ok(Ok(tok)) => tok,
+                        _ => None,
+                    };
+                // Steps 2 -> 3 -> 4 (D-Bus):
+                // ActivationToken -> ActionInvoked (if registered) -> NotificationClosed(2) (unless resident)
+                moonbeauty::overlays::notifications::emit_click_handshake(
+                    nid,
+                    token,
+                    action_key,
+                    is_resident,
+                )
+                .await;
+            },
+            move |_| {
+                Message::Notif(NotifMessage::FinishToastActivation {
+                    id: nid,
+                    dismiss: !is_resident,
+                })
+            },
+        );
+
+        Command::batch(vec![
+            Command::done(Message::RequestXdgActivation(cb)),
+            handshake_task,
+        ])
     }
 
     pub(crate) fn handle_notif(&mut self, msg: NotifMessage) -> Command<Message> {
@@ -80,15 +100,50 @@ impl MoonBeautyShellApp {
                     );
                 }
             }
+            NotifMessage::DismissToast(id) => {
+                self.notifs.dismiss_toast_ui(id);
+                if self.is_notif_surface {
+                    return Command::perform(
+                        moonbeauty::overlays::notifications::emit_notification_closed(id, 2),
+                        |_| Message::Noop,
+                    );
+                }
+            }
             NotifMessage::ActivateToast(id) => {
                 if let Some(t) = self
                     .notifs
                     .active_toasts
                     .iter()
-                    .find(|t| t.id == id)
+                    .find(|t| t.id == id && t.exit_started_at.is_none())
                     .cloned()
                 {
-                    self.activate_toast(t, "activate-toast");
+                    let action_key = t
+                        .actions
+                        .chunks_exact(2)
+                        .find(|pair| pair[0] == "default")
+                        .map(|_| "default".to_string());
+                    return self.trigger_toast_handshake(t, action_key);
+                }
+            }
+            NotifMessage::InvokeToastAction(id, key) => {
+                if let Some(t) = self
+                    .notifs
+                    .active_toasts
+                    .iter()
+                    .find(|t| t.id == id && t.exit_started_at.is_none())
+                    .cloned()
+                {
+                    let action_key = if t.actions.chunks_exact(2).any(|pair| pair[0] == key) {
+                        Some(key)
+                    } else {
+                        None
+                    };
+                    return self.trigger_toast_handshake(t, action_key);
+                }
+            }
+            NotifMessage::FinishToastActivation { id, dismiss } => {
+                if dismiss {
+                    self.notifs.dismiss_toast_ui(id);
                 }
             }
             _ => self.notifs.update(msg),
@@ -129,10 +184,12 @@ impl MoonBeautyShellApp {
             while let Ok(n) = rx.try_recv() {
                 let is_test = n.app_name == "Diagnostics";
                 self.notifs.push_notification(
+                    n.id,
                     &n.app_name,
                     &n.summary,
                     &n.body,
                     n.is_urgent,
+                    n.is_resident,
                     is_test,
                     n.desktop_entry.as_deref(),
                     n.actions.clone(),
@@ -150,12 +207,24 @@ impl MoonBeautyShellApp {
                     "dismiss" => {
                         // Dismiss the oldest active toast first so newer ones remain visible
                         if let Some(oldest) = self.notifs.oldest_active_toast() {
-                            self.notifs.update(NotifMessage::DismissToast(oldest.id));
+                            let oid = oldest.id;
+                            self.notifs.dismiss_toast_ui(oid);
+                            return Command::perform(
+                                moonbeauty::overlays::notifications::emit_notification_closed(
+                                    oid, 2,
+                                ),
+                                |_| Message::Noop,
+                            );
                         }
                     }
                     "activate-latest" => {
                         if let Some(t) = self.notifs.oldest_active_toast() {
-                            self.activate_toast(t, "activate-latest");
+                            let action_key = t
+                                .actions
+                                .chunks_exact(2)
+                                .find(|pair| pair[0] == "default")
+                                .map(|_| "default".to_string());
+                            return self.trigger_toast_handshake(t, action_key);
                         } else {
                             eprintln!("[activate-latest] no active toast");
                         }

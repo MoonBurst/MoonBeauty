@@ -108,6 +108,7 @@ pub enum Message {
     /// click target shrinks to just the visible toasts. Everything else
     /// (the empty area around/above/below toasts) becomes pass-through.
     SetToastInputRegion(Vec<(i32, i32, i32, i32)>),
+    RequestXdgActivation(iced_layershell::actions::ActivationCallback),
     /// Fires from the 500ms subscription. If `standalone_child` is
     /// Lockscreen and has exited (TTY switch, panic, SIGKILL), respawn
     /// it immediately. Lockscreen must NEVER be absent — a dead lock is
@@ -140,6 +141,12 @@ impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message
                             }
                         }),
                     ),
+                ))
+            }
+            Message::RequestXdgActivation(cb) => {
+                Ok(iced_layershell::actions::LayershellCustomActionWithId::new(
+                    None,
+                    iced_layershell::actions::LayershellCustomAction::RequestActivationToken(cb),
                 ))
             }
             other => Err(other),

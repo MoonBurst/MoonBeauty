@@ -386,6 +386,8 @@ pub struct NotificationToast {
     pub timestamp: String,
     pub is_read: bool,
     pub is_urgent: bool,
+    #[serde(default)]
+    pub is_resident: bool,
     pub border_color: String,
     #[serde(default = "default_toast_text_color")]
     pub text_color: String,
@@ -425,6 +427,8 @@ fn default_toast_text_color() -> String {
 pub enum NotifMessage {
     DismissToast(u32),
     ActivateToast(u32),
+    InvokeToastAction(u32, String),
+    FinishToastActivation { id: u32, dismiss: bool },
     ClearHistory,
     DeleteHistory(u32),
     HistorySelectNext,
@@ -669,10 +673,12 @@ impl NotificationOverlay {
 
     pub fn push_notification(
         &mut self,
+        id: u32,
         app_name: &str,
         summary: &str,
         body: &str,
         is_urgent: bool,
+        is_resident: bool,
         is_test: bool,
         desktop_entry: Option<&str>,
         actions: Vec<String>,
@@ -680,8 +686,8 @@ impl NotificationOverlay {
     ) {
         // Finding 55: payloads pre-capped at NotifServer::notify
         // ingress (dbus.rs). Re-capping here would duplicate work.
-        
-        let id = rand_id();
+        self.active_toasts.retain(|t| t.id != id);
+        self.pending_toasts.retain(|t| t.id != id);
 
         let matched_profile = settings.friend_profiles.iter().find(|p| {
             summary.to_lowercase().contains(&p.summary.to_lowercase())
@@ -767,6 +773,7 @@ impl NotificationOverlay {
             timestamp: Local::now().format("%I:%M %p").to_string(),
             is_read: false,
             is_urgent,
+            is_resident,
             border_color,
             text_color,
             avatar_path,
@@ -1226,22 +1233,27 @@ impl NotificationOverlay {
         }
     }
 
+    pub fn dismiss_toast_ui(&mut self, id: u32) {
+        let now = Instant::now();
+        for t in self.active_toasts.iter_mut() {
+            if t.id == id && t.exit_started_at.is_none() {
+                t.exit_started_at = Some(now);
+            }
+        }
+    }
+
     pub fn update(&mut self, message: NotifMessage) {
         match message {
             NotifMessage::DismissToast(id) => {
-                let now = Instant::now();
-                for t in self.active_toasts.iter_mut() {
-                    if t.id == id && t.exit_started_at.is_none() {
-                        t.exit_started_at = Some(now);
-                    }
-                }
+                self.dismiss_toast_ui(id);
             }
-            NotifMessage::ActivateToast(id) => {
-                let now = Instant::now();
-                for t in self.active_toasts.iter_mut() {
-                    if t.id == id && t.exit_started_at.is_none() {
-                        t.exit_started_at = Some(now);
-                    }
+            NotifMessage::ActivateToast(id)
+            | NotifMessage::InvokeToastAction(id, _) => {
+                self.dismiss_toast_ui(id);
+            }
+            NotifMessage::FinishToastActivation { id, dismiss } => {
+                if dismiss {
+                    self.dismiss_toast_ui(id);
                 }
             }
             NotifMessage::ClearHistory => {
@@ -1452,24 +1464,18 @@ impl NotificationOverlay {
             // inner row are Fill height. Result: the entire toast body —
             // including what was previously the 14px border — activates
             // on click. No vertical centering gap.
+            let custom_actions: Vec<(&str, &str)> = toast
+                .actions
+                .chunks_exact(2)
+                .filter(|pair| pair[0] != "default" && !pair[1].is_empty())
+                .map(|pair| (pair[0].as_str(), pair[1].as_str()))
+                .collect();
+            let has_custom_actions = !custom_actions.is_empty();
+
             let toast_body = MouseArea::new(
                 container(
                     row![avatar, {
                         // Security: render app_name on the toast body.
-                        // Without this, any same-user process can send a
-                        // notification with app_name="Signal" and
-                        // summary="Alice" and trigger Alice's friend
-                        // profile match (color, sound path, TTS
-                        // template, avatar) with no visual tell. The
-                        // history panel already shows app_name; the
-                        // toast did not. Attribution here at least
-                        // surfaces the mismatch — the user sees
-                        // "via Signal" and can notice that the ping
-                        // claimed to be from Signal, not Alice.
-                        // Security attribution: show app_name inline with
-                        // the summary so a spoofed toast (app_name="Signal"
-                        // with summary="Alice") reveals the mismatch
-                        // immediately.
                         let summary_row = if toast.app_name.is_empty() {
                             column![text(&toast.summary)
                                 .size((settings.notif_summary_size) as f32)
@@ -1506,11 +1512,78 @@ impl NotificationOverlay {
                     .width(Length::Fill)
                     .height(Length::Fill),
                 )
-                .padding(14)
+                .padding(if has_custom_actions {
+                    Padding {
+                        top: 10.0,
+                        right: 14.0,
+                        bottom: 4.0,
+                        left: 14.0,
+                    }
+                } else {
+                    Padding {
+                        top: 14.0,
+                        right: 14.0,
+                        bottom: 14.0,
+                        left: 14.0,
+                    }
+                })
                 .width(Length::Fill)
                 .height(Length::Fill),
             )
             .on_press(NotifMessage::ActivateToast(id));
+
+            let left_col: Element<'_, NotifMessage> = if has_custom_actions {
+                let mut actions_row = row![].spacing(6).align_y(Alignment::Center);
+                let act_fs = (settings.notif_body_size.saturating_sub(4)).clamp(10, 14) as f32;
+                for (action_key, action_label) in custom_actions.into_iter().take(4) {
+                    let key_owned = action_key.to_string();
+                    let label_owned = action_label.to_string();
+                    let bg_col = theme.surface_alt;
+                    let border_col = border_c;
+                    let fg_col = toast_text_color;
+                    let act_btn = button(
+                        text(label_owned)
+                            .size(act_fs)
+                            .bold()
+                            .wrapping(iced::widget::text::Wrapping::None),
+                    )
+                    .on_press(NotifMessage::InvokeToastAction(id, key_owned))
+                    .padding([3, 10])
+                    .style(move |_t, status| {
+                        let (bg, tc) = match status {
+                            button::Status::Hovered | button::Status::Pressed => {
+                                (border_col, iced::Color::BLACK)
+                            }
+                            _ => (bg_col, fg_col),
+                        };
+                        button::Style {
+                            background: Some(iced::Background::Color(bg)),
+                            border: iced::Border {
+                                color: border_col,
+                                width: 1.0,
+                                radius: 4.0.into(),
+                            },
+                            text_color: tc,
+                            ..Default::default()
+                        }
+                    });
+                    actions_row = actions_row.push(act_btn);
+                }
+                column![
+                    toast_body,
+                    container(actions_row).padding(Padding {
+                        top: 0.0,
+                        right: 14.0,
+                        bottom: 10.0,
+                        left: 14.0,
+                    }),
+                ]
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+            } else {
+                toast_body.into()
+            };
 
             // Full-height close column. 48px wide, Fill height, ✕ centered
             // vertically (matches the previous visual), but the whole
@@ -1525,7 +1598,7 @@ impl NotificationOverlay {
                     ..Default::default()
                 });
 
-            let content = row![toast_body, close_btn]
+            let content = row![left_col, close_btn]
                 .spacing(0)
                 .width(Length::Fill)
                 .height(Length::Fill);
@@ -2089,23 +2162,6 @@ fn extract_from_phrase(text: &str) -> Option<String> {
     }
 }
 
-fn rand_id() -> u32 {
-    let mut b = [0u8; 4];
-    if let Ok(mut f) = fs::File::open("/dev/urandom") {
-        use std::io::Read;
-        if f.read_exact(&mut b).is_ok() {
-            return u32::from_ne_bytes(b);
-        }
-    }
-    // Fallback: time+pid mix. Not cryptographic, but avoids the
-    // guaranteed-collision constant `1000` on the next launch.
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    (nanos.rotate_left(24) ^ std::process::id() as u64) as u32
-}
-
 pub fn dnd_flag_path() -> PathBuf {
     crate::libraries::process::mbs_runtime_dir().join("moonbeauty-dnd")
 }
@@ -2313,6 +2369,7 @@ mod tests {
             timestamp: "12:00 PM".into(),
             is_read: false,
             is_urgent: false,
+            is_resident: false,
             border_color: "#f7f700".into(),
             text_color: "#f7f700".into(),
             avatar_path: None,

@@ -872,6 +872,13 @@ where
             LayershellCustomAction::ForgetLastOutput => {
                 ev.forget_last_output();
             }
+            LayershellCustomAction::RequestActivationToken(cb) => {
+                if let Some(f) = cb.take() {
+                    ev.request_activation_token(f);
+                } else {
+                    tracing::warn!("RequestActivationToken callback already consumed");
+                }
+            }
         }
     }
 

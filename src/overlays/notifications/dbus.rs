@@ -9,6 +9,7 @@ pub struct IncomingNotification {
     pub summary: String,
     pub body: String,
     pub is_urgent: bool,
+    pub is_resident: bool,
     pub desktop_entry: Option<String>,
     pub actions: Vec<String>,
 }
@@ -30,7 +31,7 @@ impl NotifServer {
     fn notify(
         &self,
         app_name: String,
-        _replaces_id: u32,
+        replaces_id: u32,
         _app_icon: String,
         summary: String,
         body: String,
@@ -62,7 +63,11 @@ impl NotifServer {
             .map(|a| cap(a, MAX_ACTION_LEN))
             .collect();
         
-        let id = next_id();
+        let id = if replaces_id != 0 {
+            replaces_id
+        } else {
+            next_id()
+        };
         eprintln!(
             "[notif-raw] app={:?} summary={:?} body={:?}",
             app_name, summary, body
@@ -77,6 +82,14 @@ impl NotifServer {
             .get("urgency")
             .and_then(|v| u8::try_from(v).ok())
             .map(|u| u == 2)
+            .unwrap_or(false);
+        let is_resident = hints
+            .get("resident")
+            .and_then(|v| match &**v {
+                zbus::zvariant::Value::Bool(b) => Some(*b),
+                zbus::zvariant::Value::U8(n) => Some(*n != 0),
+                _ => None,
+            })
             .unwrap_or(false);
         let desktop_entry = hints
             .get("desktop-entry")
@@ -95,6 +108,7 @@ impl NotifServer {
             summary,
             body,
             is_urgent,
+            is_resident,
             desktop_entry,
             actions,
         }) {
@@ -122,11 +136,93 @@ impl NotifServer {
 use std::sync::OnceLock;
 static DBUS_CONN: OnceLock<zbus::Connection> = OnceLock::new();
 
-pub fn emit_action_invoked(id: u32, key: &str) {
+async fn emit_activation_token_async(conn: &zbus::Connection, id: u32, token: &str) {
+    let body = (id, token.to_string());
+    match conn
+        .emit_signal(
+            None::<&str>,
+            "/org/freedesktop/Notifications",
+            "org.freedesktop.Notifications",
+            "ActivationToken",
+            &body,
+        )
+        .await
+    {
+        Ok(_) => eprintln!("[activation-token] sent id={} len={}", id, token.len()),
+        Err(e) => eprintln!("[activation-token] emit failed: {e}"),
+    }
+}
+
+async fn emit_action_invoked_async(conn: &zbus::Connection, id: u32, key: &str) {
+    let body = (id, key.to_string());
+    match conn
+        .emit_signal(
+            None::<&str>,
+            "/org/freedesktop/Notifications",
+            "org.freedesktop.Notifications",
+            "ActionInvoked",
+            &body,
+        )
+        .await
+    {
+        Ok(_) => eprintln!("[action-invoked] sent id={} key={:?}", id, key),
+        Err(e) => eprintln!("[action-invoked] emit failed: {e}"),
+    }
+}
+
+async fn emit_notification_closed_async(conn: &zbus::Connection, id: u32, reason: u32) {
+    match conn
+        .emit_signal(
+            None::<&str>,
+            "/org/freedesktop/Notifications",
+            "org.freedesktop.Notifications",
+            "NotificationClosed",
+            &(id, reason),
+        )
+        .await
+    {
+        Ok(_) => eprintln!("[notif-closed] sent id={} reason={}", id, reason),
+        Err(e) => eprintln!("[notif-closed] emit failed: {e}"),
+    }
+}
+
+/// Standard freedesktop notification click handshake:
+///   1. (caller generated Wayland xdg-activation token)
+///   2. Emit ActivationToken(id, token) BEFORE ActionInvoked
+///   3. Emit ActionInvoked(id, action_key) if a matching key was registered
+///   4. Emit NotificationClosed(id, 2) unless resident
+pub async fn emit_click_handshake(
+    id: u32,
+    activation_token: Option<String>,
+    action_key: Option<String>,
+    is_resident: bool,
+) {
     let Some(conn) = DBUS_CONN.get().cloned() else {
-        eprintln!("[action-invoked] daemon connection not ready");
+        eprintln!("[click-handshake] daemon connection not ready");
         return;
     };
+    if let Some(token) = activation_token {
+        if !token.is_empty() {
+            emit_activation_token_async(&conn, id, &token).await;
+        }
+    }
+    if let Some(key) = action_key {
+        emit_action_invoked_async(&conn, id, &key).await;
+    }
+    if !is_resident {
+        emit_notification_closed_async(&conn, id, 2).await;
+    }
+}
+
+pub async fn emit_notification_closed(id: u32, reason: u32) {
+    let Some(conn) = DBUS_CONN.get().cloned() else {
+        eprintln!("[notif-closed] daemon connection not ready");
+        return;
+    };
+    emit_notification_closed_async(&conn, id, reason).await;
+}
+
+pub fn emit_action_invoked(id: u32, key: &str) {
     let key_owned = key.to_string();
     std::thread::spawn(move || {
         let Ok(rt) = tokio::runtime::Builder::new_current_thread()
@@ -135,31 +231,7 @@ pub fn emit_action_invoked(id: u32, key: &str) {
         else {
             return;
         };
-        rt.block_on(async move {
-            let body = (id, key_owned.clone());
-            let r = conn
-                .emit_signal(
-                    None::<&str>,
-                    "/org/freedesktop/Notifications",
-                    "org.freedesktop.Notifications",
-                    "ActionInvoked",
-                    &body,
-                )
-                .await;
-            match r {
-                Ok(_) => eprintln!("[action-invoked] sent id={} key={:?}", id, key_owned),
-                Err(e) => eprintln!("[action-invoked] emit failed: {e}"),
-            }
-            let _ = conn
-                .emit_signal(
-                    None::<&str>,
-                    "/org/freedesktop/Notifications",
-                    "org.freedesktop.Notifications",
-                    "NotificationClosed",
-                    &(id, 2u32),
-                )
-                .await;
-        });
+        rt.block_on(emit_click_handshake(id, None, Some(key_owned), false));
     });
 }
 

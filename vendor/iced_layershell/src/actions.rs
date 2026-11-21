@@ -68,6 +68,31 @@ impl ActionCallback {
     }
 }
 
+type ActivationCallbackFn =
+    Arc<std::sync::Mutex<Option<Box<dyn FnOnce(Option<String>) + Send>>>>;
+
+#[derive(Clone)]
+pub struct ActivationCallback(pub ActivationCallbackFn);
+
+impl std::fmt::Debug for ActivationCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "activation callback")
+    }
+}
+
+impl ActivationCallback {
+    pub fn new<F>(callback: F) -> Self
+    where
+        F: FnOnce(Option<String>) + Send + 'static,
+    {
+        Self(Arc::new(std::sync::Mutex::new(Some(Box::new(callback)))))
+    }
+
+    pub fn take(&self) -> Option<Box<dyn FnOnce(Option<String>) + Send>> {
+        self.0.lock().ok()?.take()
+    }
+}
+
 /// NOTE: DO NOT USE THIS ENUM DIERCTLY
 /// use macro to_layer_message
 #[derive(Debug, Clone)]
@@ -111,6 +136,7 @@ pub enum LayershellCustomAction {
     /// is same with WindowAction::Close(id)
     RemoveWindow,
     ForgetLastOutput,
+    RequestActivationToken(ActivationCallback),
 }
 
 /// Please do not use this struct directly

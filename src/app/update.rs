@@ -92,7 +92,7 @@ impl MoonBeautyShellApp {
 
             Message::MusicCycleDone(new_state) => return self.handle_music_cycle_done(new_state),
             Message::Noop => {}
-            Message::SetToastInputRegion(_) => {
+            Message::SetToastInputRegion(_) | Message::RequestXdgActivation(_) => {
                 // Intercepted by `try_into` — never reaches update.
             }
             Message::CloseShell => {

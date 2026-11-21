@@ -12,7 +12,10 @@
 pub mod dbus;
 pub mod ui;
 
-pub use dbus::{emit_action_invoked, spawn, IncomingNotification};
+pub use dbus::{
+    emit_action_invoked, emit_click_handshake, emit_notification_closed, spawn,
+    IncomingNotification,
+};
 pub use ui::{
     dnd_active, held_notifs_count, load_held_notifs, read_active_count, save_held_notifs,
     take_held_notifs, toggle_dnd, write_active_count, NotifMessage, NotificationOverlay,
