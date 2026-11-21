@@ -611,13 +611,24 @@ impl MoonBeautyShellApp {
                 if let Some(mail) = self.email.envelopes.get(self.email.selected_index) {
                     let email = mail.sender_email.clone();
                     if !email.is_empty() {
+                        if self
+                            .email
+                            .contacts
+                            .iter()
+                            .any(|c| c.eq_ignore_ascii_case(&email))
+                        {
+                            self.email.status_notice =
+                                Some(format!("✓ Contact already saved: {}", email));
+                            return Command::none();
+                        }
+                        let email_resp = email.clone();
                         return Command::perform(
                             async move {
                                 moonbeauty::libraries::backend::email::client::save_contact(&email)
                                     .await
                             },
-                            |res| match res {
-                                Ok(_) => Message::Email(EmailMessage::DraftSaved),
+                            move |res| match res {
+                                Ok(_) => Message::Email(EmailMessage::ContactSaved(email_resp)),
                                 Err(e) => Message::Email(EmailMessage::Error(e)),
                             },
                         );
