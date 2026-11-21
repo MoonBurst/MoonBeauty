@@ -229,6 +229,11 @@ impl UnicodeOverlay {
             .collect()
     }
 
+    pub fn selected_symbol(&self) -> Option<&'static str> {
+        let idx = self.selected_idx?;
+        self.filtered().get(idx).map(|e| e.symbol)
+    }
+
     pub fn update(&mut self, message: UnicodeMessage) {
         match message {
             UnicodeMessage::SearchChanged(q) => {
@@ -262,40 +267,26 @@ impl UnicodeOverlay {
                 });
             }
             UnicodeMessage::SelectNextRow => {
-                if !self.search_query.is_empty() {
-                    return;
-                }
                 let n = self.filtered().len();
                 if n == 0 {
                     return;
                 }
-                let cur = self.selected_idx.unwrap_or(0);
-                self.selected_idx = Some((cur + 5).min(n - 1));
+                self.selected_idx = Some(match self.selected_idx {
+                    None => 0,
+                    Some(cur) => (cur + 5).min(n - 1),
+                });
             }
             UnicodeMessage::SelectPrevRow => {
-                if !self.search_query.is_empty() {
-                    return;
-                }
                 let n = self.filtered().len();
                 if n == 0 {
                     return;
                 }
-                let cur = self.selected_idx.unwrap_or(0);
-                self.selected_idx = Some(cur.saturating_sub(5));
+                self.selected_idx = Some(match self.selected_idx {
+                    None => n.saturating_sub(1),
+                    Some(cur) => cur.saturating_sub(5),
+                });
             }
-            UnicodeMessage::CopySelected => {
-                if let Some(idx) = self.selected_idx {
-                    if let Some(entry) = self.filtered().get(idx) {
-                        let sym = entry.symbol;
-                        tokio::spawn(async move {
-                            let _ = Command::new("wl-copy").arg(sym).status().await;
-                            let _ = Command::new("notify-send")
-                                .args(["-a", "Unicode", "Glyph Copied", sym])
-                                .spawn();
-                        });
-                    }
-                }
-            }
+            UnicodeMessage::CopySelected => {}
             UnicodeMessage::Refocus => {}
             UnicodeMessage::Dismiss => {}
             UnicodeMessage::CopySymbol(_) => {}
@@ -435,7 +426,7 @@ impl UnicodeOverlay {
             left: body_inset,
         });
 
-        let list_container = container(scrollable(grid_col).height(Length::Fill))
+        let list_container = container(scrollable(grid_col).id(iced::widget::Id::new("unicode_grid")).height(Length::Fill))
             .width(Length::Fill)
             .height(Length::Fill)
             .padding(Padding {
@@ -489,5 +480,28 @@ impl UnicodeOverlay {
             .center_y(Length::Fill)
             .style(|_t| iced::widget::container::Style::default())
             .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{UnicodeMessage, UnicodeOverlay};
+
+    #[test]
+    fn row_navigation_starts_at_zero_and_works_during_search() {
+        let mut ov = UnicodeOverlay::new();
+        assert_eq!(ov.selected_symbol(), None);
+
+        ov.update(UnicodeMessage::SelectNextRow);
+        assert_eq!(ov.selected_idx, Some(0));
+        assert!(ov.selected_symbol().is_some());
+
+        ov.update(UnicodeMessage::SearchChanged("arrow".into()));
+        assert_eq!(ov.selected_idx, None);
+
+        ov.update(UnicodeMessage::SelectNextRow);
+        assert_eq!(ov.selected_idx, Some(0));
+        let sym = ov.selected_symbol().unwrap();
+        assert!(["→", "←", "↑", "↓", "↺", "↻"].contains(&sym));
     }
 }

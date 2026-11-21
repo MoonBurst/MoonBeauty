@@ -550,7 +550,7 @@ impl AppLauncher {
             "note" | "notes" | "quick notes" | "quicknote" => ("Quick Notes", "internal:notes"),
             "power" | "pwr" | "session" | "power & session" | "logout" | "reboot" | "shutdown" | "lock" | "lockscreen" => ("Power & Session", "internal:power"),
             "remind" | "reminder" | "reminders" | "alarm" | "alarms" | "reminders & alarms" | "timer" | "timers" => ("Reminders & Alarms", "internal:reminders"),
-            "unicode" | "glyph" | "glyphs" | "symbol" | "symbols" | "emoji" | "emojis" | "unicode glyphs" => ("Unicode", "internal:unicode"),
+            "." | "unicode" | "glyph" | "glyphs" | "symbol" | "symbols" | "emoji" | "emojis" | "unicode glyphs" => ("Unicode", "internal:unicode"),
             "email" | "mail" | "em" | "mail client" | "inbox" => ("Email", "internal:email"),
             "rng" | "dice" | "roll" | "random" | "rand" | "d20" => ("RNG / Dice", "internal:rng"),
             "web" | "search" | "web search" | "google" | "ddg" | "duckduckgo" => ("Web Search", "internal:web"),
@@ -926,7 +926,7 @@ impl AppLauncher {
 
 #[cfg(test)]
 mod parse_exec_tests {
-    use super::AppLauncher;
+    use super::{AppLauncher, LauncherMessage};
     #[test]
     fn simple_command() { let (prog, args) = AppLauncher::parse_exec_for_test("firefox").unwrap(); assert_eq!(prog, "firefox"); assert!(args.is_empty()); }
     #[test]
@@ -947,4 +947,19 @@ mod parse_exec_tests {
     fn backslash_escape() { let (prog, args) = AppLauncher::parse_exec_for_test(r"foo\\bar").unwrap(); assert_eq!(prog, "foo\\bar"); assert!(args.is_empty()); }
     #[test]
     fn percent_codes_stripped() { assert_eq!(AppLauncher::strip_field_codes_for_test("firefox %u"), "firefox "); assert_eq!(AppLauncher::strip_field_codes_for_test("app %f --flag"), "app  --flag"); assert_eq!(AppLauncher::strip_field_codes_for_test("echo 100%%"), "echo 100%"); }
+
+    #[test]
+    fn dot_routes_to_unicode_without_breaking_decimals() {
+        let mut l = AppLauncher::new_empty();
+        let _ = l.update(LauncherMessage::SearchChanged(".".into()));
+        assert_eq!(l.selected_index, 0);
+        assert_eq!(
+            l.filtered_apps.first().map(|a| a.exec.as_str()),
+            Some("internal:unicode")
+        );
+
+        let _ = l.update(LauncherMessage::SearchChanged(".5km".into()));
+        assert!(l.filtered_apps.iter().any(|a| a.exec.starts_with("math:")));
+    }
 }
+

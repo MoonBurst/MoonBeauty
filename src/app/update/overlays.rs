@@ -167,10 +167,7 @@ impl MoonBeautyShellApp {
             }
             UnicodeMessage::CopySymbol(sym) => {
                 if self.is_standalone {
-                    tokio::spawn(async move {
-                        UnicodeOverlay::copy(sym).await;
-                    });
-                    std::process::exit(0);
+                    crate::app::helpers::run_then_exit(UnicodeOverlay::copy(sym));
                 }
                 self.active_overlay = None;
                 return Command::perform(
@@ -201,11 +198,9 @@ impl MoonBeautyShellApp {
                 }
             }
             UnicodeMessage::CopySelected => {
-                self.unicode.update(msg);
-                if self.is_standalone {
-                    std::process::exit(0);
+                if let Some(sym) = self.unicode.selected_symbol() {
+                    return self.handle_unicode(UnicodeMessage::CopySymbol(sym));
                 }
-                self.active_overlay = None;
             }
             _ => self.unicode.update(msg),
         }

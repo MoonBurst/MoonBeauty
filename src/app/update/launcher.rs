@@ -63,13 +63,19 @@ impl MoonBeautyShellApp {
                         "[launcher] dict copy: {}...",
                         def.chars().take(40).collect::<String>()
                     );
-                    let _ = std::process::Command::new("wl-copy").arg(&def).spawn();
                     let _ = std::process::Command::new("notify-send")
                         .args(["-a", "Dictionary", "Copied", &def])
                         .spawn();
                     if self.is_standalone {
-                        std::process::exit(0);
+                        let d = def.clone();
+                        crate::app::helpers::run_then_exit(async move {
+                            let _ = tokio::process::Command::new("wl-copy")
+                                .arg(&d)
+                                .status()
+                                .await;
+                        });
                     }
+                    let _ = std::process::Command::new("wl-copy").arg(&def).spawn();
                     self.active_overlay = None;
                     return Command::none();
                 }
@@ -107,10 +113,10 @@ impl MoonBeautyShellApp {
                     }
                 }
                 if self.is_standalone {
-                    tokio::spawn(async move {
-                        AppLauncher::launch(&cmd).await;
+                    let c = cmd.clone();
+                    crate::app::helpers::run_then_exit(async move {
+                        AppLauncher::launch(&c).await;
                     });
-                    std::process::exit(0);
                 }
                 self.active_overlay = None;
                 return Command::perform(
