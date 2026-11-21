@@ -107,6 +107,31 @@ impl MoonBeautyShellApp {
             SettingsMessage::AvatarUpdated => {
                 return Command::none();
             }
+            SettingsMessage::ImportAlarmSound => {
+                return Command::perform(
+                    async move {
+                        let file = rfd::AsyncFileDialog::new()
+                            .add_filter(
+                                "Audio",
+                                &["wav", "mp3", "ogg", "flac", "opus", "m4a", "aac"],
+                            )
+                            .add_filter("All Files", &["*"])
+                            .pick_file()
+                            .await;
+                        let Some(f) = file else {
+                            return None;
+                        };
+                        let src_path = f.path().to_path_buf();
+                        tokio::task::spawn_blocking(move || {
+                            moonbeauty::overlays::settings::import_alarm_sound_file(&src_path).ok()
+                        })
+                        .await
+                        .ok()
+                        .flatten()
+                    },
+                    |name| Message::Settings(SettingsMessage::AlarmSoundImported(name)),
+                );
+            }
             _ => {}
         }
 

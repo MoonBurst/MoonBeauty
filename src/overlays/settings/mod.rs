@@ -184,6 +184,7 @@ pub enum SettingsMessage {
     AlarmSoundVolumeChanged(u32),
     TestAlarmSound,
     ImportAlarmSound,
+    AlarmSoundImported(Option<String>),
 
     SelectGpuId(String),
     ScreenshotSaveFormat(ScreenshotSaveFormat),
@@ -278,6 +279,7 @@ impl SettingsOverlay {
                 | SettingsMessage::ClipboardThumbnailSize(_)
                 | SettingsMessage::ScreenshotSaveFormat(_)
                 | SettingsMessage::SizeCommit { .. }
+                | SettingsMessage::AlarmSoundImported(_)
         );
         match message {
             SettingsMessage::TrayIconSize(v) => settings.tray_icon_size = v.clamp(12, 48),
@@ -680,49 +682,12 @@ impl SettingsOverlay {
             }
 
             SettingsMessage::ImportAlarmSound => {
-                let output = std::process::Command::new("sh")
-                    .arg("-c")
-                    .arg("zenity --file-selection --title='Select alarm sound' 2>/dev/null || kdialog --getopenfilename . 2>/dev/null || yad --file 2>/dev/null")
-                    .output();
-                if let Ok(out) = output {
-                    let path_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                    if !path_str.is_empty() {
-                        let src = std::path::Path::new(&path_str);
-                        if let Some(filename) = src.file_name().and_then(|f| f.to_str()) {
-                            // Copy to XDG_DATA/moonbeauty/sounds — stable
-                            // across cwd changes. The old `resources/` copy
-                            // worked only when the bar was launched from the
-                            // project root; systemd / nix develop / standalone
-                            // children all fail that assumption.
-                            let dest_dir = dirs::data_dir()
-                                .map(|d| d.join("moonbeauty").join("sounds"))
-                                .unwrap_or_else(|| {
-                                    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                                        .join("resources")
-                                });
-                            let _ = std::fs::create_dir_all(&dest_dir);
-                            let dest = dest_dir.join(filename);
-                            match std::fs::copy(src, &dest) {
-                                Ok(_) => {
-                                    settings.alarm_sound = Some(filename.to_string());
-                                    let _ = settings.save();
-                                    eprintln!(
-                                        "[alarm-sound] imported {} -> {}",
-                                        filename,
-                                        dest.display()
-                                    );
-                                }
-                                Err(e) => {
-                                    eprintln!(
-                                        "[alarm-sound] import failed (copy to {}): {e}",
-                                        dest.display()
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
+                // Handled in app/update/settings.rs via async rfd::AsyncFileDialog.
             }
+            SettingsMessage::AlarmSoundImported(Some(filename)) => {
+                settings.alarm_sound = Some(filename);
+            }
+            SettingsMessage::AlarmSoundImported(None) => {}
             // CopyIpc is handled in app/update.rs (returns
             // iced::clipboard::write early). This arm only exists for
             // enum exhaustiveness when SettingsOverlay::update is
@@ -986,4 +951,63 @@ impl SettingsOverlay {
 
 
 
+}
+
+pub fn import_alarm_sound_file_to(
+    src: &std::path::Path,
+    dest_dir: &std::path::Path,
+) -> Result<String, String> {
+    if !src.is_file() {
+        return Err(format!("sound file does not exist: {}", src.display()));
+    }
+    let filename = src
+        .file_name()
+        .and_then(|f| f.to_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "invalid sound filename".to_string())?;
+    std::fs::create_dir_all(dest_dir).map_err(|e| format!("mkdir {}: {e}", dest_dir.display()))?;
+    let dest = dest_dir.join(filename);
+    std::fs::copy(src, &dest).map_err(|e| format!("copy to {}: {e}", dest.display()))?;
+    eprintln!("[alarm-sound] imported {} -> {}", filename, dest.display());
+    Ok(filename.to_string())
+}
+
+pub fn import_alarm_sound_file(src: &std::path::Path) -> Result<String, String> {
+    let dest_dir = dirs::data_dir()
+        .map(|d| d.join("moonbeauty").join("sounds"))
+        .unwrap_or_else(|| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources"));
+    import_alarm_sound_file_to(src, &dest_dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{import_alarm_sound_file_to, SettingsMessage, SettingsOverlay};
+    use crate::libraries::config::settings::ShellSettings;
+
+    #[test]
+    fn import_alarm_sound_copies_file_and_updates_setting() {
+        let dir = std::env::temp_dir().join(format!(
+            "mbs-sound-test-{}",
+            crate::libraries::process::random_token()
+        ));
+        let src_dir = dir.join("src");
+        let dest_dir = dir.join("dest");
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        let missing = src_dir.join("missing.ogg");
+        assert!(import_alarm_sound_file_to(&missing, &dest_dir).is_err());
+
+        let src_file = src_dir.join("chime.ogg");
+        std::fs::write(&src_file, b"OggS-test").unwrap();
+        let name = import_alarm_sound_file_to(&src_file, &dest_dir).unwrap();
+        assert_eq!(name, "chime.ogg");
+        assert_eq!(std::fs::read(dest_dir.join("chime.ogg")).unwrap(), b"OggS-test");
+
+        let mut settings = ShellSettings::default();
+        let mut ov = SettingsOverlay::empty();
+        ov.update(SettingsMessage::AlarmSoundImported(Some(name)), &mut settings);
+        assert_eq!(settings.alarm_sound.as_deref(), Some("chime.ogg"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

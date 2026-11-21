@@ -104,6 +104,9 @@ pub fn load_friend_profiles() -> Vec<FriendProfile> {
 }
 
 pub fn save_friend_profiles(profiles: &[FriendProfile]) -> Result<(), std::io::Error> {
+    if cfg!(test) {
+        return Ok(());
+    }
     let path = find_friend_profiles_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -770,6 +773,9 @@ impl ShellSettings {
     }
 
     pub fn save(&self) -> Result<(), std::io::Error> {
+        if cfg!(test) {
+            return Ok(());
+        }
         if std::env::var_os("MBS_SETTINGS_DEBUG").is_some() {
             eprintln!(
                 "[save] writing tooltip_sizes={:?} bar_monitor={:?}",
