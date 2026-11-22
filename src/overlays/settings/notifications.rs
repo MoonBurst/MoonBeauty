@@ -28,12 +28,16 @@ impl SettingsOverlay {
                     .size((scale_sz(0.68)) as f32)
                     .bold()
                     .color(theme.danger),
+                text("Body")
+                    .size((scale_sz(0.68)) as f32)
+                    .bold()
+                    .color(theme.danger),
             ]
             .spacing(6)
             .align_y(Alignment::Center),
         ]
         .spacing(8)
-        .width(Length::Fixed(270.0));
+        .width(Length::Fixed(370.0));
 
         let mut pings_list = column![].spacing(6);
         for (idx, p) in settings.friend_profiles.iter().enumerate() {
@@ -41,6 +45,7 @@ impl SettingsOverlay {
             let p_name = p.summary.clone();
             let is_sound = p.sound;
             let is_tts = p.tts;
+            let is_read_body = p.read_body;
             let is_selected = idx == self.selected_profile;
 
             let sound_btn = button(text("Sound").size((scale_sz(0.6)) as f32).bold().color(
@@ -97,6 +102,33 @@ impl SettingsOverlay {
                 ..Default::default()
             });
 
+            let body_btn = button(text("Body").size((scale_sz(0.6)) as f32).bold().color(
+                if is_read_body {
+                    Color::BLACK
+                } else {
+                    Color::from_rgb8(255, 60, 60)
+                },
+            ))
+            .on_press(SettingsMessage::ToggleProfileReadBody(idx))
+            .padding([2, 6])
+            .style(move |_t, _s| button::Style {
+                background: Some(iced::Background::Color(if is_read_body {
+                    Color::from_rgb8(0, 224, 0)
+                } else {
+                    Color::TRANSPARENT
+                })),
+                border: iced::Border {
+                    color: if is_read_body {
+                        Color::from_rgb8(0, 224, 0)
+                    } else {
+                        Color::from_rgb8(60, 60, 80)
+                    },
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            });
+
             let swatch = container(text(""))
                 .width(Length::Fixed(14.0))
                 .height(Length::Fixed(14.0))
@@ -112,17 +144,22 @@ impl SettingsOverlay {
 
             let capsule_content = row![
                 swatch,
-                text(p_name)
-                    .size((scale_sz(0.75)) as f32)
-                    .bold()
-                    .color(if is_selected {
-                        theme.text
-                    } else {
-                        Color::from_rgb8(200, 200, 200)
-                    })
-                    .width(Length::Fill),
-                sound_btn,
-                tts_btn,
+                container(
+                    text(p_name)
+                        .size((scale_sz(0.75)) as f32)
+                        .bold()
+                        .color(if is_selected {
+                            theme.text
+                        } else {
+                            Color::from_rgb8(200, 200, 200)
+                        })
+                        .wrapping(iced::widget::text::Wrapping::None),
+                )
+                .width(Length::Fill)
+                .clip(true),
+                row![sound_btn, tts_btn, body_btn]
+                    .spacing(4)
+                    .align_y(Alignment::Center),
             ]
             .spacing(6)
             .align_y(Alignment::Center);
@@ -168,7 +205,15 @@ impl SettingsOverlay {
             ..Default::default()
         });
 
-        pings_col = pings_col.push(scrollable(pings_list).height(Length::Fixed(560.0)));
+        pings_col = pings_col.push(
+            scrollable(container(pings_list).padding(Padding {
+                top: 0.0,
+                right: 12.0,
+                bottom: 0.0,
+                left: 0.0,
+            }))
+            .height(Length::Fixed(560.0)),
+        );
         pings_col = pings_col.push(add_btn);
 
         let active_pill = button(

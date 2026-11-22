@@ -102,6 +102,7 @@ pub enum SettingsMessage {
 
     // Notifications
     ToggleNotifications,
+    ToggleNotifReadBody,
     SelectNotifCorner(String),
     SelectNotifShape(String),
     SelectNotifScreen(String),
@@ -132,6 +133,7 @@ pub enum SettingsMessage {
     TestProfileSound(usize),
     TestProfileTts(usize),
     ToggleProfileTts(usize),
+    ToggleProfileReadBody(usize),
     ProfileSummaryChanged(usize, String),
     ProfileColorChanged(usize, String),
     ProfileSoundPathChanged(usize, String),
@@ -250,6 +252,7 @@ impl SettingsOverlay {
                 | SettingsMessage::SaveSettings
                 | SettingsMessage::SelectTab(_)
                 | SettingsMessage::ToggleNotifications
+                | SettingsMessage::ToggleNotifReadBody
                 | SettingsMessage::SelectNotifCorner(_)
                 | SettingsMessage::SelectNotifShape(_)
                 | SettingsMessage::SelectNotifScreen(_)
@@ -260,6 +263,7 @@ impl SettingsOverlay {
                 | SettingsMessage::DeleteProfile(_)
                 | SettingsMessage::ToggleProfileSound(_)
                 | SettingsMessage::ToggleProfileTts(_)
+                | SettingsMessage::ToggleProfileReadBody(_)
                 | SettingsMessage::ProfileSummaryChanged(_, _)
                 | SettingsMessage::ProfileColorChanged(_, _)
                 | SettingsMessage::ProfileSoundPathChanged(_, _)
@@ -375,6 +379,9 @@ impl SettingsOverlay {
             SettingsMessage::ToggleNotifications => {
                 settings.notifications_enabled = !settings.notifications_enabled
             }
+            SettingsMessage::ToggleNotifReadBody => {
+                settings.notif_tts_read_body = !settings.notif_tts_read_body
+            }
             SettingsMessage::SelectNotifCorner(c) => settings.notif_corner = c,
             SettingsMessage::SelectNotifShape(s) => settings.notif_shape = s,
             SettingsMessage::SelectNotifScreen(s) => {
@@ -421,6 +428,14 @@ impl SettingsOverlay {
             SettingsMessage::ToggleProfileTts(idx) => {
                 if let Some(p) = settings.friend_profiles.get_mut(idx) {
                     p.tts = !p.tts;
+                    let _ = crate::libraries::config::settings::save_friend_profiles(
+                        &settings.friend_profiles,
+                    );
+                }
+            }
+            SettingsMessage::ToggleProfileReadBody(idx) => {
+                if let Some(p) = settings.friend_profiles.get_mut(idx) {
+                    p.read_body = !p.read_body;
                     let _ = crate::libraries::config::settings::save_friend_profiles(
                         &settings.friend_profiles,
                     );
@@ -489,7 +504,8 @@ impl SettingsOverlay {
                     sound: true,
                     sound_path: None,
                     tts: true,
-                    default_readout: Some("Message from {name}: {body}".into()),
+                    read_body: false,
+                    default_readout: Some("Message from {name}".into()),
                     content_rules: vec![crate::libraries::config::settings::ContentRule {
                         pattern: "logged in".into(),
                         readout: "{name} has logged in".into(),

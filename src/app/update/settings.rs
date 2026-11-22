@@ -26,11 +26,12 @@ impl MoonBeautyShellApp {
             if let Some(p) = self.settings.friend_profiles.get(idx) {
                 moonbeauty::overlays::notifications::NotificationOverlay::speak_tts(
                     "Diagnostics",
-                    "Test",
                     &p.summary,
+                    "Sample message body",
                     p.default_readout.as_deref(),
                     self.settings.tts_command.clone(),
                     self.settings.notif_volume,
+                    p.read_body,
                 );
             }
             return Command::none();

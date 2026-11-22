@@ -60,8 +60,15 @@ pub fn is_app_focused(candidates: &[String]) -> bool {
     candidates.iter().any(|c| focused.eq_ignore_ascii_case(c))
 }
 
-pub fn focus_notification_app(app_name: &str, desktop_entry: Option<&str>) -> bool {
+pub fn focus_notification_app(
+    app_name: &str,
+    desktop_entry: Option<&str>,
+    activation_token: Option<&str>,
+) -> bool {
     let candidates = notification_candidates(app_name, desktop_entry);
+    if is_app_focused(&candidates) {
+        return true;
+    }
     if std::env::var("SWAYSOCK").is_ok() {
         for cand in &candidates {
             let _ = std::process::Command::new("swaymsg")
@@ -70,29 +77,31 @@ pub fn focus_notification_app(app_name: &str, desktop_entry: Option<&str>) -> bo
                 .stderr(std::process::Stdio::null())
                 .status();
         }
-        if let Some(focused) = focused_app_id() {
-            for cand in &candidates {
-                if focused.eq_ignore_ascii_case(cand) {
-                    return true;
-                }
-            }
+        if is_app_focused(&candidates) {
+            return true;
         }
     }
     if let Some(de) = desktop_entry {
         let de_clean = de.trim_end_matches(".desktop");
         if moonbeauty::libraries::process::is_safe_app_id(de_clean) {
-            let ok = std::process::Command::new("gtk-launch")
-                .arg(de_clean)
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
+            let mut cmd = std::process::Command::new("gtk-launch");
+            cmd.arg(de_clean);
+            if let Some(tok) = activation_token.filter(|s| !s.is_empty()) {
+                cmd.env("XDG_ACTIVATION_TOKEN", tok);
+            }
+            let ok = cmd.status().map(|s| s.success()).unwrap_or(false);
             if ok {
                 return true;
             }
         }
     }
     if let Some(first) = candidates.first() {
-        let _ = std::process::Command::new("gtk-launch").arg(first).status();
+        let mut cmd = std::process::Command::new("gtk-launch");
+        cmd.arg(first);
+        if let Some(tok) = activation_token.filter(|s| !s.is_empty()) {
+            cmd.env("XDG_ACTIVATION_TOKEN", tok);
+        }
+        let _ = cmd.status();
     }
     false
 }

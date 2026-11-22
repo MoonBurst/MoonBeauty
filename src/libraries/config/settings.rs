@@ -60,6 +60,8 @@ pub struct FriendProfile {
     #[serde(default)]
     pub tts: bool,
     #[serde(default)]
+    pub read_body: bool,
+    #[serde(default)]
     pub default_readout: Option<String>,
     #[serde(default)]
     pub content_rules: Vec<ContentRule>,
@@ -274,6 +276,8 @@ pub struct ShellSettings {
     pub notif_hold_duration_sec: u64,
     #[serde(default = "default_notif_volume", alias = "notifVolume")]
     pub notif_volume: u32,
+    #[serde(default, alias = "notifTtsReadBody")]
+    pub notif_tts_read_body: bool,
     #[serde(default = "default_notif_corner", alias = "notifCorner")]
     pub notif_corner: String,
     #[serde(default = "default_notif_shape", alias = "notificationShapeStyle")]
@@ -640,6 +644,7 @@ impl Default for ShellSettings {
             notifications_enabled: true,
             notif_hold_duration_sec: default_notif_hold(),
             notif_volume: default_notif_volume(),
+            notif_tts_read_body: false,
             notif_corner: default_notif_corner(),
             notif_shape: default_notif_shape(),
             notif_screen_name: default_notif_screen(),

@@ -256,6 +256,9 @@ impl MoonBeautyShellApp {
                     Key::Named(Named::ArrowDown) => {
                         Some(Message::Notif(NotifMessage::HistorySelectNext))
                     }
+                    Key::Named(Named::Enter) => {
+                        Some(Message::Notif(NotifMessage::HistoryActivateSelected))
+                    }
                     Key::Named(Named::Delete) => {
                         Some(Message::Notif(NotifMessage::HistoryDeleteSelected))
                     }

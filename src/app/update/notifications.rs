@@ -11,6 +11,27 @@
 #![allow(clippy::collapsible_match)]
 
 use super::*;
+use crate::app::keys::focus_notification_app;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct NotifActivateCmd {
+    id: u32,
+    token: Option<String>,
+    action_key: Option<String>,
+    is_resident: bool,
+    #[serde(default)]
+    close_notification: bool,
+}
+
+fn is_notif_surface_pid_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    let Ok(bytes) = std::fs::read(format!("/proc/{}/cmdline", pid)) else {
+        return false;
+    };
+    bytes.split(|b| *b == 0).any(|arg| arg == b"--notif-surface")
+}
 
 impl MoonBeautyShellApp {
     fn trigger_toast_handshake(
@@ -103,6 +124,7 @@ impl MoonBeautyShellApp {
             NotifMessage::DismissToast(id) => {
                 self.notifs.dismiss_toast_ui(id);
                 if self.is_notif_surface {
+                    self.notifs.mark_history_closed(id);
                     return Command::perform(
                         moonbeauty::overlays::notifications::emit_notification_closed(id, 2),
                         |_| Message::Noop,
@@ -144,7 +166,104 @@ impl MoonBeautyShellApp {
             NotifMessage::FinishToastActivation { id, dismiss } => {
                 if dismiss {
                     self.notifs.dismiss_toast_ui(id);
+                    if self.is_notif_surface {
+                        self.notifs.mark_history_closed(id);
+                    }
                 }
+            }
+            NotifMessage::HistoryActivateSelected => {
+                let Some(sel_id) = self.notifs.selected_history_id else {
+                    return Command::none();
+                };
+                let Some(t) = self
+                    .notifs
+                    .history
+                    .iter()
+                    .find(|t| t.id == sel_id)
+                    .cloned()
+                else {
+                    return Command::none();
+                };
+
+                let has_default = t.actions.chunks_exact(2).any(|pair| pair[0] == "default");
+                let live_capable =
+                    !t.closed && has_default && is_notif_surface_pid_alive(t.daemon_pid);
+
+                let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
+                let tx = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
+                let cb = iced_layershell::actions::ActivationCallback::new(move |token| {
+                    if let Ok(mut guard) = tx.lock() {
+                        if let Some(sender) = guard.take() {
+                            let _ = sender.send(token);
+                        }
+                    }
+                });
+
+                let jump_task = Command::perform(
+                    async move {
+                        let token = match tokio::time::timeout(
+                            std::time::Duration::from_millis(500),
+                            rx,
+                        )
+                        .await
+                        {
+                            Ok(Ok(tok)) => tok,
+                            _ => None,
+                        };
+
+                        if live_capable {
+                            let cmd_path = moonbeauty::libraries::process::mbs_runtime_dir()
+                                .join("moonbeauty-notif-cmd");
+                            let tmp_path = cmd_path.with_extension("tmp");
+                            let payload = NotifActivateCmd {
+                                id: t.id,
+                                token: token.clone(),
+                                action_key: Some("default".to_string()),
+                                is_resident: t.is_resident,
+                                close_notification: false,
+                            };
+                            if let Ok(json) = serde_json::to_vec(&payload) {
+                                if moonbeauty::libraries::process::private_write_file(
+                                    &tmp_path, &json,
+                                )
+                                .is_ok()
+                                    && std::fs::rename(&tmp_path, &cmd_path).is_ok()
+                                {
+                                    for _ in 0..20 {
+                                        if !cmd_path.exists() {
+                                            break;
+                                        }
+                                        tokio::time::sleep(std::time::Duration::from_millis(10))
+                                            .await;
+                                    }
+                                    return;
+                                }
+                            }
+                        }
+
+                        tokio::task::spawn_blocking(move || {
+                            focus_notification_app(
+                                &t.app_name,
+                                t.desktop_entry.as_deref(),
+                                token.as_deref(),
+                            );
+                        })
+                        .await
+                        .ok();
+                    },
+                    |_| Message::Notif(NotifMessage::FinishHistoryActivation),
+                );
+
+                return Command::batch(vec![
+                    Command::done(Message::RequestXdgActivation(cb)),
+                    jump_task,
+                ]);
+            }
+            NotifMessage::FinishHistoryActivation => {
+                if self.is_standalone {
+                    std::process::exit(0);
+                }
+                self.active_overlay = None;
             }
             _ => self.notifs.update(msg),
         }
@@ -209,6 +328,7 @@ impl MoonBeautyShellApp {
                         if let Some(oldest) = self.notifs.oldest_active_toast() {
                             let oid = oldest.id;
                             self.notifs.dismiss_toast_ui(oid);
+                            self.notifs.mark_history_closed(oid);
                             return Command::perform(
                                 moonbeauty::overlays::notifications::emit_notification_closed(
                                     oid, 2,
@@ -229,7 +349,24 @@ impl MoonBeautyShellApp {
                             eprintln!("[activate-latest] no active toast");
                         }
                     }
-                    _ => {}
+                    other => {
+                        if let Ok(req) = serde_json::from_str::<NotifActivateCmd>(other) {
+                            self.notifs.dismiss_toast_ui(req.id);
+                            if req.close_notification && !req.is_resident {
+                                self.notifs.mark_history_closed(req.id);
+                            }
+                            let skip_dbus_close = !req.close_notification || req.is_resident;
+                            return Command::perform(
+                                moonbeauty::overlays::notifications::emit_click_handshake(
+                                    req.id,
+                                    req.token,
+                                    req.action_key,
+                                    skip_dbus_close,
+                                ),
+                                |_| Message::Noop,
+                            );
+                        }
+                    }
                 }
             }
 

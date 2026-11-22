@@ -90,6 +90,7 @@ impl MoonBeautyShellApp {
                     Some("New email from {sender}: {body}"),
                     self.settings.tts_command.clone(),
                     self.settings.notif_volume,
+                    self.settings.notif_tts_read_body,
                 );
 
                 notified.insert(env.id.clone());

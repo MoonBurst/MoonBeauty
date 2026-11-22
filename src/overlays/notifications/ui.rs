@@ -417,6 +417,12 @@ pub struct NotificationToast {
     pub tts_pending: bool,
     #[serde(default)]
     pub tts_spoken: bool,
+    #[serde(default)]
+    pub tts_read_body: bool,
+    #[serde(default)]
+    pub daemon_pid: u32,
+    #[serde(default)]
+    pub closed: bool,
 }
 
 fn default_toast_text_color() -> String {
@@ -429,6 +435,8 @@ pub enum NotifMessage {
     ActivateToast(u32),
     InvokeToastAction(u32, String),
     FinishToastActivation { id: u32, dismiss: bool },
+    HistoryActivateSelected,
+    FinishHistoryActivation,
     ClearHistory,
     DeleteHistory(u32),
     HistorySelectNext,
@@ -460,6 +468,7 @@ pub struct NotificationOverlay {
     pub selected_history_id: Option<u32>,
     pub last_saved: Instant,
     pub history_dirty: bool,
+    history_file_sig: Option<(Option<std::time::SystemTime>, u64, u64)>,
 }
 
 impl Default for NotificationOverlay {
@@ -469,8 +478,26 @@ impl Default for NotificationOverlay {
 }
 
 impl NotificationOverlay {
+    fn history_file_sig() -> Option<(Option<std::time::SystemTime>, u64, u64)> {
+        use std::os::unix::fs::MetadataExt as _;
+        let meta = std::fs::metadata(Self::history_path()).ok()?;
+        Some((meta.modified().ok(), meta.ino(), meta.len()))
+    }
+
+    pub fn sync_history_from_disk_if_changed(&mut self) {
+        if cfg!(test) {
+            return;
+        }
+        let sig = Self::history_file_sig();
+        if sig != self.history_file_sig {
+            self.history = Self::load_history();
+            self.history_file_sig = sig;
+        }
+    }
+
     pub fn new() -> Self {
         let history = Self::load_history();
+        let history_file_sig = Self::history_file_sig();
         let selected_history_id = history.first().map(|t| t.id);
         Self {
             icon_cache: std::collections::HashMap::new(),
@@ -484,6 +511,7 @@ impl NotificationOverlay {
             selected_history_id,
             last_saved: Instant::now(),
             history_dirty: false,
+            history_file_sig,
         }
     }
 
@@ -500,6 +528,7 @@ impl NotificationOverlay {
             selected_history_id: None,
             last_saved: Instant::now(),
             history_dirty: false,
+            history_file_sig: None,
         }
     }
 
@@ -640,7 +669,7 @@ impl NotificationOverlay {
         }
     }
 
-    fn save_history_immediate(&self) {
+    fn save_history_immediate(&mut self) {
         if cfg!(test) {
             return;
         }
@@ -651,12 +680,15 @@ impl NotificationOverlay {
             // URLs. `fs::write` inherits umask (022 → 0644). Route through
             // the same 0600 helper the rest of the file already uses.
             if crate::libraries::process::private_write_file(&tmp, data.as_bytes()).is_ok() {
-                let _ = fs::rename(tmp, path);
+                if fs::rename(tmp, &path).is_ok() {
+                    self.history_file_sig = Self::history_file_sig();
+                }
             }
         }
     }
 
     pub fn push_to_history(&mut self, item: NotificationToast) {
+        self.sync_history_from_disk_if_changed();
         self.history.insert(0, item);
         if self.history.len() > 80 {
             self.history.truncate(80);
@@ -789,9 +821,13 @@ impl NotificationOverlay {
             tts_command: None,
             tts_pending: false,
             tts_spoken: false,
+            tts_read_body: false,
+            daemon_pid: std::process::id(),
+            closed: false,
         };
 
         let tts_pending = !is_test && matched_profile.map(|p| p.tts).unwrap_or(false);
+        let tts_read_body = matched_profile.map(|p| p.read_body).unwrap_or(false);
         let mut tts_readout = matched_profile.and_then(|p| p.default_readout.clone());
 
         // Apply custom content rules if they match the summary or body
@@ -819,6 +855,7 @@ impl NotificationOverlay {
         item.tts_readout = tts_readout;
         item.tts_command = tts_command;
         item.tts_pending = tts_pending;
+        item.tts_read_body = tts_read_body;
 
         if dnd_active() {
             eprintln!(
@@ -852,6 +889,7 @@ impl NotificationOverlay {
         }
 
         self.push_to_history(item);
+        self.save_history_immediate();
     }
 
     pub fn play_sound(path: String, volume: u32) {
@@ -871,11 +909,12 @@ impl NotificationOverlay {
         _custom_readout: Option<&str>,
         tts_command: Option<String>,
         volume: u32,
+        read_body: bool,
     ) {
         let a = app_name.to_string();
         let s = summary.to_string();
         let b = body.to_string();
-        let readout_template = _custom_readout.map(|s| s.to_string()).unwrap_or_else(|| {
+        let mut readout_template = _custom_readout.map(|s| s.to_string()).unwrap_or_else(|| {
             let lower = format!("{} {}", s, b).to_lowercase();
             if lower.contains("logged in") || lower.contains("signed in") {
                 "{sender} has logged in".to_string()
@@ -883,6 +922,21 @@ impl NotificationOverlay {
                 "Message from {sender}".to_string()
             }
         });
+        if !read_body {
+            for pat in [
+                ": {body}", ": $body", ": {message}", ": $message",
+                " - {body}", " - $body", " - {message}", " - $message",
+                " {body}", " $body", " {message}", " $message",
+                "{body}", "$body", "{message}", "$message",
+            ] {
+                readout_template = readout_template.replace(pat, "");
+            }
+            readout_template = readout_template
+                .trim()
+                .trim_end_matches(':')
+                .trim()
+                .to_string();
+        }
 
         std::thread::spawn(move || {
             // Smart sender extraction
@@ -938,13 +992,6 @@ impl NotificationOverlay {
                         if !remaining.is_empty() {
                             msg = remaining;
                         }
-                    } else if !b.is_empty()
-                        && b.len() < 30
-                        && !b.contains(':')
-                        && !looks_like_action(&b)
-                    {
-                        sender = b.clone();
-                        msg = "".to_string();
                     } else {
                         sender = a.clone();
                     }
@@ -1026,6 +1073,13 @@ impl NotificationOverlay {
                 }
             }
 
+            let template_has_body = ["{body}", "$body", "{message}", "$message"]
+                .iter()
+                .any(|k| readout_template.contains(k));
+            let is_login_rule = {
+                let low = readout_template.to_lowercase();
+                low.contains("logged in") || low.contains("signed in")
+            };
             let mut spoken = readout_template.clone();
             for (key, val) in [
                 // The new smart sender variables
@@ -1052,6 +1106,13 @@ impl NotificationOverlay {
                 ("$appname", &a),
             ] {
                 spoken = spoken.replace(key, val);
+            }
+
+            if read_body && !template_has_body && !is_login_rule {
+                let clean_msg = msg.trim();
+                if !clean_msg.is_empty() && !clean_msg.eq_ignore_ascii_case(&sender) {
+                    spoken = format!("{}: {}", spoken.trim_end(), clean_msg);
+                }
             }
 
             crate::dbg_log!("[tts-trace] app={:?} summary={:?} body={:?}", a, s, b);
@@ -1212,6 +1273,7 @@ impl NotificationOverlay {
                         t.tts_body.clone(),
                         t.tts_readout.clone(),
                         t.tts_command.clone(),
+                        t.tts_read_body,
                     ))
                 } else {
                     None
@@ -1219,9 +1281,9 @@ impl NotificationOverlay {
             } else {
                 None
             };
-            if let Some((a, s, b, r, c)) = payload {
+            if let Some((a, s, b, r, c, read_body)) = payload {
                 crate::dbg_log!("[tts-fire] id={} app={:?}", fid, a);
-                Self::speak_tts(&a, &s, &b, r.as_deref(), c, volume);
+                Self::speak_tts(&a, &s, &b, r.as_deref(), c, volume, read_body);
             }
         }
 
@@ -1239,6 +1301,21 @@ impl NotificationOverlay {
             if t.id == id && t.exit_started_at.is_none() {
                 t.exit_started_at = Some(now);
             }
+        }
+    }
+
+    pub fn mark_history_closed(&mut self, id: u32) {
+        self.sync_history_from_disk_if_changed();
+        let pid = std::process::id();
+        let mut changed = false;
+        for h in self.history.iter_mut() {
+            if h.id == id && h.daemon_pid == pid && !h.closed {
+                h.closed = true;
+                changed = true;
+            }
+        }
+        if changed {
+            self.save_history_immediate();
         }
     }
 
@@ -1318,7 +1395,7 @@ impl NotificationOverlay {
                     };
                 }
             }
-            NotifMessage::HistoryScrollTo(_) => {}
+            NotifMessage::HistoryScrollTo(_) | NotifMessage::HistoryActivateSelected | NotifMessage::FinishHistoryActivation => {}
             NotifMessage::ToggleHistoryDrawer => {
                 self.show_history = !self.show_history;
             }
@@ -1883,7 +1960,7 @@ impl NotificationOverlay {
         });
 
         let footer_row = container(
-            text("↑/↓ Navigate  •  Delete to remove  •  ESC to dismiss")
+            text("↑/↓ Navigate  •  Enter to jump  •  Delete to remove  •  ESC to dismiss")
                 .size(fs_sm)
                 .color(theme.muted)
                 .align_x(Alignment::Center),
@@ -2385,6 +2462,9 @@ mod tests {
             tts_command: None,
             tts_pending: false,
             tts_spoken: false,
+            tts_read_body: false,
+            daemon_pid: 0,
+            closed: false,
         }
     }
 
