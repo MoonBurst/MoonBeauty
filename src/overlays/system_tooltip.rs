@@ -815,9 +815,22 @@ impl App {
         if let Some(d) = &self.data {
             match d {
                 Data::Cpu(c) => {
+                    let q = self.search_query.to_lowercase();
+                    let header_title = if q.is_empty() {
+                        format!("CPU METRICS · {}%", c.usage_pct)
+                    } else {
+                        let sum_pct: f64 = c
+                            .top_procs
+                            .iter()
+                            .filter(|p| p.name.to_lowercase().contains(&q))
+                            .map(|p| leading_number(&p.metric))
+                            .sum();
+                        format!("CPU METRICS · {:.1}%", sum_pct)
+                    };
+
                     let header_h = fs as f32 + 16.0;
                     let header: Element<'_, Message> = row![
-                        text("CPU METRICS")
+                        text(header_title)
                             .size((fs.max(12)) as f32)
                             .bold()
                             .color(text_col)
@@ -878,10 +891,34 @@ impl App {
                 Data::Gpu(g) => {
                     let header_h = fs as f32 + 16.0;
                     let multi = self.gpu_list.len() > 1;
-                    let header_label = if multi {
-                        format!("GPU: {} ({}%)  ▼", g.name, g.usage_pct)
+                    let q = self.search_query.to_lowercase();
+                    let usage_label = if q.is_empty() {
+                        format!("{}%", g.usage_pct)
                     } else {
-                        format!("GPU: {} ({}%)", g.name, g.usage_pct)
+                        let matching: Vec<&ProcessItem> = g
+                            .top_procs
+                            .iter()
+                            .filter(|p| p.name.to_lowercase().contains(&q))
+                            .collect();
+                        let has_pct = matching.iter().any(|p| p.metric.contains('%'));
+                        let has_mib = matching.iter().any(|p| p.metric.contains("MiB"));
+                        if has_pct || !has_mib {
+                            let sum_pct: f64 = matching
+                                .iter()
+                                .filter(|p| p.metric.contains('%'))
+                                .map(|p| leading_number(&p.metric))
+                                .sum();
+                            format!("{:.1}%", sum_pct)
+                        } else {
+                            let sum_mib: f64 =
+                                matching.iter().map(|p| leading_number(&p.metric)).sum();
+                            format!("{:.0}M", sum_mib)
+                        }
+                    };
+                    let header_label = if multi {
+                        format!("GPU: {} ({})  ▼", g.name, usage_label)
+                    } else {
+                        format!("GPU: {} ({})", g.name, usage_label)
                     };
 
                     let header_el: Element<'_, Message> = if multi {
