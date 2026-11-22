@@ -87,6 +87,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
 
     moonbeauty::bar::tray::cli::run(&args);
+    moonbeauty::overlays::tooltips::run(&args);
 
     let is_notif_surface = detect_notif_surface(&args);
 
@@ -130,14 +131,17 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     // D-Bus service file is kept as a crash fallback: if notif-surface
     // crashes, D-Bus reactivates it on the next Notify() call.
     if !is_notif_surface && standalone_target.is_none() {
+        // SIGKILL, not SIGTERM: the previous notif-surface may never
+        // poll was_sigterm_signaled(). SIGKILL is uncatchable.
         let _ = std::process::Command::new("pkill")
             .args([
+                "-9",
                 "-f",
                 "--",
                 "(^|/)(moonbeauty|moon-beauty-shell) --notif-surface$",
             ])
             .status();
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        std::thread::sleep(std::time::Duration::from_millis(50));
         let exe = resolve_exe();
         let mut cmd = std::process::Command::new(exe);
         cmd.arg("--notif-surface");
@@ -145,7 +149,10 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         if !target.is_empty() && target != "Auto" && target != "Auto (Primary)" {
             cmd.env("MBS_OUTPUT", target);
         }
-        let _ = moonbeauty::libraries::process::spawn_and_reap(&mut cmd);
+        // PDEATHSIG: if the bar dies (crash, SIGKILL, systemctl restart),
+        // the notif-surface dies with it. Prevents stale-orphan
+        // accumulation — the "3 moonbeauty processes" bug.
+        let _ = moonbeauty::libraries::process::spawn_and_reap_pdeathsig(&mut cmd);
     }
 
     // Fast path: bar already set MBS_OUTPUT — child inherits it.
@@ -299,8 +306,6 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             ..Default::default()
         }
     };
-
-    moonbeauty::overlays::tooltips::run(&args);
 
     let _app = iced_layershell::application(
         MoonBeautyShellApp::new_app,

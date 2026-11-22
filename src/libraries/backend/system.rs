@@ -124,6 +124,54 @@ fn short_gpu_name(full: &str) -> String {
     s.to_string()
 }
 
+fn label_moonbeauty_from_cmdline(name: &str, cmdline: &[u8]) -> String {
+    if name != "moonbeauty" && name != "moon-beauty-shell" {
+        return name.to_string();
+    }
+    let args: Vec<&str> = cmdline
+        .split(|b| *b == 0)
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| std::str::from_utf8(s).ok())
+        .collect();
+    if args.is_empty() {
+        return name.to_string();
+    }
+    let role = if args.contains(&"--notif-surface") {
+        "notifs"
+    } else if args.contains(&"--sys-tooltip")
+        || args.contains(&"--weather-tooltip")
+        || args.contains(&"--info-tooltip")
+    {
+        "tooltip"
+    } else if args.contains(&"--overlay") {
+        "overlay"
+    } else if args.contains(&"--lockscreen") || args.contains(&"--lockscreen-instance") {
+        "lock"
+    } else if args.contains(&"--annotator-session")
+        || args.contains(&"--screenshot")
+        || args.contains(&"--freeze-fragment")
+    {
+        "shot"
+    } else if args.contains(&"--tray-context-menu") {
+        "tray"
+    } else if args.contains(&"--clipboard-ingest") {
+        "ingest"
+    } else {
+        "bar"
+    };
+    format!("{} ({})", name, role)
+}
+
+fn label_moonbeauty_role(pid: u32, name: &str) -> String {
+    if name != "moonbeauty" && name != "moon-beauty-shell" {
+        return name.to_string();
+    }
+    let Ok(bytes) = fs::read(format!("/proc/{}/cmdline", pid)) else {
+        return name.to_string();
+    };
+    label_moonbeauty_from_cmdline(name, &bytes)
+}
+
 impl SystemCollector {
     pub fn new() -> Self {
         Self {
@@ -216,7 +264,11 @@ impl SystemCollector {
                                                     };
                                                     procs_cpu.push((
                                                         pid,
-                                                        name.to_string(),
+                                                        if i == loops - 1 {
+                                                            label_moonbeauty_role(pid, name)
+                                                        } else {
+                                                            name.to_string()
+                                                        },
                                                         cpu_pct as f32,
                                                     ));
                                                 }
@@ -242,7 +294,7 @@ impl SystemCollector {
                                                     if !name.contains(" #") {
                                                         procs_ram_raw.push((
                                                             pid,
-                                                            name.to_string(),
+                                                            label_moonbeauty_role(pid, name),
                                                             rss_bytes,
                                                         ));
                                                     } else {
@@ -275,7 +327,7 @@ impl SystemCollector {
                         .sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
                     top_procs_cpu = procs_cpu
                         .into_iter()
-                        .take(15)
+                        .take(250)
                         .map(|(pid, name, pct)| ProcessItem {
                             pid,
                             name,
@@ -336,7 +388,7 @@ impl SystemCollector {
             procs_ram_raw.sort_by_key(|x| std::cmp::Reverse(x.2));
             let top_procs_ram = procs_ram_raw
                 .into_iter()
-                .take(15)
+                .take(500)
                 .map(|(pid, name, bytes)| ProcessItem {
                     pid,
                     name,
@@ -1082,7 +1134,7 @@ impl SystemCollector {
                 let total_kib: u64 = clients.values().map(|(v, _)| *v).sum();
                 let total_engine_ns: u64 = clients.values().map(|(_, e)| *e).sum();
                 let comm = fs::read_to_string(format!("/proc/{}/comm", pid))
-                    .map(|s| s.trim().to_string())
+                    .map(|s| label_moonbeauty_role(pid, s.trim()))
                     .unwrap_or_else(|_| format!("pid {}", pid));
                 users.insert(pid, (comm, total_kib, total_engine_ns));
             }
@@ -1131,7 +1183,7 @@ impl SystemCollector {
                     is_highlight: false,
                 })
             })
-            .take(15)
+            .take(100)
             .collect();
 
         result
@@ -1345,5 +1397,30 @@ impl SystemCollector {
             g.insert(card_id.to_string(), (Instant::now(), m.clone()));
         }
         m
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::label_moonbeauty_from_cmdline;
+
+    #[test]
+    fn labels_moonbeauty_roles_from_cmdline() {
+        assert_eq!(
+            label_moonbeauty_from_cmdline("moonbeauty", b"/bin/moonbeauty\0"),
+            "moonbeauty (bar)"
+        );
+        assert_eq!(
+            label_moonbeauty_from_cmdline("moonbeauty", b"/bin/moonbeauty\0--notif-surface\0"),
+            "moonbeauty (notifs)"
+        );
+        assert_eq!(
+            label_moonbeauty_from_cmdline("moonbeauty", b"/bin/moonbeauty\0--sys-tooltip\0"),
+            "moonbeauty (tooltip)"
+        );
+        assert_eq!(
+            label_moonbeauty_from_cmdline("firefox", b"/usr/bin/firefox\0"),
+            "firefox"
+        );
     }
 }
