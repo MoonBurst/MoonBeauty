@@ -172,6 +172,27 @@ fn label_moonbeauty_role(pid: u32, name: &str) -> String {
     label_moonbeauty_from_cmdline(name, &bytes)
 }
 
+fn read_proc_ram_bytes(proc_dir: &Path, use_pss: bool) -> Option<u64> {
+    if use_pss {
+        if let Ok(rollup) = fs::read_to_string(proc_dir.join("smaps_rollup")) {
+            for line in rollup.lines() {
+                if let Some(rest) = line.strip_prefix("Pss:") {
+                    if let Some(kb) = rest
+                        .split_whitespace()
+                        .next()
+                        .and_then(|s| s.parse::<u64>().ok())
+                    {
+                        return Some(kb * 1024);
+                    }
+                }
+            }
+        }
+    }
+    let statm = fs::read_to_string(proc_dir.join("statm")).ok()?;
+    let rss_pages = statm.split_whitespace().nth(1)?.parse::<u64>().ok()?;
+    Some(rss_pages * 4096)
+}
+
 impl SystemCollector {
     pub fn new() -> Self {
         Self {
@@ -184,6 +205,14 @@ impl SystemCollector {
     }
 
     pub async fn collect_all() -> (CpuMetrics, RamMetrics) {
+        Self::collect_all_inner(false).await
+    }
+
+    pub async fn collect_all_pss() -> (CpuMetrics, RamMetrics) {
+        Self::collect_all_inner(true).await
+    }
+
+    async fn collect_all_inner(use_pss: bool) -> (CpuMetrics, RamMetrics) {
         let temp_c = read_cpu_temp();
 
         tokio::task::spawn_blocking(move || {
@@ -278,12 +307,9 @@ impl SystemCollector {
 
                                     // RAM (read statm on the final loop)
                                     if i == loops - 1 {
-                                        if let Ok(statm) =
-                                            std::fs::read_to_string(entry.path().join("statm"))
+                                        if let Some(rss_bytes) =
+                                            read_proc_ram_bytes(&entry.path(), use_pss)
                                         {
-                                            if let Some(rss_str) = statm.split_whitespace().nth(1) {
-                                                if let Ok(rss_pages) = rss_str.parse::<u64>() {
-                                                    let rss_bytes = rss_pages * 4096; // Assuming 4KB pages
                                                     // Only dedupe Firefox/Chrome-style
                                                     // renderer subprocesses (name has
                                                     // " #N" suffix). Ordinary processes
@@ -311,8 +337,6 @@ impl SystemCollector {
                                                             ));
                                                         }
                                                     }
-                                                }
-                                            }
                                         }
                                     }
                                 }

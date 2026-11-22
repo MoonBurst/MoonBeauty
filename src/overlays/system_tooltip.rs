@@ -33,6 +33,8 @@ pub enum Message {
     KillProcess(u32),
     Noop,
     SearchChanged(String),
+    Scrolled(f32),
+    ScrollToFraction(f32),
     CycleGpu,
 }
 
@@ -60,6 +62,7 @@ pub struct App {
     slant_r: SlantSide,
     closing_at: Option<crate::overlays::tooltip_engine::ClosingState>,
     search_query: String,
+    scroll_y: f32,
     gpu_list: Vec<GpuInfo>,
     selected_gpu: usize,
     anim_frame: u64,
@@ -137,6 +140,7 @@ impl App {
             slant_r: env.slant_r,
             closing_at: None,
             search_query: String::new(),
+            scroll_y: 0.0,
             gpu_list,
             selected_gpu,
             anim_frame: 0,
@@ -163,7 +167,7 @@ impl App {
                 |d| Message::Loaded(Data::Gpu(d)),
             )
         } else if target == "ram" {
-            Task::perform(async { SystemCollector::collect_all().await.1 }, |d| {
+            Task::perform(async { SystemCollector::collect_all_pss().await.1 }, |d| {
                 Message::Loaded(Data::Ram(d))
             })
         } else {
@@ -251,7 +255,7 @@ impl App {
                             match target.as_str() {
                                 "cpu" => Data::Cpu(async { SystemCollector::collect_all().await.0 }.await),
                                 "gpu" => Data::Gpu(SystemCollector::collect_gpu_by_info(&gpu_info).await),
-                                _ => Data::Ram(async { SystemCollector::collect_all().await.1 }.await),
+                                _ => Data::Ram(async { SystemCollector::collect_all_pss().await.1 }.await),
                             }
                         },
                         Message::Loaded,
@@ -267,6 +271,22 @@ impl App {
             }
             Message::SearchChanged(q) => {
                 self.search_query = q;
+                self.scroll_y = 0.0;
+                return iced::widget::operation::scroll_to(
+                    iced::widget::Id::new("sys_proc_scroll"),
+                    iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: 0.0 },
+                );
+            }
+            Message::Scrolled(y) => {
+                self.scroll_y = y.max(0.0);
+            }
+            Message::ScrollToFraction(frac) => {
+                let target_y = frac.clamp(0.0, 1.0) * self.max_scroll();
+                self.scroll_y = target_y;
+                return iced::widget::operation::scroll_to(
+                    iced::widget::Id::new("sys_proc_scroll"),
+                    iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: target_y },
+                );
             }
             Message::Loaded(d) => {
                 self.data = Some(d);
@@ -297,7 +317,7 @@ impl App {
                                     Data::Gpu(SystemCollector::collect_gpu_by_info(&gpu_info).await)
                                 }
                                 _ => Data::Ram(
-                                    async { SystemCollector::collect_all().await.1 }.await,
+                                    async { SystemCollector::collect_all_pss().await.1 }.await,
                                 ),
                             }
                         },
@@ -307,6 +327,7 @@ impl App {
             }
             Message::CycleGpu => {
                 if !self.gpu_list.is_empty() {
+                    self.scroll_y = 0.0;
                     self.selected_gpu = (self.selected_gpu + 1) % self.gpu_list.len();
                     let info = self.gpu_list[self.selected_gpu].clone();
                     eprintln!("[gpu-cycle] now {}", info.name);
@@ -442,7 +463,153 @@ fn leading_number(s: &str) -> f64 {
     first.trim_end_matches('%').parse().unwrap_or(0.0)
 }
 
+struct DiagonalScrollbar {
+    y_top: f32,
+    list_h: f32,
+    content_h: f32,
+    scroll_y: f32,
+    total_h: f32,
+    w_f: f32,
+    slant_h: f32,
+    slant_right: bool,
+    half_tt: f32,
+    rail_color: Color,
+    thumb_color: Color,
+}
+
+impl DiagonalScrollbar {
+    fn track_cx(&self, local_y: f32) -> f32 {
+        let global_y = self.y_top + local_y;
+        let frac = (global_y / self.total_h.max(1.0)).clamp(0.0, 1.0);
+        let border_x = if self.slant_right {
+            self.w_f - self.slant_h * frac - self.half_tt
+        } else {
+            self.w_f - self.slant_h * (1.0 - frac) - self.half_tt
+        };
+        border_x - 8.0
+    }
+}
+
+impl iced::widget::canvas::Program<Message> for DiagonalScrollbar {
+    type State = bool;
+
+    fn update(
+        &self,
+        dragging: &mut Self::State,
+        event: &iced::Event,
+        bounds: iced::Rectangle,
+        cursor: iced::mouse::Cursor,
+    ) -> Option<iced::widget::Action<Message>> {
+        use iced::mouse;
+        if self.content_h <= self.list_h + 1.0 {
+            *dragging = false;
+            return None;
+        }
+        match event {
+            iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                if let Some(pt) = cursor.position_in(bounds) {
+                    if (pt.x - self.track_cx(pt.y)).abs() <= 10.0 {
+                        *dragging = true;
+                        let frac = (pt.y / bounds.height.max(1.0)).clamp(0.0, 1.0);
+                        return Some(iced::widget::Action::publish(Message::ScrollToFraction(
+                            frac,
+                        )));
+                    }
+                }
+            }
+            iced::Event::Mouse(mouse::Event::CursorMoved { .. }) if *dragging => {
+                if let Some(pt) = cursor.position() {
+                    let frac = ((pt.y - bounds.y) / bounds.height.max(1.0)).clamp(0.0, 1.0);
+                    return Some(iced::widget::Action::publish(Message::ScrollToFraction(
+                        frac,
+                    )));
+                }
+            }
+            iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                if *dragging =>
+            {
+                *dragging = false;
+                return Some(iced::widget::Action::publish(Message::Noop));
+            }
+            _ => {}
+        }
+        None
+    }
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &iced::Renderer,
+        _theme: &Theme,
+        bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<iced::widget::canvas::Geometry> {
+        let mut frame = iced::widget::canvas::Frame::new(renderer, bounds.size());
+        if self.content_h <= self.list_h + 1.0 {
+            return vec![frame.into_geometry()];
+        }
+        let h = bounds.height.max(1.0);
+
+        let rail_hw = 1.5;
+        let (rx0, rx1) = (self.track_cx(2.0), self.track_cx(h - 2.0));
+        let rail_path = iced::widget::canvas::Path::new(|b| {
+            b.move_to(iced::Point::new(rx0 - rail_hw, 2.0));
+            b.line_to(iced::Point::new(rx0 + rail_hw, 2.0));
+            b.line_to(iced::Point::new(rx1 + rail_hw, h - 2.0));
+            b.line_to(iced::Point::new(rx1 - rail_hw, h - 2.0));
+            b.close();
+        });
+        frame.fill(&rail_path, self.rail_color);
+
+        let track_span = (h - 4.0).max(1.0);
+        let thumb_h = ((self.list_h / self.content_h) * track_span).clamp(24.0, track_span);
+        let max_scroll = (self.content_h - self.list_h).max(1.0);
+        let scroll_frac = (self.scroll_y / max_scroll).clamp(0.0, 1.0);
+        let ty0 = 2.0 + scroll_frac * (track_span - thumb_h);
+        let ty1 = ty0 + thumb_h;
+        let (tx0, tx1) = (self.track_cx(ty0), self.track_cx(ty1));
+        let thumb_hw = 2.5;
+        let thumb_path = iced::widget::canvas::Path::new(|b| {
+            b.move_to(iced::Point::new(tx0 - thumb_hw, ty0));
+            b.line_to(iced::Point::new(tx0 + thumb_hw, ty0));
+            b.line_to(iced::Point::new(tx1 + thumb_hw, ty1));
+            b.line_to(iced::Point::new(tx1 - thumb_hw, ty1));
+            b.close();
+        });
+        frame.fill(&thumb_path, self.thumb_color);
+
+        vec![frame.into_geometry()]
+    }
+}
+
 impl App {
+    fn max_scroll(&self) -> f32 {
+        let Some(d) = &self.data else {
+            return 0.0;
+        };
+        let raw = match d {
+            Data::Cpu(c) => &c.top_procs,
+            Data::Gpu(g) => &g.top_procs,
+            Data::Ram(r) => &r.top_procs,
+        };
+        let q = self.search_query.to_lowercase();
+        let count = raw
+            .iter()
+            .filter(|p| q.is_empty() || p.name.to_lowercase().contains(&q))
+            .count();
+        let fs = self.settings.tooltip_font_size;
+        let proc_h = fs as f32 + 10.0;
+        let proc_gap = 2.0;
+        let vpad = 14.0;
+        let gap = 8.0;
+        let header_h = fs as f32 + 16.0;
+        let search_h = 40.0;
+        let y = vpad + header_h + gap + search_h + gap;
+        let list_h = (self.h as f32 - vpad - y).max(60.0);
+        let content_h = (count as f32) * proc_h + (count.saturating_sub(1) as f32) * proc_gap;
+        (content_h - list_h).max(0.0)
+    }
+
     fn render_search_bar<'a>(
         &'a self,
         t: &ShellTheme,
@@ -463,6 +630,147 @@ impl App {
             alpha, y, total_h, slant_h, slant_right, safe, w_f, fs, tooltip_slope, gap,
             self.opened.elapsed().as_millis() as u64,
         )
+    }
+
+    fn render_proc_list<'a>(
+        &'a self,
+        raw_procs: &'a [ProcessItem],
+        total_ram_gib: Option<f32>,
+        is_gpu: bool,
+        empty_msg: &'static str,
+        no_match_msg: &'static str,
+        t: &ShellTheme,
+        fs: u16,
+        alpha: f32,
+        y: f32,
+        total_h: f32,
+        vpad: f32,
+        slant_h: f32,
+        slant_right: bool,
+        safe: f32,
+        w_f: f32,
+        tooltip_slope: f32,
+    ) -> Element<'a, Message> {
+        let muted = Color {
+            a: t.muted.a * alpha,
+            ..t.muted
+        };
+        let proc_h = fs as f32 + 10.0;
+        let proc_gap = 2.0;
+        let q = self.search_query.to_lowercase();
+        let mut items: Vec<&ProcessItem> = raw_procs
+            .iter()
+            .filter(|p| q.is_empty() || p.name.to_lowercase().contains(&q))
+            .collect();
+        items.sort_by(|a, b| {
+            leading_number(&b.metric)
+                .partial_cmp(&leading_number(&a.metric))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        if items.is_empty() {
+            let msg = if raw_procs.is_empty() {
+                empty_msg
+            } else {
+                no_match_msg
+            };
+            let empty_el: Element<'a, Message> = container(
+                text(msg)
+                    .size((fs.saturating_sub(4).max(9)) as f32)
+                    .color(muted)
+                    .wrapping(iced::widget::text::Wrapping::None),
+            )
+            .into();
+            return slanted_row(
+                empty_el,
+                y + 10.0,
+                total_h,
+                slant_h,
+                slant_right,
+                safe,
+                w_f,
+                20.0,
+            );
+        }
+
+        let list_h = (total_h - vpad - y).max(60.0);
+        let mut procs_col = column![].spacing(proc_gap).width(Length::Fixed(w_f));
+        for (i, &p) in items.iter().enumerate() {
+            let screen_y = (y + (i as f32) * (proc_h + proc_gap) - self.scroll_y + proc_h * 0.5)
+                .clamp(0.0, total_h);
+            let frac = (screen_y / total_h.max(1.0)).clamp(0.0, 1.0);
+            let (lp, rp) = if slant_right {
+                (slant_h * (1.0 - frac) + safe, slant_h * frac + safe)
+            } else {
+                (slant_h * frac + safe, slant_h * (1.0 - frac) + safe)
+            };
+            let inner_w = (w_f - lp - rp).max(10.0);
+            let proc_row = render_proc_row(
+                p,
+                t,
+                total_ram_gib,
+                is_gpu,
+                fs,
+                alpha,
+                inner_w,
+                proc_h,
+                slant_right,
+                tooltip_slope,
+            );
+            procs_col = procs_col.push(slanted_row(
+                proc_row,
+                screen_y,
+                total_h,
+                slant_h,
+                slant_right,
+                safe,
+                w_f,
+                proc_h,
+            ));
+        }
+
+        let content_h =
+            (items.len() as f32) * proc_h + (items.len().saturating_sub(1) as f32) * proc_gap;
+        let scroll_el: Element<'a, Message> = iced::widget::scrollable(procs_col)
+            .id(iced::widget::Id::new("sys_proc_scroll"))
+            .direction(iced::widget::scrollable::Direction::Vertical(
+                iced::widget::scrollable::Scrollbar::hidden(),
+            ))
+            .width(Length::Fixed(w_f))
+            .height(Length::Fixed(list_h))
+            .on_scroll(|vp| Message::Scrolled(vp.absolute_offset().y))
+            .into();
+
+        let half_tt = self.settings.control_border_width * 0.5;
+        let diag_bar: Element<'a, Message> = iced::widget::canvas::Canvas::new(DiagonalScrollbar {
+            y_top: y,
+            list_h,
+            content_h,
+            scroll_y: self.scroll_y,
+            total_h,
+            w_f,
+            slant_h,
+            slant_right,
+            half_tt,
+            rail_color: Color {
+                a: t.muted.a * alpha * 0.35,
+                ..t.muted
+            },
+            thumb_color: Color {
+                a: t.text.a * alpha,
+                ..t.text
+            },
+        })
+        .width(Length::Fixed(w_f))
+        .height(Length::Fixed(list_h))
+        .into();
+
+        Stack::new()
+            .push(scroll_el)
+            .push(diag_bar)
+            .width(Length::Fixed(w_f))
+            .height(Length::Fixed(list_h))
+            .into()
     }
     fn build_content<'a>(
         &'a self,
@@ -548,51 +856,24 @@ impl App {
                     col = col.push(search_el);
                     y = new_y;
 
-                    let proc_h = fs as f32 + 10.0;
-                    let proc_gap = 2.0;
-                    let mut procs_col = column![].spacing(proc_gap).width(Length::Fill);
-                    let q = self.search_query.to_lowercase();
-                    let mut items: Vec<&ProcessItem> = c
-                        .top_procs
-                        .iter()
-                        .filter(|p| q.is_empty() || p.name.to_lowercase().contains(&q))
-                        .collect();
-                    items.sort_by(|a, b| {
-                        leading_number(&b.metric)
-                            .partial_cmp(&leading_number(&a.metric))
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
-                    for &p in items.iter().take(10) {
-                        let inner_w = w_f
-                            - (slant_h * (1.0 - (y + proc_h * 0.5) / total_h.max(1.0)) + safe)
-                            - (slant_h * ((y + proc_h * 0.5) / total_h.max(1.0)) + safe);
-                        let proc_row = render_proc_row(
-                            p,
-                            t,
-                            None,
-                            false,
-                            fs,
-                            alpha,
-                            inner_w,
-                            proc_h,
-                            slant_right,
-                            tooltip_slope,
-                        );
-                        procs_col = procs_col.push(slanted_row(
-                            proc_row,
-                            y + proc_h * 0.5,
-                            total_h,
-                            slant_h,
-                            slant_right,
-                            safe,
-                            w_f,
-                            proc_h,
-                        ));
-                        y += proc_h + proc_gap;
-                    }
-                    if !items.is_empty() {
-                        col = col.push(procs_col);
-                    }
+                    col = col.push(self.render_proc_list(
+                        &c.top_procs,
+                        None,
+                        false,
+                        "(no CPU processes tracked)",
+                        "(no match)",
+                        t,
+                        fs,
+                        alpha,
+                        y,
+                        total_h,
+                        vpad,
+                        slant_h,
+                        slant_right,
+                        safe,
+                        w_f,
+                        tooltip_slope,
+                    ));
                 }
                 Data::Gpu(g) => {
                     let header_h = fs as f32 + 16.0;
@@ -666,80 +947,48 @@ impl App {
                     col = col.push(search_el);
                     y = new_y;
 
-                    let proc_h = fs as f32 + 10.0;
-                    let proc_gap = 2.0;
-                    let mut procs_col = column![].spacing(proc_gap).width(Length::Fill);
-                    let q = self.search_query.to_lowercase();
-                    let mut items: Vec<&ProcessItem> = g
-                        .top_procs
-                        .iter()
-                        .filter(|p| q.is_empty() || p.name.to_lowercase().contains(&q))
-                        .collect();
-                    items.sort_by(|a, b| {
-                        leading_number(&b.metric)
-                            .partial_cmp(&leading_number(&a.metric))
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
-                    for &p in items.iter().take(10) {
-                        let inner_w = w_f
-                            - (slant_h * (1.0 - (y + proc_h * 0.5) / total_h.max(1.0)) + safe)
-                            - (slant_h * ((y + proc_h * 0.5) / total_h.max(1.0)) + safe);
-                        let proc_row = render_proc_row(
-                            p,
-                            t,
-                            Some(g.vram_total_gib as f32),
-                            true,
-                            fs,
-                            alpha,
-                            inner_w,
-                            proc_h,
-                            slant_right,
-                            tooltip_slope,
-                        );
-                        procs_col = procs_col.push(slanted_row(
-                            proc_row,
-                            y + proc_h * 0.5,
-                            total_h,
-                            slant_h,
-                            slant_right,
-                            safe,
-                            w_f,
-                            proc_h,
-                        ));
-                        y += proc_h + proc_gap;
-                    }
-                    if !items.is_empty() {
-                        col = col.push(procs_col);
-                    } else {
-                        let empty_el: Element<'_, Message> = container(
-                            text(if g.top_procs.is_empty() {
-                                "(no GPU processes tracked)"
-                            } else {
-                                "(no match)"
-                            })
-                            .size((fs.saturating_sub(4).max(9)) as f32)
-                            .color(muted)
-                            .wrapping(iced::widget::text::Wrapping::None),
-                        )
-                        .into();
-                        col = col.push(slanted_row(
-                            empty_el,
-                            y + 10.0,
-                            total_h,
-                            slant_h,
-                            slant_right,
-                            safe,
-                            w_f,
-                            20.0,
-                        ));
-                    }
+                    col = col.push(self.render_proc_list(
+                        &g.top_procs,
+                        Some(g.vram_total_gib as f32),
+                        true,
+                        "(no GPU processes tracked)",
+                        "(no match)",
+                        t,
+                        fs,
+                        alpha,
+                        y,
+                        total_h,
+                        vpad,
+                        slant_h,
+                        slant_right,
+                        safe,
+                        w_f,
+                        tooltip_slope,
+                    ));
                 }
                 Data::Ram(r) => {
                     let total = r.total_gib.max(0.01);
+                    let q = self.search_query.to_lowercase();
+                    let header_title = if q.is_empty() {
+                        let used_gib = (r.total_gib - r.available_gib).max(0.0);
+                        format!("RAM USAGE · {:.1}/{:.1}G", used_gib, r.total_gib)
+                    } else {
+                        let sum_mib: f64 = r
+                            .top_procs
+                            .iter()
+                            .filter(|p| p.name.to_lowercase().contains(&q))
+                            .map(|p| leading_number(&p.metric))
+                            .sum();
+                        if sum_mib >= 1024.0 {
+                            format!("RAM USAGE · {:.2}G", sum_mib / 1024.0)
+                        } else {
+                            format!("RAM USAGE · {:.0}M", sum_mib)
+                        }
+                    };
 
                     let header_h = fs as f32 + 16.0;
                     let header: Element<'_, Message> = row![
-                        text("RAM USAGE")
+                        text(header_title)
                             .size((fs.max(12)) as f32)
                             .bold()
                             .color(text_col)
@@ -778,51 +1027,24 @@ impl App {
                     col = col.push(search_el);
                     y = new_y;
 
-                    let proc_h = fs as f32 + 10.0;
-                    let proc_gap = 2.0;
-                    let mut procs_col = column![].spacing(proc_gap).width(Length::Fill);
-                    let q = self.search_query.to_lowercase();
-                    let mut items: Vec<&ProcessItem> = r
-                        .top_procs
-                        .iter()
-                        .filter(|p| q.is_empty() || p.name.to_lowercase().contains(&q))
-                        .collect();
-                    items.sort_by(|a, b| {
-                        leading_number(&b.metric)
-                            .partial_cmp(&leading_number(&a.metric))
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
-                    for &p in items.iter().take(10) {
-                        let inner_w = w_f
-                            - (slant_h * (1.0 - (y + proc_h * 0.5) / total_h.max(1.0)) + safe)
-                            - (slant_h * ((y + proc_h * 0.5) / total_h.max(1.0)) + safe);
-                        let proc_row = render_proc_row(
-                            p,
-                            t,
-                            Some(total),
-                            false,
-                            fs,
-                            alpha,
-                            inner_w,
-                            proc_h,
-                            slant_right,
-                            tooltip_slope,
-                        );
-                        procs_col = procs_col.push(slanted_row(
-                            proc_row,
-                            y + proc_h * 0.5,
-                            total_h,
-                            slant_h,
-                            slant_right,
-                            safe,
-                            w_f,
-                            proc_h,
-                        ));
-                        y += proc_h + proc_gap;
-                    }
-                    if !items.is_empty() {
-                        col = col.push(procs_col);
-                    }
+                    col = col.push(self.render_proc_list(
+                        &r.top_procs,
+                        Some(total),
+                        false,
+                        "(no RAM processes tracked)",
+                        "(no match)",
+                        t,
+                        fs,
+                        alpha,
+                        y,
+                        total_h,
+                        vpad,
+                        slant_h,
+                        slant_right,
+                        safe,
+                        w_f,
+                        tooltip_slope,
+                    ));
                 }
             }
         } else {
