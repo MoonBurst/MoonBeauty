@@ -181,6 +181,15 @@ impl App {
                     let snap = self.snapshot_for_close();
                     self.closing_at = Some(snap);
                 }
+                // Same fix as popup.rs::Message::Dismiss — reschedule
+                // Tick so the auto-exit check runs; otherwise the
+                // process hangs at ESC.
+                return Task::perform(
+                    async {
+                        tokio::time::sleep(std::time::Duration::from_millis(4)).await
+                    },
+                    |_| Message::Tick,
+                );
             }
         }
         Task::none()

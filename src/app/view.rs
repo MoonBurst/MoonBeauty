@@ -18,6 +18,13 @@ impl MoonBeautyShellApp {
             .into()
     }
 
+    pub fn view_window(&self, id: iced::window::Id) -> Element<'_, Message> {
+        if self.notif_window_id == Some(id) || self.closing_notif_id == Some(id) {
+            return self.build_notifs_view();
+        }
+        self.view()
+    }
+
     pub fn view(&self) -> Element<'_, Message> {
         if self.is_notif_surface {
             return self.build_notifs_view();

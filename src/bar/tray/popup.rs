@@ -176,6 +176,15 @@ impl App {
                 if self.closing_at.is_none() {
                     self.closing_at = Some(self.snapshot_for_close());
                 }
+                // Reschedule Tick: without this, close animation freezes
+                // and the auto-exit check in Tick never runs — process
+                // hangs forever. This is the "3rd moonbeauty" bug.
+                return Task::perform(
+                    async {
+                        tokio::time::sleep(std::time::Duration::from_millis(4)).await
+                    },
+                    |_| Message::Tick,
+                );
             }
         }
         Task::none()

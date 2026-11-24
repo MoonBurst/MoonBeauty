@@ -22,10 +22,10 @@ impl MoonBeautyShellApp {
     pub fn update(&mut self, message: Message) -> Command<Message> {
         match message {
             // Message::WindowResized removed (problem 07)
-            Message::ResizeNotifSurface(w, h) => {
+            Message::ResizeNotifSurface(id, w, h) => {
                 // Intercepted by `try_into`; never reached. Arm kept only
                 // to keep the match exhaustive.
-                let _ = (w, h);
+                let _ = (id, w, h);
             }
             Message::IdleTick => return self.handle_idle_tick(),
 
@@ -92,7 +92,10 @@ impl MoonBeautyShellApp {
 
             Message::MusicCycleDone(new_state) => return self.handle_music_cycle_done(new_state),
             Message::Noop => {}
-            Message::SetToastInputRegion(_) | Message::RequestXdgActivation(_) => {
+            Message::SetToastInputRegion(_, _)
+            | Message::RequestXdgActivation(_)
+            | Message::OpenNotifLayer(_, _)
+            | Message::CloseNotifLayer(_) => {
                 // Intercepted by `try_into` — never reaches update.
             }
             Message::CloseShell => {

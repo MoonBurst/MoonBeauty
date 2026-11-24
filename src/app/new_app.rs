@@ -144,7 +144,8 @@ impl MoonBeautyShellApp {
             let _ = moonbeauty::libraries::process::spawn_and_reap(&mut paste_cmd);
         }
 
-        let notif_rx = if is_notif_surface {
+        let is_bar = !is_standalone && !is_notif_surface;
+        let notif_rx = if is_notif_surface || is_bar {
             // Finding 55: bounded (256). notify-send can be called at
             // arbitrary rate by any same-user process; unbounded channel
             // OOMs the shell under load. 256 is 64× the visible toast cap.
@@ -158,12 +159,10 @@ impl MoonBeautyShellApp {
 
         let notif_screen_at_startup = settings.notif_screen_name.clone();
         let app = Self {
-            settings_ui: if is_notif_surface
-                || (is_standalone && !matches!(standalone_target, Some(OverlayTarget::Settings)))
-            {
-                SettingsOverlay::empty()
-            } else {
+            settings_ui: if matches!(standalone_target, Some(OverlayTarget::Settings)) {
                 SettingsOverlay::new(&settings)
+            } else {
+                SettingsOverlay::empty()
             },
             settings,
             theme,
@@ -195,6 +194,8 @@ impl MoonBeautyShellApp {
             // window_w removed (problem 07)
             notif_screen_at_startup,
             notif_surface_size: if is_notif_surface { (1, 1) } else { (0, 0) },
+            notif_window_id: None,
+            closing_notif_id: None,
             tray_expanded: false,
             tray_items: Vec::new(),
             tray_anim_width: tray_width_px,
@@ -210,16 +211,10 @@ impl MoonBeautyShellApp {
                 SystemCollector::list_gpus_sync()
             },
 
-            launcher: if is_standalone
-                && !matches!(standalone_target, Some(OverlayTarget::Launcher))
-            {
-                // Cheap constructor: no desktop file scan. Saves 200-400ms
-                // on every non-launcher overlay spawn (clipboard, notes,
-                // email, todo, reminders, calc, pass, unicode, websearch,
-                // annotator, rng, amogus, settings, notifications, etc).
-                AppLauncher::new_empty()
-            } else {
+            launcher: if matches!(standalone_target, Some(OverlayTarget::Launcher)) {
                 AppLauncher::new()
+            } else {
+                AppLauncher::new_empty()
             },
             calc: {
                 if let Ok(expr) = std::env::var("MBS_CALC_EXPR") {
@@ -229,34 +224,31 @@ impl MoonBeautyShellApp {
                 }
             },
             clipboard: ClipboardOverlay::new(),
-            notes: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Notes)) {
-                NotesOverlay::empty()
-            } else {
+            notes: if matches!(standalone_target, Some(OverlayTarget::Notes)) {
                 NotesOverlay::new()
-            },
-            pass: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Pass)) {
-                PassOverlay::empty()
             } else {
+                NotesOverlay::empty()
+            },
+            pass: if matches!(standalone_target, Some(OverlayTarget::Pass)) {
                 PassOverlay::new()
+            } else {
+                PassOverlay::empty()
             },
             power: PowerOverlay::new(),
-            todo: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Todo)) {
-                TodoOverlay::empty()
-            } else {
+            todo: if matches!(standalone_target, Some(OverlayTarget::Todo)) {
                 TodoOverlay::new()
-            },
-            reminders: if is_standalone
-                && !matches!(standalone_target, Some(OverlayTarget::Reminders))
-            {
-                RemindersOverlay::empty()
             } else {
+                TodoOverlay::empty()
+            },
+            reminders: if matches!(standalone_target, Some(OverlayTarget::Reminders)) {
                 RemindersOverlay::new()
-            },
-            dict: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Dictionary))
-            {
-                DictionaryOverlay::empty()
             } else {
+                RemindersOverlay::empty()
+            },
+            dict: if matches!(standalone_target, Some(OverlayTarget::Dictionary)) {
                 DictionaryOverlay::new()
+            } else {
+                DictionaryOverlay::empty()
             },
             unicode: UnicodeOverlay::new(),
             web: WebSearchOverlay::new(),
@@ -296,12 +288,13 @@ impl MoonBeautyShellApp {
                 a
             },
             rng: RngOverlay::new(),
-            email: if is_standalone && !matches!(standalone_target, Some(OverlayTarget::Email)) {
-                EmailOverlay::empty()
-            } else {
+            email: if matches!(standalone_target, Some(OverlayTarget::Email)) {
                 EmailOverlay::new()
+            } else {
+                EmailOverlay::empty()
             },
             notifs: if is_notif_surface
+                || is_bar
                 || matches!(standalone_target, Some(OverlayTarget::NotificationsHistory))
             {
                 NotificationOverlay::new()

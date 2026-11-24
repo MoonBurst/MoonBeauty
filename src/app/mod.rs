@@ -71,7 +71,9 @@ pub enum Message {
     ),
     IpcReceived(IpcCommand),
     PollNotifs,
-    ResizeNotifSurface(u32, u32),
+    ResizeNotifSurface(Option<iced::window::Id>, u32, u32),
+    OpenNotifLayer(iced::window::Id, iced_layershell::reexport::NewLayerShellSettings),
+    CloseNotifLayer(iced::window::Id),
     // WindowResized removed (problem 07): emitted by resize_sub but
     // the only consumer (view_toasts _window_w) ignored it.
     TopBar(TopBarMessage),
@@ -107,7 +109,7 @@ pub enum Message {
     /// `LayershellCustomAction::SetInputRegion` so the layer surface's
     /// click target shrinks to just the visible toasts. Everything else
     /// (the empty area around/above/below toasts) becomes pass-through.
-    SetToastInputRegion(Vec<(i32, i32, i32, i32)>),
+    SetToastInputRegion(Option<iced::window::Id>, Vec<(i32, i32, i32, i32)>),
     RequestXdgActivation(iced_layershell::actions::ActivationCallback),
     /// Fires from the 500ms subscription. If `standalone_child` is
     /// Lockscreen and has exited (TTY switch, panic, SIGKILL), respawn
@@ -125,15 +127,15 @@ impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message
         self,
     ) -> Result<iced_layershell::actions::LayershellCustomActionWithId, Self::Error> {
         match self {
-            Message::ResizeNotifSurface(w, h) => {
+            Message::ResizeNotifSurface(id, w, h) => {
                 Ok(iced_layershell::actions::LayershellCustomActionWithId::new(
-                    None,
+                    id,
                     iced_layershell::actions::LayershellCustomAction::SizeChange((w, h)),
                 ))
             }
-            Message::SetToastInputRegion(rects) => {
+            Message::SetToastInputRegion(id, rects) => {
                 Ok(iced_layershell::actions::LayershellCustomActionWithId::new(
-                    None,
+                    id,
                     iced_layershell::actions::LayershellCustomAction::SetInputRegion(
                         iced_layershell::actions::ActionCallback::new(move |region| {
                             for (x, y, w, h) in &rects {
@@ -141,6 +143,21 @@ impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message
                             }
                         }),
                     ),
+                ))
+            }
+            Message::OpenNotifLayer(id, settings) => {
+                Ok(iced_layershell::actions::LayershellCustomActionWithId::new(
+                    None,
+                    iced_layershell::actions::LayershellCustomAction::NewLayerShell {
+                        settings,
+                        id,
+                    },
+                ))
+            }
+            Message::CloseNotifLayer(id) => {
+                Ok(iced_layershell::actions::LayershellCustomActionWithId::new(
+                    Some(id),
+                    iced_layershell::actions::LayershellCustomAction::RemoveWindow,
                 ))
             }
             Message::RequestXdgActivation(cb) => {
@@ -172,6 +189,8 @@ pub struct MoonBeautyShellApp {
     // and the only reader was view_toasts, which ignored it.
     pub notif_screen_at_startup: String,
     pub notif_surface_size: (u32, u32),
+    pub notif_window_id: Option<iced::window::Id>,
+    pub closing_notif_id: Option<iced::window::Id>,
     pub tray_expanded: bool,
     pub tray_items: Vec<moonbeauty::bar::tray::TrayItem>,
     pub tray_anim_width: f32,

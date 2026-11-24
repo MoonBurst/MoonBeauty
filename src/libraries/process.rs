@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static SIGTERM_FLAG: AtomicBool = AtomicBool::new(false);
+static WATCHDOG_ARMED: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn sigterm_handler(_sig: libc::c_int) {
     // Async-signal-safe: single atomic store.
@@ -22,6 +23,22 @@ pub fn install_sigterm_handler() {
         let handler = sigterm_handler as *const () as libc::sighandler_t;
         libc::signal(libc::SIGTERM, handler);
     }
+    // Watchdog: force-exit 1.5s after SIGTERM if the async loop never
+    // polls was_sigterm_signaled(). Without this, SIGTERM is a no-op on
+    // any process whose event loop is idle or stuck.
+    if WATCHDOG_ARMED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if SIGTERM_FLAG.load(Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(1400));
+            #[allow(unsafe_code)]
+            unsafe {
+                libc::_exit(0);
+            }
+        }
+    });
 }
 
 /// True after SIGTERM was received. Poll from a Tick handler.
@@ -460,6 +477,31 @@ pub fn read_json_capped<T: serde::de::DeserializeOwned>(
 /// 48). Suitable for fire-and-forget spawns like notify-send, xdg-open,
 /// wl-copy.
 pub fn spawn_and_reap(cmd: &mut std::process::Command) -> std::io::Result<u32> {
+    let mut child = cmd.spawn()?;
+    let pid = child.id();
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(pid)
+}
+
+/// Like `spawn_and_reap`, but sets `PR_SET_PDEATHSIG(SIGKILL)` so the
+/// child cannot outlive the parent even on crash. Use for long-lived
+/// children that hold shell state (notif-surface). One-shots
+/// (notify-send, xdg-open) stay on plain spawn_and_reap — PDEATHSIG
+/// would kill them mid-flight if the shell exits first.
+pub fn spawn_and_reap_pdeathsig(cmd: &mut std::process::Command) -> std::io::Result<u32> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt;
+        #[allow(unsafe_code)]
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+                Ok(())
+            });
+        }
+    }
     let mut child = cmd.spawn()?;
     let pid = child.id();
     std::thread::spawn(move || {

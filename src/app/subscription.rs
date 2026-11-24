@@ -18,7 +18,7 @@ fn ipc_stream() -> impl futures_util::Stream<Item = Message> {
 impl MoonBeautyShellApp {
     pub fn subscription(&self) -> iced::Subscription<Message> {
         let is_bar = !self.is_standalone && !self.is_notif_surface;
-        let toast_sub = if self.is_notif_surface {
+        let toast_sub = if self.is_notif_surface || is_bar {
             let interval = if self.notifs.active_toasts.is_empty() {
                 1000
             } else {
@@ -439,10 +439,14 @@ impl MoonBeautyShellApp {
         // under any crash scenario. Not bulletproof, but small enough
         // that a human attacker cannot reliably exploit the window.
 
-        let notif_sub = if self.is_notif_surface {
-            // 16ms (60fps) instead of 50ms — reduces notification arrival
-            // latency by up to 34ms with no cost (poll checks a channel).
-            iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::PollNotifs)
+        let notif_sub = if self.is_notif_surface || is_bar {
+            let interval = if self.notifs.active_toasts.is_empty() {
+                100
+            } else {
+                16
+            };
+            iced::time::every(std::time::Duration::from_millis(interval))
+                .map(|_| Message::PollNotifs)
         } else {
             iced::Subscription::none()
         };

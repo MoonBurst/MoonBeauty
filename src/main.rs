@@ -2,7 +2,6 @@ use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings};
 use moonbeauty::libraries::config::ShellSettings;
 use moonbeauty::libraries::ipc::OverlayTarget;
-use moonbeauty::libraries::process::resolve_exe;
 
 mod app;
 pub mod debug;
@@ -142,17 +141,6 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             ])
             .status();
         std::thread::sleep(std::time::Duration::from_millis(50));
-        let exe = resolve_exe();
-        let mut cmd = std::process::Command::new(exe);
-        cmd.arg("--notif-surface");
-        let target = &settings.notif_screen_name;
-        if !target.is_empty() && target != "Auto" && target != "Auto (Primary)" {
-            cmd.env("MBS_OUTPUT", target);
-        }
-        // PDEATHSIG: if the bar dies (crash, SIGKILL, systemctl restart),
-        // the notif-surface dies with it. Prevents stale-orphan
-        // accumulation — the "3 moonbeauty processes" bug.
-        let _ = moonbeauty::libraries::process::spawn_and_reap_pdeathsig(&mut cmd);
     }
 
     // Fast path: bar already set MBS_OUTPUT — child inherits it.
@@ -307,19 +295,36 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         }
     };
 
-    let _app = iced_layershell::application(
-        MoonBeautyShellApp::new_app,
-        || "moonbeauty".to_string(),
-        MoonBeautyShellApp::update,
-        MoonBeautyShellApp::view,
-    )
-    .subscription(MoonBeautyShellApp::subscription)
-    .theme(app_theme)
-    .style(app_style)
-    .settings(Settings {
-        layer_settings,
-        ..Default::default()
-    });
-    _app.run()
+    if !is_notif_surface && standalone_target.is_none() {
+        iced_layershell::daemon(
+            MoonBeautyShellApp::new_app,
+            || "moonbeauty".to_string(),
+            MoonBeautyShellApp::update,
+            MoonBeautyShellApp::view_window,
+        )
+        .subscription(MoonBeautyShellApp::subscription)
+        .theme(iced::Theme::Dark)
+        .style(app_style)
+        .settings(Settings {
+            layer_settings,
+            ..Default::default()
+        })
+        .run()
+    } else {
+        let _app = iced_layershell::application(
+            MoonBeautyShellApp::new_app,
+            || "moonbeauty".to_string(),
+            MoonBeautyShellApp::update,
+            MoonBeautyShellApp::view,
+        )
+        .subscription(MoonBeautyShellApp::subscription)
+        .theme(app_theme)
+        .style(app_style)
+        .settings(Settings {
+            layer_settings,
+            ..Default::default()
+        });
+        _app.run()
+    }
 }
 
