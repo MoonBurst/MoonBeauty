@@ -4,9 +4,12 @@
 //!   - Library discovery scans `ShellSettings::load().music_dirs` (falling back
 //!     to `dirs::audio_dir()` / `~/Music`) and caches metadata to
 //!     `$XDG_CACHE_HOME/moonbeauty/music_index.json`.
+//!   - Playback state (queue, active track path, position, volume) is saved to
+//!     `$XDG_CACHE_HOME/moonbeauty/music_state.json` so daemon restarts resume
+//!     the exact track and timestamp instead of resetting to track 0.
 //!   - Audio playback runs in a self-managed `--audio-daemon` subprocess
-//!     listening on `$XDG_RUNTIME_DIR/moonbeauty-audio.sock` (mode 0600),
-//!     so playback survives bar restarts and never blocks the iced UI thread.
+//!     launched into `app.slice` via `systemd-run` (with `spawn_and_reap`
+//!     fallback) so playback survives bar exits and restarts uninterrupted.
 //!   - `rodio::MixerDeviceSink` is `!Send`/`!Sync` and lives exclusively on a
 //!     dedicated audio thread inside the daemon.
 
@@ -30,6 +33,7 @@ use super::mpris::MprisTrack;
 const AUDIO_EXTS: &[&str] = &["mp3", "flac", "ogg", "opus", "m4a", "wav", "aac"];
 const CACHE_TTL_SECS: u64 = 300;
 const MAX_INDEX_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_STATE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_IPC_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +51,24 @@ struct MusicIndexCache {
     music_dirs: Vec<String>,
     scanned_at_epoch: u64,
     tracks: Vec<IndexedTrack>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct SavedMusicState {
+    #[serde(default)]
+    queue_paths: Vec<String>,
+    #[serde(default)]
+    current_path: Option<String>,
+    #[serde(default)]
+    position_sec: f64,
+    #[serde(default = "default_volume_pct")]
+    volume_pct: u8,
+    #[serde(default)]
+    is_playing: bool,
+}
+
+fn default_volume_pct() -> u8 {
+    100
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +92,7 @@ enum ThreadMsg {
     Client(AudioCmd, mpsc::SyncSender<AudioResp>),
     DefaultQueue(Vec<IndexedTrack>),
     ReloadedQueue(Vec<IndexedTrack>),
+    Shutdown(mpsc::SyncSender<()>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,6 +166,11 @@ pub fn get_music_dir() -> PathBuf {
 fn index_cache_path() -> PathBuf {
     let base = dirs::cache_dir().unwrap_or_else(crate::libraries::process::mbs_runtime_dir);
     base.join("moonbeauty").join("music_index.json")
+}
+
+fn music_state_path() -> PathBuf {
+    let base = dirs::cache_dir().unwrap_or_else(crate::libraries::process::mbs_runtime_dir);
+    base.join("moonbeauty").join("music_state.json")
 }
 
 fn socket_path() -> PathBuf {
@@ -344,6 +372,9 @@ pub fn run_audio_daemon() -> ! {
     eprintln!("[audio-daemon] listening on {:?}", sock);
     loop {
         if crate::libraries::process::was_sigterm_signaled() {
+            let (stx, srx) = mpsc::sync_channel(1);
+            let _ = cmd_tx.send(ThreadMsg::Shutdown(stx));
+            let _ = srx.recv_timeout(Duration::from_millis(400));
             let _ = std::fs::remove_file(&sock);
             std::process::exit(0);
         }
@@ -406,30 +437,118 @@ struct PlaybackEngine {
     queue: Vec<IndexedTrack>,
     current_idx: Option<usize>,
     user_paused: bool,
+    pending_resume: bool,
+    resume_retries: u8,
+    last_resume_attempt: Instant,
     volume_pct: u8,
+    pending_seek_sec: Option<f64>,
+    saved_current_path: Option<String>,
+    last_state_save: Instant,
 }
 
 impl PlaybackEngine {
     fn new() -> Self {
-        match DeviceSinkBuilder::open_default_sink() {
-            Ok(sink_handle) => Self {
-                _sink_handle: Some(sink_handle),
-                player: None,
-                queue: Vec::new(),
-                current_idx: None,
-                user_paused: true,
-                volume_pct: 100,
-            },
+        let saved = crate::libraries::process::read_json_capped::<SavedMusicState>(
+            &music_state_path(),
+            MAX_STATE_BYTES,
+        )
+        .unwrap_or_default();
+
+        let pending_seek_sec = if saved.position_sec > 0.5 {
+            Some(saved.position_sec)
+        } else {
+            None
+        };
+        let saved_current_path = saved.current_path.clone();
+        let volume_pct = saved.volume_pct.min(100);
+        let pending_resume = saved.is_playing;
+
+        let mut restored_queue = Vec::new();
+        if !saved.queue_paths.is_empty() {
+            let cached_index = crate::libraries::process::read_json_capped::<MusicIndexCache>(
+                &index_cache_path(),
+                MAX_INDEX_BYTES,
+            )
+            .map(|c| c.tracks)
+            .unwrap_or_default();
+
+            for raw in &saved.queue_paths {
+                if let Some(t) = resolve_track_from_url(raw, &cached_index) {
+                    restored_queue.push(t);
+                }
+            }
+        }
+
+        let current_idx = if restored_queue.is_empty() {
+            None
+        } else if let Some(ref cp) = saved_current_path {
+            restored_queue
+                .iter()
+                .position(|t| &t.path == cp)
+                .or(Some(0))
+        } else {
+            Some(0)
+        };
+
+        let sink_handle = match DeviceSinkBuilder::open_default_sink() {
+            Ok(s) => Some(s),
             Err(e) => {
                 eprintln!("[audio-daemon] open_default_sink failed: {e}");
-                Self {
-                    _sink_handle: None,
-                    player: None,
-                    queue: Vec::new(),
-                    current_idx: None,
-                    user_paused: true,
-                    volume_pct: 100,
-                }
+                None
+            }
+        };
+
+        Self {
+            _sink_handle: sink_handle,
+            player: None,
+            queue: restored_queue,
+            current_idx,
+            user_paused: !pending_resume,
+            pending_resume,
+            resume_retries: 0,
+            last_resume_attempt: Instant::now(),
+            volume_pct,
+            pending_seek_sec,
+            saved_current_path,
+            last_state_save: Instant::now(),
+        }
+    }
+
+    fn save_state(&mut self) {
+        self.last_state_save = Instant::now();
+        let pos = self
+            .player
+            .as_ref()
+            .map(|p| p.get_pos().as_secs_f64())
+            .or(self.pending_seek_sec)
+            .unwrap_or(0.0);
+        let current_path = self
+            .current_idx
+            .and_then(|i| self.queue.get(i))
+            .map(|t| t.path.clone())
+            .or_else(|| self.saved_current_path.clone());
+        let queue_paths: Vec<String> = self.queue.iter().map(|t| t.path.clone()).collect();
+        let is_playing = self
+            .player
+            .as_ref()
+            .is_some_and(|p| !p.is_paused() && !p.empty())
+            || (self.pending_resume && !self.user_paused);
+
+        let state = SavedMusicState {
+            queue_paths,
+            current_path,
+            position_sec: pos,
+            volume_pct: self.volume_pct,
+            is_playing,
+        };
+        let path = music_state_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(json) = serde_json::to_vec(&state) {
+            let tmp = path.with_extension("json.tmp");
+            if crate::libraries::process::private_write_file(&tmp, &json).is_ok() {
+                let _ = std::fs::rename(&tmp, &path);
             }
         }
     }
@@ -464,7 +583,6 @@ impl PlaybackEngine {
         let source =
             rodio::Decoder::try_from(BufReader::new(file)).map_err(|e| format!("decode: {e}"))?;
 
-        // Drop any previous Player cleanly before attaching a new one to the mixer.
         self.player = None;
         let Some(sink) = self._sink_handle.as_ref() else {
             return Err("no audio output device available".into());
@@ -472,11 +590,19 @@ impl PlaybackEngine {
         let player = Player::connect_new(sink.mixer());
         player.set_volume(self.volume_pct as f32 / 100.0);
         player.append(source);
+        if let Some(seek_sec) = self.pending_seek_sec.take() {
+            if seek_sec > 0.5 && (track.duration_sec <= 0.0 || seek_sec < track.duration_sec) {
+                let _ = player.try_seek(Duration::from_secs_f64(seek_sec));
+            }
+        }
         player.play();
 
         self.player = Some(player);
         self.current_idx = Some(idx);
+        self.saved_current_path = Some(track.path);
         self.user_paused = false;
+        self.pending_resume = false;
+        self.save_state();
         Ok(())
     }
 
@@ -485,6 +611,7 @@ impl PlaybackEngine {
             .player
             .as_ref()
             .map(|p| p.get_pos().as_secs_f64())
+            .or(self.pending_seek_sec)
             .unwrap_or(0.0);
         let playing = self
             .player
@@ -517,17 +644,42 @@ impl PlaybackEngine {
     }
 
     fn tick_auto_advance(&mut self) {
+        if self.pending_resume
+            && !self.user_paused
+            && self.player.is_none()
+            && self.current_idx.is_some()
+        {
+            if self.resume_retries < 10
+                && self.last_resume_attempt.elapsed() >= Duration::from_millis(500)
+            {
+                self.last_resume_attempt = Instant::now();
+                self.resume_retries += 1;
+                if let Some(idx) = self.current_idx {
+                    let _ = self.load_and_play(idx);
+                }
+            } else if self.resume_retries >= 10 {
+                self.pending_resume = false;
+                self.user_paused = true;
+                self.save_state();
+            }
+            return;
+        }
         let finished = self.player.as_ref().is_some_and(|p| p.empty());
         if finished && !self.user_paused {
             if let Some(idx) = self.current_idx {
+                self.pending_seek_sec = None;
                 if idx + 1 < self.queue.len() {
                     let _ = self.load_and_play(idx + 1);
                 } else {
                     self.player = None;
                     self.user_paused = true;
                     self.current_idx = Some(0);
+                    self.saved_current_path = self.queue.first().map(|t| t.path.clone());
+                    self.save_state();
                 }
             }
+        } else if !self.user_paused && self.last_state_save.elapsed() >= Duration::from_secs(2) {
+            self.save_state();
         }
     }
 
@@ -539,14 +691,20 @@ impl PlaybackEngine {
                     if !p.empty() {
                         p.play();
                         self.user_paused = false;
+                        self.pending_resume = false;
+                        self.save_state();
                         return AudioResp::Ok;
                     }
                 }
                 if self.queue.is_empty() {
                     let tracks = load_or_build_index(false);
                     if !tracks.is_empty() {
+                        self.current_idx = self
+                            .saved_current_path
+                            .as_deref()
+                            .and_then(|cp| tracks.iter().position(|t| t.path == cp))
+                            .or(Some(0));
                         self.queue = tracks;
-                        self.current_idx = Some(0);
                     }
                 }
                 if !self.queue.is_empty() {
@@ -563,7 +721,9 @@ impl PlaybackEngine {
                 if let Some(p) = &self.player {
                     p.pause();
                 }
+                self.pending_resume = false;
                 self.user_paused = true;
+                self.save_state();
                 AudioResp::Ok
             }
             AudioCmd::TogglePlayPause => {
@@ -571,11 +731,13 @@ impl PlaybackEngine {
                     .player
                     .as_ref()
                     .is_some_and(|p| !p.is_paused() && !p.empty());
-                if is_playing {
+                if is_playing || (self.pending_resume && !self.user_paused) {
                     if let Some(p) = &self.player {
                         p.pause();
                     }
+                    self.pending_resume = false;
                     self.user_paused = true;
+                    self.save_state();
                     AudioResp::Ok
                 } else {
                     self.handle_cmd(AudioCmd::Play, bg_tx)
@@ -584,6 +746,7 @@ impl PlaybackEngine {
             AudioCmd::Next => {
                 if let Some(idx) = self.current_idx {
                     if idx + 1 < self.queue.len() {
+                        self.pending_seek_sec = None;
                         return match self.load_and_play(idx + 1) {
                             Ok(()) => AudioResp::Ok,
                             Err(e) => AudioResp::Err(e),
@@ -602,9 +765,12 @@ impl PlaybackEngine {
                     if let Some(p) = &self.player {
                         let _ = p.try_seek(Duration::ZERO);
                     }
+                    self.pending_seek_sec = None;
+                    self.save_state();
                     return AudioResp::Ok;
                 }
                 if let Some(idx) = self.current_idx {
+                    self.pending_seek_sec = None;
                     if idx > 0 {
                         return match self.load_and_play(idx - 1) {
                             Ok(()) => AudioResp::Ok,
@@ -612,14 +778,19 @@ impl PlaybackEngine {
                         };
                     } else if let Some(p) = &self.player {
                         let _ = p.try_seek(Duration::ZERO);
+                        self.save_state();
                     }
                 }
                 AudioResp::Ok
             }
             AudioCmd::Seek(secs) => {
+                let target = secs.max(0.0);
                 if let Some(p) = &self.player {
-                    let _ = p.try_seek(Duration::from_secs_f64(secs.max(0.0)));
+                    let _ = p.try_seek(Duration::from_secs_f64(target));
+                } else {
+                    self.pending_seek_sec = Some(target);
                 }
+                self.save_state();
                 AudioResp::Ok
             }
             AudioCmd::SetVolume(vol) => {
@@ -627,6 +798,7 @@ impl PlaybackEngine {
                 if let Some(p) = &self.player {
                     p.set_volume(self.volume_pct as f32 / 100.0);
                 }
+                self.save_state();
                 AudioResp::Ok
             }
             AudioCmd::PlayQueue { urls, start_index } => {
@@ -640,6 +812,7 @@ impl PlaybackEngine {
                 }
                 let start = start_index.min(tracks.len().saturating_sub(1));
                 self.queue = tracks;
+                self.pending_seek_sec = None;
                 match self.load_and_play(start) {
                     Ok(()) => AudioResp::Ok,
                     Err(e) => AudioResp::Err(e),
@@ -659,8 +832,13 @@ impl PlaybackEngine {
 
 fn audio_thread_loop(cmd_rx: mpsc::Receiver<ThreadMsg>, bg_tx: mpsc::Sender<ThreadMsg>) {
     let mut engine = PlaybackEngine::new();
+    if engine.pending_resume {
+        if let Some(idx) = engine.current_idx {
+            let _ = engine.load_and_play(idx);
+        }
+    }
 
-    // Populate default library queue asynchronously so startup stays instant.
+    // Populate default library queue asynchronously if nothing was restored from saved state.
     let init_tx = bg_tx.clone();
     std::thread::spawn(move || {
         let tracks = load_or_build_index(false);
@@ -675,22 +853,55 @@ fn audio_thread_loop(cmd_rx: mpsc::Receiver<ThreadMsg>, bg_tx: mpsc::Sender<Thre
             }
             Ok(ThreadMsg::DefaultQueue(tracks)) => {
                 if engine.queue.is_empty() && !tracks.is_empty() {
+                    let idx = engine
+                        .saved_current_path
+                        .as_deref()
+                        .and_then(|cp| tracks.iter().position(|t| t.path == cp))
+                        .or(Some(0));
                     engine.queue = tracks;
-                    engine.current_idx = Some(0);
-                    engine.user_paused = true;
+                    engine.current_idx = idx;
+                    if engine.pending_resume {
+                        if let Some(i) = idx {
+                            let _ = engine.load_and_play(i);
+                        }
+                    } else {
+                        engine.user_paused = true;
+                    }
                 }
             }
             Ok(ThreadMsg::ReloadedQueue(tracks)) => {
                 let is_idle = engine.player.as_ref().is_none_or(|p| p.empty());
                 if engine.queue.is_empty() || (engine.user_paused && is_idle) {
-                    engine.current_idx = if tracks.is_empty() { None } else { Some(0) };
+                    let cur_path = engine
+                        .current_idx
+                        .and_then(|i| engine.queue.get(i))
+                        .map(|t| t.path.clone())
+                        .or_else(|| engine.saved_current_path.clone());
+                    let idx = if tracks.is_empty() {
+                        None
+                    } else {
+                        cur_path
+                            .as_deref()
+                            .and_then(|cp| tracks.iter().position(|t| t.path == cp))
+                            .or(Some(0))
+                    };
+                    engine.current_idx = idx;
                     engine.queue = tracks;
+                    engine.save_state();
                 }
+            }
+            Ok(ThreadMsg::Shutdown(ack_tx)) => {
+                engine.save_state();
+                let _ = ack_tx.send(());
+                break;
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 engine.tick_auto_advance();
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                engine.save_state();
+                break;
+            }
         }
     }
 }
@@ -735,25 +946,46 @@ impl LocalMusicBackend {
         }
 
         let exe = crate::libraries::process::resolve_exe();
-        let mut cmd = std::process::Command::new(exe);
-        cmd.arg("--audio-daemon")
+
+        // Spawn inside its own transient systemd unit (app.slice) so closing or
+        // restarting the bar/service never kills active music playback.
+        let systemd_ok = std::process::Command::new("systemd-run")
+            .args([
+                "--user",
+                "--collect",
+                "--quiet",
+                "--slice=app.slice",
+                "--",
+            ])
+            .arg(&exe)
+            .arg("--audio-daemon")
             .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null());
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
 
-        if let Ok(log_file) = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(daemon_log_path())
-        {
-            cmd.stderr(log_file);
-        } else {
-            cmd.stderr(std::process::Stdio::null());
-        }
+        if !systemd_ok {
+            let mut cmd = std::process::Command::new(exe);
+            cmd.arg("--audio-daemon")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null());
 
-        if crate::libraries::process::spawn_and_reap(&mut cmd).is_err() {
-            return false;
+            if let Ok(log_file) = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(daemon_log_path())
+            {
+                cmd.stderr(log_file);
+            } else {
+                cmd.stderr(std::process::Stdio::null());
+            }
+
+            if crate::libraries::process::spawn_and_reap(&mut cmd).is_err() {
+                return false;
+            }
         }
 
         for _ in 0..40 {

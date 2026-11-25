@@ -128,13 +128,14 @@ fn label_moonbeauty_from_cmdline(name: &str, cmdline: &[u8]) -> String {
     if name != "moonbeauty" && name != "moon-beauty-shell" {
         return name.to_string();
     }
+    let display = "MoonBeauty";
     let args: Vec<&str> = cmdline
         .split(|b| *b == 0)
         .filter(|s| !s.is_empty())
         .filter_map(|s| std::str::from_utf8(s).ok())
         .collect();
     if args.is_empty() {
-        return name.to_string();
+        return display.to_string();
     }
     let role = if args.contains(&"--notif-surface") {
         "notifs"
@@ -156,10 +157,12 @@ fn label_moonbeauty_from_cmdline(name: &str, cmdline: &[u8]) -> String {
         "tray"
     } else if args.contains(&"--clipboard-ingest") {
         "ingest"
+    } else if args.contains(&"--audio-daemon") {
+        "music"
     } else {
         "bar"
     };
-    format!("{} ({})", name, role)
+    format!("{} ({})", display, role)
 }
 
 fn label_moonbeauty_role(pid: u32, name: &str) -> String {
@@ -1432,15 +1435,19 @@ mod tests {
     fn labels_moonbeauty_roles_from_cmdline() {
         assert_eq!(
             label_moonbeauty_from_cmdline("moonbeauty", b"/bin/moonbeauty\0"),
-            "moonbeauty (bar)"
+            "MoonBeauty (bar)"
         );
         assert_eq!(
             label_moonbeauty_from_cmdline("moonbeauty", b"/bin/moonbeauty\0--notif-surface\0"),
-            "moonbeauty (notifs)"
+            "MoonBeauty (notifs)"
         );
         assert_eq!(
             label_moonbeauty_from_cmdline("moonbeauty", b"/bin/moonbeauty\0--sys-tooltip\0"),
-            "moonbeauty (tooltip)"
+            "MoonBeauty (tooltip)"
+        );
+        assert_eq!(
+            label_moonbeauty_from_cmdline("moonbeauty", b"/bin/moonbeauty\0--audio-daemon\0"),
+            "MoonBeauty (music)"
         );
         assert_eq!(
             label_moonbeauty_from_cmdline("firefox", b"/usr/bin/firefox\0"),

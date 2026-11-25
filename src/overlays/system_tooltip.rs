@@ -612,6 +612,9 @@ impl iced::widget::canvas::Program<Message> for DiagonalScrollbar {
             return vec![frame.into_geometry()];
         }
         let h = bounds.height.max(1.0);
+        if !h.is_finite() || h <= 8.0 {
+            return vec![frame.into_geometry()];
+        }
 
         let rail_hw = 1.5;
         let (rx0, rx1) = (self.track_cx(2.0), self.track_cx(h - 2.0));
@@ -625,7 +628,8 @@ impl iced::widget::canvas::Program<Message> for DiagonalScrollbar {
         frame.fill(&rail_path, self.rail_color);
 
         let track_span = (h - 4.0).max(1.0);
-        let thumb_h = ((self.list_h / self.content_h) * track_span).clamp(24.0, track_span);
+        let min_thumb = 24.0_f32.min(track_span);
+        let thumb_h = ((self.list_h / self.content_h) * track_span).clamp(min_thumb, track_span);
         let max_scroll = (self.content_h - self.list_h).max(1.0);
         let scroll_frac = (self.scroll_y / max_scroll).clamp(0.0, 1.0);
         let ty0 = 2.0 + scroll_frac * (track_span - thumb_h);
