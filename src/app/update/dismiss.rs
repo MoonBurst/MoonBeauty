@@ -2,6 +2,19 @@ use super::*;
 
 impl MoonBeautyShellApp {
     pub(crate) fn handle_dismiss_active_overlay(&mut self) -> Command<Message> {
+        if let Some(ref mut tip) = self.in_bar_tooltip {
+            return match tip {
+                InBarTooltip::Weather(app) => app
+                    .update(moonbeauty::bar::weather::tooltip::Message::Dismiss)
+                    .map(Message::InBarWeatherTip),
+                InBarTooltip::System(app) => app
+                    .update(moonbeauty::overlays::system_tooltip::Message::Dismiss)
+                    .map(Message::InBarSysTip),
+                InBarTooltip::Info(app) => app
+                    .update(moonbeauty::overlays::info_tooltip::Message::Dismiss)
+                    .map(Message::InBarInfoTip),
+            };
+        }
         // Todo edit mode: Escape cancels the edit rather than
         // closing the overlay.
         if matches!(self.active_overlay, Some(OverlayTarget::Todo))

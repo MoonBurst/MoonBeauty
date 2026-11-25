@@ -232,12 +232,26 @@ impl TooltipEnv {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct InBarTooltipConfig {
+    pub id: String,
+    pub w: u32,
+    pub h: u32,
+    pub cx: i32,
+    pub sw: u32,
+    pub cap_w: f32,
+    pub grow_right: bool,
+    pub slant_l: crate::libraries::style::shape_box::SlantSide,
+    pub slant_r: crate::libraries::style::shape_box::SlantSide,
+    pub drop_ms: f32,
+    pub expand_ms: f32,
+}
+
 pub fn layer_anchor_and_margin(
     s: &crate::libraries::config::ShellSettings,
     w: u32,
     center_on_capsule: bool,
 ) -> (iced_layershell::reexport::Anchor, (i32, i32, i32, i32)) {
-    use iced_layershell::reexport::Anchor;
     let cx: i32 = std::env::var("MBS_CAPSULE_CX")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -250,13 +264,27 @@ pub fn layer_anchor_and_margin(
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(100.0);
+    let (bias_l, bias_r) = crate::bar::tooltip_spawn::read_offset_extra();
+    layer_anchor_and_margin_for(s, w, center_on_capsule, cx, sw, cap_w, bias_l, bias_r)
+}
+
+pub fn layer_anchor_and_margin_for(
+    s: &crate::libraries::config::ShellSettings,
+    w: u32,
+    center_on_capsule: bool,
+    cx: i32,
+    sw: i32,
+    cap_w: f32,
+    bias_l: i32,
+    bias_r: i32,
+) -> (iced_layershell::reexport::Anchor, (i32, i32, i32, i32)) {
+    use iced_layershell::reexport::Anchor;
     let grow_right = cx < sw / 2;
 
     let bar_h = s.bar_height as i32;
     let margin_top = (bar_h - s.control_border_width as i32 - 1).max(0);
     let half_cap = (cap_w / 2.0) as i32;
 
-    let (bias_l, bias_r) = crate::bar::tooltip_spawn::read_offset_extra();
     let adjust_left = s.effective_tooltip_offset_left() + bias_l;
     let adjust_right = s.effective_tooltip_offset_right() + bias_r;
 

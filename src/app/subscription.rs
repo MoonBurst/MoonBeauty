@@ -18,7 +18,7 @@ fn ipc_stream() -> impl futures_util::Stream<Item = Message> {
 impl MoonBeautyShellApp {
     pub fn subscription(&self) -> iced::Subscription<Message> {
         let is_bar = !self.is_standalone && !self.is_notif_surface;
-        let toast_sub = if self.is_notif_surface || is_bar {
+        let toast_sub = if self.is_notif_surface {
             let interval = if self.notifs.active_toasts.is_empty() {
                 1000
             } else {
@@ -439,7 +439,7 @@ impl MoonBeautyShellApp {
         // under any crash scenario. Not bulletproof, but small enough
         // that a human attacker cannot reliably exploit the window.
 
-        let notif_sub = if self.is_notif_surface || is_bar {
+        let notif_sub = if self.is_notif_surface {
             let interval = if self.notifs.active_toasts.is_empty() {
                 100
             } else {
@@ -515,6 +515,33 @@ impl MoonBeautyShellApp {
         } else {
             iced::Subscription::none()
         };
+        let in_bar_music_sub = if matches!(
+            self.in_bar_tooltip,
+            Some(InBarTooltip::Info(ref app)) if app.is_music_search_nav()
+        ) {
+            iced::event::listen_with(|event, _status, _window| {
+                if let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event
+                {
+                    match key {
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => {
+                            Some(Message::InBarInfoTip(
+                                moonbeauty::overlays::info_tooltip::Message::MusicSelectNext,
+                            ))
+                        }
+                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
+                            Some(Message::InBarInfoTip(
+                                moonbeauty::overlays::info_tooltip::Message::MusicSelectPrev,
+                            ))
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            })
+        } else {
+            iced::Subscription::none()
+        };
         iced::Subscription::batch(vec![
             idle_tick_sub,
             toast_sub,
@@ -544,6 +571,7 @@ impl MoonBeautyShellApp {
             tray_watchdog_sub,
             tray_fetch_sub,
             close_sub,
+            in_bar_music_sub,
         ])
     }
 }

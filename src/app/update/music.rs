@@ -15,7 +15,7 @@ use iced::Task as Command;
 
 use moonbeauty::bar::TopBarMessage;
 use moonbeauty::libraries::backend::music::{
-    poll_track, MpdBackend, MprisBackend, MusicCycleState, TrackSource,
+    poll_track, LocalMusicBackend, MprisBackend, MusicCycleState, TrackSource,
 };
 
 impl MoonBeautyShellApp {
@@ -84,7 +84,7 @@ impl MoonBeautyShellApp {
 async fn toggle_play_pause_async() {
     let (_, src) = poll_track().await;
     match src {
-        TrackSource::Mpd => MpdBackend::toggle_play_pause().await,
+        TrackSource::Local => LocalMusicBackend::toggle_play_pause().await,
         TrackSource::Mpris => MprisBackend::toggle_play_pause().await,
         TrackSource::None => {}
     }
@@ -93,7 +93,7 @@ async fn toggle_play_pause_async() {
 async fn next_track_async() {
     let (_, src) = poll_track().await;
     match src {
-        TrackSource::Mpd => MpdBackend::next().await,
+        TrackSource::Local => LocalMusicBackend::next().await,
         TrackSource::Mpris => MprisBackend::next().await,
         TrackSource::None => {}
     }
@@ -102,7 +102,7 @@ async fn next_track_async() {
 async fn previous_track_async() {
     let (_, src) = poll_track().await;
     match src {
-        TrackSource::Mpd => MpdBackend::previous().await,
+        TrackSource::Local => LocalMusicBackend::previous().await,
         TrackSource::Mpris => MprisBackend::previous().await,
         TrackSource::None => {}
     }

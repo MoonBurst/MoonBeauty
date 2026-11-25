@@ -87,6 +87,45 @@ impl MoonBeautyShellApp {
             Message::TrayAnimTick => return self.handle_tray_anim(),
             Message::FetchTrayItems => return self.handle_fetch_tray_items(),
             Message::TrayItemsLoaded(items) => return self.handle_tray_items_loaded(items),
+            Message::InBarWeatherTip(m) => {
+                if let Some(InBarTooltip::Weather(ref mut app)) = self.in_bar_tooltip {
+                    let cmd = app.update(m).map(Message::InBarWeatherTip);
+                    if app.should_close {
+                        self.in_bar_tooltip = None;
+                        if let Some(wid) = self.tooltip_window_id.take() {
+                            self.closing_tooltip_id = Some(wid);
+                            return Command::batch([cmd, Command::done(Message::CloseNotifLayer(wid))]);
+                        }
+                    }
+                    return cmd;
+                }
+            }
+            Message::InBarSysTip(m) => {
+                if let Some(InBarTooltip::System(ref mut app)) = self.in_bar_tooltip {
+                    let cmd = app.update(m).map(Message::InBarSysTip);
+                    if app.should_close {
+                        self.in_bar_tooltip = None;
+                        if let Some(wid) = self.tooltip_window_id.take() {
+                            self.closing_tooltip_id = Some(wid);
+                            return Command::batch([cmd, Command::done(Message::CloseNotifLayer(wid))]);
+                        }
+                    }
+                    return cmd;
+                }
+            }
+            Message::InBarInfoTip(m) => {
+                if let Some(InBarTooltip::Info(ref mut app)) = self.in_bar_tooltip {
+                    let cmd = app.update(m).map(Message::InBarInfoTip);
+                    if app.should_close {
+                        self.in_bar_tooltip = None;
+                        if let Some(wid) = self.tooltip_window_id.take() {
+                            self.closing_tooltip_id = Some(wid);
+                            return Command::batch([cmd, Command::done(Message::CloseNotifLayer(wid))]);
+                        }
+                    }
+                    return cmd;
+                }
+            }
 
             Message::DismissActiveOverlay => return self.handle_dismiss_active_overlay(),
 

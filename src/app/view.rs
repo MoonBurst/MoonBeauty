@@ -18,9 +18,24 @@ impl MoonBeautyShellApp {
             .into()
     }
 
+    fn build_in_bar_tooltip_view(&self) -> Element<'_, Message> {
+        match &self.in_bar_tooltip {
+            Some(InBarTooltip::Weather(app)) => app.view().map(Message::InBarWeatherTip),
+            Some(InBarTooltip::System(app)) => app.view().map(Message::InBarSysTip),
+            Some(InBarTooltip::Info(app)) => app.view().map(Message::InBarInfoTip),
+            None => container(iced::widget::Space::new())
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+        }
+    }
+
     pub fn view_window(&self, id: iced::window::Id) -> Element<'_, Message> {
         if self.notif_window_id == Some(id) || self.closing_notif_id == Some(id) {
             return self.build_notifs_view();
+        }
+        if self.tooltip_window_id == Some(id) || self.closing_tooltip_id == Some(id) {
+            return self.build_in_bar_tooltip_view();
         }
         self.view()
     }

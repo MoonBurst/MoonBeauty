@@ -22,7 +22,9 @@ use crate::libraries::config::ShellSettings;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
 use crate::libraries::style::TextExt;
 
-use crate::overlays::tooltip_common::{layer_anchor_and_margin, slanted_row, TooltipEnv};
+use crate::overlays::tooltip_common::{
+    layer_anchor_and_margin, slanted_row, InBarTooltipConfig, TooltipEnv,
+};
 
 const W_START: f32 = 130.0;
 const AUTO_MS: u128 = 15_000;
@@ -102,6 +104,8 @@ pub struct App {
     music_search_results: Vec<(String, String)>,
     music_selected_idx: usize,
     music_sources: crate::libraries::backend::music::MusicSources,
+    in_bar: bool,
+    pub should_close: bool,
 }
 
 #[allow(dead_code)]
@@ -147,6 +151,50 @@ impl App {
             music_search_results: Vec::new(),
             music_selected_idx: 0,
             music_sources: crate::libraries::backend::music::MusicSources::load(),
+            in_bar: false,
+            should_close: false,
+        };
+        let task = Task::perform(fetch_data(mode), Message::Loaded);
+        (
+            app,
+            Task::batch(vec![
+                task,
+                Task::perform(
+                    async { tokio::time::sleep(std::time::Duration::from_millis(4)).await },
+                    |_| Message::Tick,
+                ),
+            ]),
+        )
+    }
+
+    pub fn new_in_bar(cfg: &InBarTooltipConfig) -> (Self, Task<Message>) {
+        let mode = cfg.id.clone();
+        let settings = ShellSettings::load();
+        let theme = ShellTheme::from_settings(&settings);
+        let app = Self {
+            opened: Instant::now(),
+            mode: mode.clone(),
+            data: None,
+            grow_right: cfg.grow_right,
+            w: cfg.w,
+            w_start: cfg.cap_w,
+            slant_l: cfg.slant_l,
+            slant_r: cfg.slant_r,
+            h: cfg.h,
+            drop_ms: cfg.drop_ms,
+            expand_ms: cfg.expand_ms,
+            closing_at: None,
+            search_query: String::new(),
+            trash_confirm: false,
+            anim_frame: 0,
+            settings,
+            theme,
+            music_search_query: String::new(),
+            music_search_results: Vec::new(),
+            music_selected_idx: 0,
+            music_sources: crate::libraries::backend::music::MusicSources::load(),
+            in_bar: true,
+            should_close: false,
         };
         let task = Task::perform(fetch_data(mode), Message::Loaded);
         (
@@ -184,7 +232,11 @@ impl App {
         format!("mbs-info-tip-{}", self.mode)
     }
 
-    fn update(&mut self, m: Message) -> Task<Message> {
+    pub fn is_music_search_nav(&self) -> bool {
+        self.mode == "music" && !self.music_search_results.is_empty()
+    }
+
+    pub fn update(&mut self, m: Message) -> Task<Message> {
         match m {
             Message::Tick => {
                 if crate::libraries::process::was_sigterm_signaled()
@@ -210,9 +262,17 @@ impl App {
 
                 if let Some(t) = &self.closing_at {
                     if t.started.elapsed().as_millis() > (self.drop_ms * 3.0) as u128 {
+                        if self.in_bar {
+                            self.should_close = true;
+                            return Task::none();
+                        }
                         std::process::exit(0);
                     }
                 } else if self.opened.elapsed().as_millis() > AUTO_MS {
+                    if self.in_bar {
+                        self.should_close = true;
+                        return Task::none();
+                    }
                     std::process::exit(0);
                 }
 
@@ -336,10 +396,10 @@ impl App {
                 return Task::perform(
                     async move {
                         let _ = crate::libraries::backend::MprisBackend::set_position(secs).await;
-                        let _ = crate::libraries::backend::MpdBackend::seek(secs).await;
+                        let _ = crate::libraries::backend::LocalMusicBackend::seek(secs).await;
                         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                         crate::libraries::backend::MprisBackend::clear_cache();
-                        crate::libraries::backend::MpdBackend::clear_cache();
+                        crate::libraries::backend::LocalMusicBackend::clear_cache();
                         fetch_data("music".to_string()).await
                     },
                     Message::Loaded,
@@ -349,10 +409,10 @@ impl App {
                 return Task::perform(
                     async move {
                         let _ = crate::libraries::backend::MprisBackend::set_volume(vol).await;
-                        let _ = crate::libraries::backend::MpdBackend::set_volume(vol).await;
+                        let _ = crate::libraries::backend::LocalMusicBackend::set_volume(vol).await;
                         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                         crate::libraries::backend::MprisBackend::clear_cache();
-                        crate::libraries::backend::MpdBackend::clear_cache();
+                        crate::libraries::backend::LocalMusicBackend::clear_cache();
                         fetch_data("music".to_string()).await
                     },
                     Message::Loaded,
@@ -408,7 +468,7 @@ impl App {
                     return Task::none();
                 }
                 return Task::perform(
-                    async move { crate::libraries::backend::MpdBackend::search_songs(&q).await },
+                    async move { crate::libraries::backend::LocalMusicBackend::search_songs(&q).await },
                     Message::MusicSearchResults,
                 );
             }
@@ -460,7 +520,7 @@ impl App {
                     let idx = self.music_selected_idx;
                     return Task::perform(
                         async move {
-                            crate::libraries::backend::MpdBackend::play_queue(&urls, idx).await;
+                            crate::libraries::backend::LocalMusicBackend::play_queue(&urls, idx).await;
                             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                             fetch_data("music".to_string()).await
                         },
@@ -481,7 +541,7 @@ impl App {
                         .collect();
                     return Task::perform(
                         async move {
-                            crate::libraries::backend::MpdBackend::play_queue(&urls, idx).await;
+                            crate::libraries::backend::LocalMusicBackend::play_queue(&urls, idx).await;
                             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                             fetch_data("music".to_string()).await
                         },
@@ -508,7 +568,7 @@ impl App {
         Task::none()
     }
 
-    fn view(&self) -> Element<'_, Message> {
+    pub fn view(&self) -> Element<'_, Message> {
         let settings = &self.settings;
         let theme = &self.theme;
         let _content_h = match &self.data {

@@ -6,6 +6,10 @@ use crate::libraries::ipc::IpcCommand;
 use crate::libraries::ipc::send_ipc_sync;
 
 pub fn run(args: &[String]) {
+    if args.iter().any(|a| a == "--audio-daemon") {
+        crate::libraries::backend::music::local::run_audio_daemon();
+    }
+
     // Music CLI flags — fired from the tooltip's Cycle/Prev/Play/Next
     // buttons and bindable to sway keybinds.
     for (flag, cmd) in [

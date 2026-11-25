@@ -10,7 +10,7 @@
 //! State: `next_idx` (which to play next) + `last_playing` (which we
 //! most recently started). Both updated atomically per press.
 
-use super::mpd::MpdBackend;
+use super::local::LocalMusicBackend;
 use super::mpris::MprisBackend;
 use serde::{Deserialize, Serialize};
 
@@ -49,7 +49,7 @@ impl MusicSources {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlayerKind {
-    Mpd,
+    Local,
     Mpris(String),
 }
 
@@ -108,8 +108,10 @@ pub async fn probe_all() -> Vec<(PlayerKind, bool)> {
     let sources = MusicSources::load();
 
     if sources.local {
-        if let Some(track) = MpdBackend::poll().await {
-            out.push((PlayerKind::Mpd, track.is_playing));
+        if let Some(track) = LocalMusicBackend::poll().await {
+            if track.url.is_some() || track.is_playing {
+                out.push((PlayerKind::Local, track.is_playing));
+            }
         }
     }
 
@@ -139,11 +141,11 @@ pub async fn probe_all() -> Vec<(PlayerKind, bool)> {
 
 async fn dispatch_play(kind: &PlayerKind, play: bool) {
     match kind {
-        PlayerKind::Mpd => {
+        PlayerKind::Local => {
             if play {
-                MpdBackend::play().await
+                LocalMusicBackend::play().await
             } else {
-                MpdBackend::pause().await
+                LocalMusicBackend::pause().await
             }
         }
         PlayerKind::Mpris(bus) => MprisBackend::set_playing_for(bus, play).await,
@@ -154,7 +156,7 @@ async fn dispatch_play(kind: &PlayerKind, play: bool) {
 /// was acted on (for logging / UI feedback), or None if no players
 /// are available.
 pub async fn press(state: &mut MusicCycleState) -> Option<(PlayerKind, PressOutcome)> {
-    super::mpd::MpdBackend::clear_cache();
+    LocalMusicBackend::clear_cache();
     let probed = probe_all().await;
     let available: Vec<PlayerKind> = probed.iter().map(|(k, _)| k.clone()).collect();
     let playing: Vec<PlayerKind> = probed
@@ -178,7 +180,7 @@ pub async fn press(state: &mut MusicCycleState) -> Option<(PlayerKind, PressOutc
         Decision::Pause(target, new_next) => {
             crate::dbg_log!("[music-cycle] pausing {:?}", target);
             dispatch_play(&target, false).await;
-            super::mpd::MpdBackend::clear_cache();
+            LocalMusicBackend::clear_cache();
             state.last_playing = None;
             state.next_idx = new_next;
             Some((target, PressOutcome::Paused))
@@ -186,7 +188,7 @@ pub async fn press(state: &mut MusicCycleState) -> Option<(PlayerKind, PressOutc
         Decision::Play(target, new_next) => {
             crate::dbg_log!("[music-cycle] playing {:?}", target);
             dispatch_play(&target, true).await;
-            super::mpd::MpdBackend::clear_cache();
+            LocalMusicBackend::clear_cache();
             state.last_playing = Some(target.clone());
             state.next_idx = new_next;
             Some((target, PressOutcome::Played))
@@ -202,7 +204,7 @@ mod decide_tests {
         PlayerKind::Mpris("org.mpris.MediaPlayer2.firefox.instance_1".into())
     }
     fn mpd() -> PlayerKind {
-        PlayerKind::Mpd
+        PlayerKind::Local
     }
 
     #[test]

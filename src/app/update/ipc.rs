@@ -74,8 +74,16 @@ impl MoonBeautyShellApp {
             IpcCommand::JumpToLatestNotif => return self.jump_to_latest_notif(),
             IpcCommand::ToggleHistory => return self.toggle_history(),
             IpcCommand::ReloadSettings => {
+                let prev_screen = self.settings.notif_screen_name.clone();
+                let prev_corner = self.settings.notif_corner.clone();
                 self.settings = ShellSettings::load();
                 self.theme = ShellTheme::from_settings(&self.settings);
+                if self.settings.notif_screen_name != prev_screen
+                    || self.settings.notif_corner != prev_corner
+                {
+                    self.notif_screen_at_startup = self.settings.notif_screen_name.clone();
+                    self.restart_notif_surface();
+                }
             }
             IpcCommand::TestNotification => return self.test_notification(),
             IpcCommand::MusicCycle => return self.music_cycle(),

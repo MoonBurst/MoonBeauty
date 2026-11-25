@@ -129,7 +129,7 @@ impl MoonBeautyShellApp {
             }
             NotifMessage::DismissToast(id) => {
                 self.notifs.dismiss_toast_ui(id);
-                if self.is_notif_surface || !self.is_standalone {
+                if self.is_notif_surface {
                     self.notifs.mark_history_closed(id);
                     return Command::perform(
                         moonbeauty::overlays::notifications::emit_notification_closed(id, 2),
@@ -172,7 +172,7 @@ impl MoonBeautyShellApp {
             NotifMessage::FinishToastActivation { id, dismiss } => {
                 if dismiss {
                     self.notifs.dismiss_toast_ui(id);
-                    if self.is_notif_surface || !self.is_standalone {
+                    if self.is_notif_surface {
                         self.notifs.mark_history_closed(id);
                     }
                 }
@@ -277,6 +277,9 @@ impl MoonBeautyShellApp {
     }
 
     pub(crate) fn handle_poll_notifs(&mut self) -> Command<Message> {
+        if !self.is_notif_surface {
+            return Command::none();
+        }
         let mtime = std::fs::metadata(ShellSettings::config_path())
             .ok()
             .and_then(|m| m.modified().ok());

@@ -9,7 +9,7 @@ use crate::libraries::config::settings::ShellSettings;
 use crate::libraries::config::theme::ShellTheme;
 use crate::libraries::style::shape_box::{AngledHexGeometry, ShapeBox, ShapeType};
 use crate::libraries::style::{shell_font, TextExt};
-use crate::libraries::backend::{poll_track, MprisBackend, MprisTrack, MpdBackend};
+use crate::libraries::backend::{poll_track, LocalMusicBackend, MprisBackend, MprisTrack};
 use crate::libraries::backend::music::MusicSources;
 
 #[derive(Debug, Clone)]
@@ -471,10 +471,10 @@ impl AppLauncher {
                 }
                 return iced::Task::perform(async move { 
                     let _ = MprisBackend::set_position(secs).await; 
-                    let _ = MpdBackend::seek(secs).await;
+                    let _ = LocalMusicBackend::seek(secs).await;
                     tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                     MprisBackend::clear_cache();
-                    MpdBackend::clear_cache();
+                    LocalMusicBackend::clear_cache();
                     poll_track().await.0
                 }, LauncherMessage::MusicLoaded);
             }
@@ -484,10 +484,10 @@ impl AppLauncher {
                 }
                 return iced::Task::perform(async move { 
                     let _ = MprisBackend::set_volume(vol).await; 
-                    let _ = MpdBackend::set_volume(vol).await;
+                    let _ = LocalMusicBackend::set_volume(vol).await;
                     tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                     MprisBackend::clear_cache();
-                    MpdBackend::clear_cache();
+                    LocalMusicBackend::clear_cache();
                     poll_track().await.0
                 }, LauncherMessage::MusicLoaded);
             }
@@ -510,7 +510,7 @@ impl AppLauncher {
                 self.music_search_query = q.clone();
                 self.music_selected_idx = 0;
                 if q.is_empty() { self.music_search_results.clear(); return iced::Task::none(); }
-                return iced::Task::perform(async move { MpdBackend::search_songs(&q).await }, LauncherMessage::MusicSearchResults);
+                return iced::Task::perform(async move { LocalMusicBackend::search_songs(&q).await }, LauncherMessage::MusicSearchResults);
             }
             LauncherMessage::MusicSearchSubmit => return iced::Task::done(LauncherMessage::MusicPlaySelected),
             LauncherMessage::MusicSearchResults(res) => { self.music_search_results = res; self.music_selected_idx = 0; }
@@ -521,7 +521,7 @@ impl AppLauncher {
                     let urls: Vec<String> = self.music_search_results.iter().map(|(_, u)| u.clone()).collect();
                     let idx = self.music_selected_idx;
                     return iced::Task::perform(async move {
-                        MpdBackend::play_queue(&urls, idx).await;
+                        LocalMusicBackend::play_queue(&urls, idx).await;
                         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
                         poll_track().await.0
                     }, LauncherMessage::MusicLoaded);
@@ -531,7 +531,7 @@ impl AppLauncher {
                 if let Some(idx) = self.music_search_results.iter().position(|(_, u)| u == &url) {
                     let urls: Vec<String> = self.music_search_results.iter().map(|(_, u)| u.clone()).collect();
                     return iced::Task::perform(async move {
-                        MpdBackend::play_queue(&urls, idx).await;
+                        LocalMusicBackend::play_queue(&urls, idx).await;
                         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
                         poll_track().await.0
                     }, LauncherMessage::MusicLoaded);
@@ -754,7 +754,7 @@ impl AppLauncher {
                     src_btn("Local", 0), src_btn("Spotify", 1), src_btn("Browser", 2)
                 ].spacing(10).align_y(Alignment::Center).width(Length::Fill);
 
-                let search_input = text_input("Search MPD...", &self.music_search_query)
+                let search_input = text_input("Search local music...", &self.music_search_query)
                     .id(MUSIC_SEARCH_ID)
                     .on_input(LauncherMessage::MusicSearchChanged)
                     .on_submit(LauncherMessage::MusicSearchSubmit)

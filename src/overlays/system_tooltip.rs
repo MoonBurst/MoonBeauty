@@ -12,7 +12,7 @@ use crate::libraries::style::shape_box::SlantSide;
 
 use crate::overlays::tooltip_common::{
     layer_anchor_and_margin, proc_kill_row, slanted_row, slanted_search_bar, truncate_proc_name,
-    TooltipEnv,
+    InBarTooltipConfig, TooltipEnv,
 };
 
 const W_START: f32 = 130.0;
@@ -68,6 +68,8 @@ pub struct App {
     anim_frame: u64,
     settings: ShellSettings,
     theme: ShellTheme,
+    in_bar: bool,
+    pub should_close: bool,
 }
 
 #[allow(dead_code)]
@@ -146,7 +148,60 @@ impl App {
             anim_frame: 0,
             settings,
             theme,
+            in_bar: false,
+            should_close: false,
         };
+        Self::boot_with_app(app, target)
+    }
+
+    pub fn new_in_bar(cfg: &InBarTooltipConfig) -> (Self, Task<Message>) {
+        let target = cfg.id.clone();
+        let s = ShellSettings::load();
+        let mut w = cfg.w;
+        let mut h = cfg.h;
+        if target == "ram" {
+            w = w.max(540);
+            h = h.max(480);
+        }
+        let gpu_list = if target == "gpu" {
+            SystemCollector::list_gpus_sync()
+        } else {
+            Vec::new()
+        };
+        let selected_gpu = if target == "gpu" {
+            select_gpu_index(&gpu_list, &s.gpu_selected_id)
+        } else {
+            0
+        };
+        let settings = s;
+        let theme = ShellTheme::from_settings(&settings);
+        let app = Self {
+            opened: Instant::now(),
+            target: target.clone(),
+            data: None,
+            grow_right: cfg.grow_right,
+            w,
+            h,
+            drop_ms: cfg.drop_ms,
+            expand_ms: cfg.expand_ms,
+            w_start: cfg.cap_w,
+            slant_l: cfg.slant_l,
+            slant_r: cfg.slant_r,
+            closing_at: None,
+            search_query: String::new(),
+            scroll_y: 0.0,
+            gpu_list,
+            selected_gpu,
+            anim_frame: 0,
+            settings,
+            theme,
+            in_bar: true,
+            should_close: false,
+        };
+        Self::boot_with_app(app, target)
+    }
+
+    fn boot_with_app(app: Self, target: String) -> (Self, Task<Message>) {
         let task = if target == "cpu" {
             Task::perform(async { SystemCollector::collect_all().await.0 }, |d| {
                 Message::Loaded(Data::Cpu(d))
@@ -212,7 +267,7 @@ impl App {
         format!("mbs-sys-tip-{}", self.target)
     }
 
-    fn update(&mut self, m: Message) -> Task<Message> {
+    pub fn update(&mut self, m: Message) -> Task<Message> {
         match m {
             Message::Tick => {
                 if crate::libraries::process::was_sigterm_signaled()
@@ -229,9 +284,17 @@ impl App {
 
                 if let Some(t) = &self.closing_at {
                     if t.started.elapsed().as_millis() > (self.drop_ms * 3.0) as u128 {
+                        if self.in_bar {
+                            self.should_close = true;
+                            return Task::none();
+                        }
                         std::process::exit(0);
                     }
                 } else if self.opened.elapsed().as_millis() > AUTO_MS {
+                    if self.in_bar {
+                        self.should_close = true;
+                        return Task::none();
+                    }
                     std::process::exit(0);
                 }
 
@@ -342,7 +405,7 @@ impl App {
         Task::none()
     }
 
-    fn view(&self) -> Element<'_, Message> {
+    pub fn view(&self) -> Element<'_, Message> {
         let settings = &self.settings;
         let theme = &self.theme;
         let effective_h = self.h as f32;

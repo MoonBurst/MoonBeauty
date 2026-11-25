@@ -79,7 +79,7 @@ pub fn run(args: &[String]) {
         let _ = std::process::Command::new("pkill")
             .args([
                 "-f",
-                "(^|/)(moonbeauty|moon-beauty-shell) (--(sys|weather|alarm|info)-tooltip|--tray-popup)$",
+                "(^|/)(moonbeauty|moon-beauty-shell) (--(sys|weather|alarm|info)-tooltip|--tray-popup|--notif-surface)$",
             ])
             .status();
         std::thread::sleep(std::time::Duration::from_millis(400));

@@ -322,7 +322,7 @@ impl SettingsOverlay {
                                     radius: 3.0.into(),
                                 }
                             },
-                            text_color: if is_auto { theme.muted } else { theme.warning },
+                            text_color: if is_auto { theme.text } else { theme.warning },
                             ..Default::default()
                         }),
                 ]
@@ -374,7 +374,7 @@ impl SettingsOverlay {
                                     radius: 3.0.into(),
                                 }
                             },
-                            text_color: if is_auto { theme.muted } else { theme.warning },
+                            text_color: if is_auto { theme.text } else { theme.warning },
                             ..Default::default()
                         }),
                 ]
@@ -515,14 +515,14 @@ impl SettingsOverlay {
 
             let size_controls = if id_str == "tray" {
                 row![
-                    text("W:").size((scale_sz(0.6)) as f32).color(theme.muted),
+                    text("W:").size((scale_sz(0.6)) as f32).color(theme.text),
                     slider(30..=400, settings.tray_width, SettingsMessage::TrayWidth)
                         .width(Length::Fixed(80.0)),
                     text(format!("{}", settings.tray_width))
                         .size((scale_sz(0.6)) as f32)
                         .color(theme.text)
                         .width(Length::Fixed(25.0)),
-                    text("I:").size((scale_sz(0.6)) as f32).color(theme.muted),
+                    text("I:").size((scale_sz(0.6)) as f32).color(theme.text),
                     slider(
                         12..=48,
                         settings.tray_icon_size,
@@ -533,7 +533,7 @@ impl SettingsOverlay {
                         .size((scale_sz(0.6)) as f32)
                         .color(theme.text)
                         .width(Length::Fixed(25.0)),
-                    text("T:").size((scale_sz(0.6)) as f32).color(theme.muted),
+                    text("T:").size((scale_sz(0.6)) as f32).color(theme.text),
                     slider(
                         0..=30,
                         settings.tray_timeout_sec,
@@ -559,7 +559,7 @@ impl SettingsOverlay {
                     bg: theme.background,
                     fg: theme.text,
                     border: theme.border,
-                    muted: theme.muted,
+                    muted: theme.text,
                     display_w: 180.0,
                     display_h: 150.0,
                 };
@@ -571,7 +571,7 @@ impl SettingsOverlay {
                             .color(if has_override {
                                 theme.danger
                             } else {
-                                theme.muted
+                                theme.text
                             })
                     )
                     .on_press(SettingsMessage::ResetTooltipSize(id_reset))
@@ -661,7 +661,7 @@ impl SettingsOverlay {
                     row![
                         text("Sound:")
                             .size((scale_sz(0.7)) as f32)
-                            .color(theme.muted)
+                            .color(theme.text)
                             .width(Length::Fixed(55.0)),
                         text_input(
                             "filename.mp3",
@@ -711,7 +711,7 @@ impl SettingsOverlay {
                     row![
                         text("Duration:")
                             .size((scale_sz(0.7)) as f32)
-                            .color(theme.muted)
+                            .color(theme.text)
                             .width(Length::Fixed(55.0)),
                         slider(
                             1..=60,
@@ -729,7 +729,7 @@ impl SettingsOverlay {
                     row![
                         text("Volume:")
                             .size((scale_sz(0.7)) as f32)
-                            .color(theme.muted)
+                            .color(theme.text)
                             .width(Length::Fixed(55.0)),
                         slider(
                             0..=100,

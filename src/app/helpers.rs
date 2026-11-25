@@ -72,7 +72,7 @@ impl MoonBeautyShellApp {
     /// even with rapid clicking). Preserving `id` as String inside
     /// the body keeps the extracted logic byte-for-byte identical
     /// to the inline version; no per-site &str/String juggling.
-    pub(crate) fn dismiss_tooltip_child(&mut self) {
+    pub(crate) fn dismiss_tooltip_child(&mut self) -> Command<Message> {
         if let Some(mut c) = self.weather_tooltip_child.take() {
             let pid = c.id() as libc::pid_t;
             #[allow(unsafe_code)]
@@ -83,10 +83,30 @@ impl MoonBeautyShellApp {
                 let _ = c.wait();
             });
         }
+        self.in_bar_tooltip = None;
+        if let Some(wid) = self.tooltip_window_id.take() {
+            self.closing_tooltip_id = Some(wid);
+            return Command::done(Message::CloseNotifLayer(wid));
+        }
+        Command::none()
     }
 
     pub fn toggle_tooltip(&mut self, id: &str) -> Command<Message> {
         let id = id.to_string();
+        if let Some(ref mut tip) = self.in_bar_tooltip {
+            eprintln!("[tooltip] Already open in-bar; toggling off (animate)");
+            return match tip {
+                InBarTooltip::Weather(app) => app
+                    .update(moonbeauty::bar::weather::tooltip::Message::Dismiss)
+                    .map(Message::InBarWeatherTip),
+                InBarTooltip::System(app) => app
+                    .update(moonbeauty::overlays::system_tooltip::Message::Dismiss)
+                    .map(Message::InBarSysTip),
+                InBarTooltip::Info(app) => app
+                    .update(moonbeauty::overlays::info_tooltip::Message::Dismiss)
+                    .map(Message::InBarInfoTip),
+            };
+        }
         // Recent click => use cursor position for dynamic placement.
         // Fallback to capsule_center_x if no click in last 5s (e.g. IPC trigger).
         let recent_click = self.last_cursor_time.elapsed() < std::time::Duration::from_secs(5);
@@ -98,8 +118,7 @@ impl MoonBeautyShellApp {
             .is_some_and(|status| status.is_none());
         if running {
             eprintln!("[tooltip] Already open; toggling off via SIGTERM (animate)");
-            self.dismiss_tooltip_child();
-            return Command::none();
+            return self.dismiss_tooltip_child();
         }
         self.weather_tooltip_child = None;
 
@@ -169,7 +188,7 @@ impl MoonBeautyShellApp {
             cx < (sw as i32) / 2
         };
         let (tip_w, _tip_h) = self.settings.tooltip_size(&id);
-        let tip_output =
+        let _tip_output =
             if self.settings.bar_monitor != "All" && !self.settings.bar_monitor.is_empty() {
                 Some(self.settings.bar_monitor.clone())
             } else {
@@ -181,36 +200,81 @@ impl MoonBeautyShellApp {
 
         // Finding 76: per-capsule tooltip bias.
         let (bias_l, bias_r) = moonbeauty::bar::capsules::tooltip_bias(&id, &self.theme);
-        let req = moonbeauty::bar::tooltip_spawn::SpawnRequest {
-            id: &id,
-            exe: resolve_exe(),
-            output: tip_output.as_deref(),
-            tooltip_w: tip_w,
-            tooltip_h: moonbeauty::bar::tooltip_spawn::compute_height(
-                &id,
-                &self.settings,
-                &self.telemetry,
-            ),
-            drop_ms: self.settings.tooltip_drop_ms,
-            expand_ms: self.settings.tooltip_expand_ms,
-            capsule_cx: cx,
-            capsule_w: cap_w,
-            screen_w: sw,
-            slant_l,
-            slant_r,
-            grow_right,
-            offset_left_extra: bias_l,
-            offset_right_extra: bias_r,
-        };
-
-        match moonbeauty::bar::tooltip_spawn::spawn(&req) {
-            Ok(c) => {
-                eprintln!("[ipc] spawned tooltip pid={}", c.id());
-                self.weather_tooltip_child = Some(c);
+        let tip_h = moonbeauty::bar::tooltip_spawn::compute_height(
+            &id,
+            &self.settings,
+            &self.telemetry,
+        );
+        use moonbeauty::libraries::style::shape_box::SlantSide;
+        let parse_slant = |s: &str| {
+            if s == "R" {
+                SlantSide::Right
+            } else {
+                SlantSide::Left
             }
-            Err(e) => eprintln!("[tooltip] Failed to spawn: {e}"),
-        }
-        Command::none()
+        };
+        let final_w = if id == "ram" {
+            tip_w.max(cap_w as u32).max(540)
+        } else {
+            tip_w.max(cap_w as u32)
+        };
+        let final_h = if id == "ram" { tip_h.max(480) } else { tip_h };
+        let cfg = moonbeauty::overlays::tooltip_common::InBarTooltipConfig {
+            id: id.clone(),
+            w: final_w,
+            h: final_h,
+            cx,
+            sw,
+            cap_w,
+            grow_right,
+            slant_l: parse_slant(slant_l),
+            slant_r: parse_slant(slant_r),
+            drop_ms: self.settings.tooltip_drop_ms as f32,
+            expand_ms: self.settings.tooltip_expand_ms as f32,
+        };
+        let (anchor, margin) = moonbeauty::overlays::tooltip_common::layer_anchor_and_margin_for(
+            &self.settings,
+            final_w,
+            id == "clock",
+            cx,
+            sw as i32,
+            cap_w,
+            bias_l,
+            bias_r,
+        );
+        let (tip_state, init_cmd) = if id == "weather" {
+            let (app, cmd) = moonbeauty::bar::weather::tooltip::App::new_in_bar(&cfg);
+            (InBarTooltip::Weather(app), cmd.map(Message::InBarWeatherTip))
+        } else if matches!(
+            id.as_str(),
+            "calendar" | "music" | "unified" | "net" | "custom" | "clock"
+        ) {
+            let (app, cmd) = moonbeauty::overlays::info_tooltip::App::new_in_bar(&cfg);
+            (InBarTooltip::Info(app), cmd.map(Message::InBarInfoTip))
+        } else {
+            let (app, cmd) = moonbeauty::overlays::system_tooltip::App::new_in_bar(&cfg);
+            (InBarTooltip::System(app), cmd.map(Message::InBarSysTip))
+        };
+        let win_id = iced::window::Id::unique();
+        let ns = format!("mbs-inbar-tip-{}", id);
+        let layer_settings = iced_layershell::reexport::NewLayerShellSettings {
+            size: Some((final_w, final_h)),
+            layer: iced_layershell::reexport::Layer::Overlay,
+            anchor,
+            exclusive_zone: Some(-1),
+            margin: Some(margin),
+            keyboard_interactivity:
+                iced_layershell::reexport::KeyboardInteractivity::Exclusive,
+            output_option: iced_layershell::reexport::OutputOption::None,
+            events_transparent: false,
+            namespace: Some(ns),
+        };
+        self.in_bar_tooltip = Some(tip_state);
+        self.tooltip_window_id = Some(win_id);
+        Command::batch([
+            Command::done(Message::OpenNotifLayer(win_id, layer_settings)),
+            init_cmd,
+        ])
     }
 
     /// Handle a bar capsule action (bar-side click handler dispatch).
@@ -234,9 +298,9 @@ impl MoonBeautyShellApp {
                 //       selection and falls through to --sys-tooltip
                 //       (which defaults unknown targets to RAM).
                 if id == "alarm" {
-                    self.dismiss_tooltip_child();
+                    let cmd = self.dismiss_tooltip_child();
                     self.toggle_standalone(OverlayTarget::Reminders);
-                    return Command::none();
+                    return cmd;
                 }
 
                 // 2. DROPDOWN TOOLTIPS (CPU, GPU, RAM, Tray)
@@ -295,12 +359,13 @@ impl MoonBeautyShellApp {
             CapsuleAction::ToggleNotificationDnd => return self.toggle_notification_dnd(),
             CapsuleAction::CancelTooltip(id) => {
                 eprintln!("[topbar] CancelTooltip: {}", id);
-                self.dismiss_tooltip_child();
+                let cmd = self.dismiss_tooltip_child();
                 // Right-click on alarm capsule: wipe active timers
                 if id == "alarm" {
                     moonbeauty::overlays::reminders::save_reminders(&[]);
                     eprintln!("[topbar] cleared active timers");
                 }
+                return cmd;
             }
             CapsuleAction::ToggleSourceMute => {
                 return Command::perform(AudioBackend::toggle_source_mute(), |_| {
@@ -533,4 +598,50 @@ where
         ),
     }
     std::process::exit(0)
+}
+
+pub(crate) fn spawn_notif_surface_child() -> Option<std::process::Child> {
+    let exe = resolve_exe();
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("--notif-surface");
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt;
+        #[allow(unsafe_code)]
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+                Ok(())
+            });
+        }
+    }
+    match cmd.spawn() {
+        Ok(c) => {
+            eprintln!("[bar] spawned --notif-surface pid={}", c.id());
+            Some(c)
+        }
+        Err(e) => {
+            eprintln!("[bar] failed to spawn --notif-surface: {e}");
+            None
+        }
+    }
+}
+
+impl MoonBeautyShellApp {
+    pub(crate) fn restart_notif_surface(&mut self) {
+        if let Some(mut c) = self.notif_surface_child.take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+        let _ = std::process::Command::new("pkill")
+            .args([
+                "-9",
+                "-f",
+                "--",
+                "(^|/)(moonbeauty|moon-beauty-shell) --notif-surface$",
+            ])
+            .status();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        self.notif_surface_child = spawn_notif_surface_child();
+    }
 }

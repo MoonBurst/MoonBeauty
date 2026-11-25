@@ -137,7 +137,7 @@ impl SettingsOverlay {
             container(
                 text("Click 📋 to copy a command. Paste into a sway keybind, shell alias, or terminal.")
                     .size(fs_desc)
-                    .color(theme.muted),
+                    .color(theme.text),
             )
             .padding([10, 14])
             .width(Length::Fill)
@@ -159,7 +159,7 @@ impl SettingsOverlay {
             for (desc, cmd) in entries.iter() {
                 let cmd_clone = (*cmd).to_string();
 
-                let desc_el = text(*desc).size(fs_desc).color(theme.muted);
+                let desc_el = text(*desc).size(fs_desc).color(theme.text);
 
                 let cmd_el = text(*cmd)
                     .size(fs_cmd)

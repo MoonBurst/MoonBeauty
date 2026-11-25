@@ -370,7 +370,7 @@ impl MprisBackend {
             let mut path = std::path::PathBuf::from(decoded);
             
             if !path.is_absolute() {
-                let base = crate::libraries::backend::music::mpd::get_music_dir();
+                let base = crate::libraries::backend::music::local::get_music_dir();
                 path = base.join(path);
             }
             
@@ -395,13 +395,13 @@ impl MprisBackend {
             }
 
             // If not found, just try opening the music root as a last resort
-            let base = crate::libraries::backend::music::mpd::get_music_dir();
+            let base = crate::libraries::backend::music::local::get_music_dir();
             crate::dbg_log!("[open-folder] FAILED to find exact path, falling back to root: {:?}", base);
             let _ = Command::new("xdg-open").arg(base).spawn();
             return;
         }
         
-        let base = crate::libraries::backend::music::mpd::get_music_dir();
+        let base = crate::libraries::backend::music::local::get_music_dir();
         crate::dbg_log!("[open-folder] NO URL PROVIDED, opening root: {:?}", base);
         let _ = Command::new("xdg-open").arg(base).spawn();
     }

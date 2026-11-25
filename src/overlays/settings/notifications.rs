@@ -722,7 +722,7 @@ impl SettingsOverlay {
                     row![
                         text("When contains:")
                             .size((scale_sz(0.65)) as f32)
-                            .color(theme.muted),
+                            .color(theme.text),
                         text_input("pattern", &pat)
                             .on_input(move |v| SettingsMessage::RulePatternChanged(
                                 sel_idx, r_idx, v
@@ -732,7 +732,7 @@ impl SettingsOverlay {
                             .width(Length::Fixed(140.0)),
                         text("TTS:")
                             .size((scale_sz(0.65)) as f32)
-                            .color(theme.muted),
+                            .color(theme.text),
                         text_input("readout", &rd)
                             .on_input(move |v| SettingsMessage::RuleReadoutChanged(
                                 sel_idx, r_idx, v

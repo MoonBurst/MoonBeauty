@@ -383,6 +383,8 @@ pub struct ShellSettings {
     pub overlay_angle: u32,
     #[serde(default)]
     pub attachment_download_dir: String,
+    #[serde(default, alias = "musicDirs", alias = "musicFolders")]
+    pub music_dirs: Vec<String>,
 
     #[serde(default, alias = "screenshotSaveFormat")]
     pub screenshot_save_format: ScreenshotSaveFormat,
@@ -684,6 +686,7 @@ impl Default for ShellSettings {
             palette: Base16Palette::default(),
             tts_command: None,
             attachment_download_dir: String::new(),
+            music_dirs: Vec::new(),
             screenshot_save_format: ScreenshotSaveFormat::default(),
             email_auto_sort_threshold: default_email_auto_sort_threshold(),
             overlay_cut: default_overlay_cut(),

@@ -104,6 +104,9 @@ pub enum Message {
     TrayItemsLoaded(Vec<moonbeauty::bar::tray::TrayItem>),
     TrayAnimTick,
     TrayWatchdogTick,
+    InBarWeatherTip(moonbeauty::bar::weather::tooltip::Message),
+    InBarSysTip(moonbeauty::overlays::system_tooltip::Message),
+    InBarInfoTip(moonbeauty::overlays::info_tooltip::Message),
     /// Pre-computed toast rectangles (surface-local coords). Emitted
     /// whenever the toast count changes; `try_into` converts it to
     /// `LayershellCustomAction::SetInputRegion` so the layer surface's
@@ -171,6 +174,12 @@ impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message
     }
 }
 
+pub enum InBarTooltip {
+    Weather(moonbeauty::bar::weather::tooltip::App),
+    System(moonbeauty::overlays::system_tooltip::App),
+    Info(moonbeauty::overlays::info_tooltip::App),
+}
+
 pub struct MoonBeautyShellApp {
     pub weather_tooltip_child: Option<std::process::Child>,
     pub settings: ShellSettings,
@@ -191,6 +200,10 @@ pub struct MoonBeautyShellApp {
     pub notif_surface_size: (u32, u32),
     pub notif_window_id: Option<iced::window::Id>,
     pub closing_notif_id: Option<iced::window::Id>,
+    pub notif_surface_child: Option<std::process::Child>,
+    pub in_bar_tooltip: Option<InBarTooltip>,
+    pub tooltip_window_id: Option<iced::window::Id>,
+    pub closing_tooltip_id: Option<iced::window::Id>,
     pub tray_expanded: bool,
     pub tray_items: Vec<moonbeauty::bar::tray::TrayItem>,
     pub tray_anim_width: f32,

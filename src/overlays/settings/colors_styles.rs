@@ -64,7 +64,7 @@ impl SettingsOverlay {
                 .color(theme.success),
             text("Click on color swatches to apply presets, or type any valid hex color:")
                 .size((scale_sz(0.72)) as f32)
-                .color(theme.muted),
+                .color(theme.text),
         ]
         .spacing(10);
 

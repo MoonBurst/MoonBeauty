@@ -145,14 +145,21 @@ impl MoonBeautyShellApp {
         }
 
         let is_bar = !is_standalone && !is_notif_surface;
-        let notif_rx = if is_notif_surface || is_bar {
+        let notif_rx = if is_notif_surface {
             // Finding 55: bounded (256). notify-send can be called at
             // arbitrary rate by any same-user process; unbounded channel
             // OOMs the shell under load. 256 is 64× the visible toast cap.
             let (tx, rx) = std::sync::mpsc::sync_channel(256);
             moonbeauty::overlays::notifications::spawn(tx);
-            moonbeauty::bar::tray::watcher::spawn();
             Some(rx)
+        } else {
+            None
+        };
+        if is_bar {
+            moonbeauty::bar::tray::watcher::spawn();
+        }
+        let notif_surface_child = if is_bar {
+            crate::app::helpers::spawn_notif_surface_child()
         } else {
             None
         };
@@ -183,6 +190,10 @@ impl MoonBeautyShellApp {
             },
             active_overlay: standalone_target.clone(),
             weather_tooltip_child: None,
+            in_bar_tooltip: None,
+            tooltip_window_id: None,
+            closing_tooltip_id: None,
+            notif_surface_child,
             is_standalone,
             system_collector: std::sync::Arc::new(std::sync::Mutex::new(SystemCollector::new())),
             standalone_child: None,
@@ -294,7 +305,6 @@ impl MoonBeautyShellApp {
                 EmailOverlay::empty()
             },
             notifs: if is_notif_surface
-                || is_bar
                 || matches!(standalone_target, Some(OverlayTarget::NotificationsHistory))
             {
                 NotificationOverlay::new()

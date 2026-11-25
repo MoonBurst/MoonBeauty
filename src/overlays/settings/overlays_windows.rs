@@ -9,14 +9,161 @@ impl SettingsOverlay {
     ) -> Element<'a, SettingsMessage> {
         let base_sz = theme.font_size_overlay;
         let scale_sz = |factor: f32| -> u16 { ((base_sz as f32) * factor).round().max(9.0) as u16 };
+
+        if let Some(ref current_dir) = self.browsing_music_dir {
+            let fs_lbl = scale_sz(0.85) as f32;
+            let mut nav_row = row![].spacing(8).align_y(Alignment::Center);
+
+            if let Some(parent) = current_dir.parent() {
+                let p_buf = parent.to_path_buf();
+                nav_row = nav_row.push(
+                    button(text("⬆ Up").size(fs_lbl).bold().color(theme.text))
+                        .on_press(SettingsMessage::BrowseNavigate(p_buf))
+                        .padding([4, 10])
+                        .style(move |_t, _s| button::Style {
+                            background: Some(iced::Background::Color(theme.surface_alt)),
+                            border: iced::Border { color: theme.border, width: 1.0, radius: 4.0.into() },
+                            ..Default::default()
+                        }),
+                );
+            }
+
+            if let Some(home) = dirs::home_dir() {
+                nav_row = nav_row.push(
+                    button(text("🏠 Home").size(fs_lbl).bold().color(theme.text))
+                        .on_press(SettingsMessage::BrowseNavigate(home))
+                        .padding([4, 10])
+                        .style(move |_t, _s| button::Style {
+                            background: Some(iced::Background::Color(theme.surface_alt)),
+                            border: iced::Border { color: theme.border, width: 1.0, radius: 4.0.into() },
+                            ..Default::default()
+                        }),
+                );
+            }
+
+            for quick in ["/", "/mnt", "/run/media"] {
+                let qp = std::path::PathBuf::from(quick);
+                if qp.exists() {
+                    nav_row = nav_row.push(
+                        button(text(quick).size(fs_lbl).bold().color(theme.text))
+                            .on_press(SettingsMessage::BrowseNavigate(qp))
+                            .padding([4, 10])
+                            .style(move |_t, _s| button::Style {
+                                background: Some(iced::Background::Color(theme.surface_alt)),
+                                border: iced::Border { color: theme.border, width: 1.0, radius: 4.0.into() },
+                                ..Default::default()
+                            }),
+                    );
+                }
+            }
+
+            nav_row = nav_row.push(row![].width(Length::Fill));
+            nav_row = nav_row.push(
+                button(text("✓ Add This Folder").size(fs_lbl).bold().color(theme.background))
+                    .on_press(SettingsMessage::BrowseSelectCurrent)
+                    .padding([5, 12])
+                    .style(move |_t, _s| button::Style {
+                        background: Some(iced::Background::Color(theme.success)),
+                        border: iced::Border { color: theme.success, width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+            );
+            nav_row = nav_row.push(
+                button(text("✕ Cancel").size(fs_lbl).bold().color(theme.danger))
+                    .on_press(SettingsMessage::BrowseCancel)
+                    .padding([5, 12])
+                    .style(move |_t, _s| button::Style {
+                        background: Some(iced::Background::Color(theme.surface_alt)),
+                        border: iced::Border { color: theme.danger, width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+            );
+
+            let mut list_col = column![].spacing(6);
+            if self.browse_entries.is_empty() {
+                list_col = list_col.push(
+                    text("(No subdirectories — click 'Add This Folder' to add this directory)")
+                        .size(fs_lbl)
+                        .color(theme.text),
+                );
+            } else {
+                for entry in &self.browse_entries {
+                    let name = entry
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let nav_target = entry.clone();
+                    let add_str = entry.to_string_lossy().into_owned();
+                    list_col = list_col.push(
+                        row![
+                            button(
+                                text(format!("📁 {}", name))
+                                    .size(fs_lbl)
+                                    .color(theme.text)
+                            )
+                            .on_press(SettingsMessage::BrowseNavigate(nav_target))
+                            .padding([6, 10])
+                            .width(Length::Fill)
+                            .style(move |_t, status| button::Style {
+                                background: Some(iced::Background::Color(match status {
+                                    button::Status::Hovered => theme.surface_alt,
+                                    _ => Color::from_rgb8(18, 20, 26),
+                                })),
+                                border: iced::Border { color: theme.border, width: 1.0, radius: 4.0.into() },
+                                ..Default::default()
+                            }),
+                            button(text("+ Add").size(fs_lbl).bold().color(theme.success))
+                                .on_press(SettingsMessage::MusicDirPicked(Some(add_str)))
+                                .padding([6, 10])
+                                .style(move |_t, _s| button::Style {
+                                    background: Some(iced::Background::Color(theme.surface_alt)),
+                                    border: iced::Border { color: theme.success, width: 1.0, radius: 4.0.into() },
+                                    ..Default::default()
+                                }),
+                        ]
+                        .spacing(8)
+                        .align_y(Alignment::Center),
+                    );
+                }
+            }
+
+            return container(
+                column![
+                    text("📁 SELECT MUSIC FOLDER")
+                        .size(base_sz as f32)
+                        .bold()
+                        .color(theme.success),
+                    text(current_dir.to_string_lossy().into_owned())
+                        .size(fs_lbl)
+                        .bold()
+                        .color(theme.text),
+                    nav_row,
+                    scrollable(list_col).height(Length::Fill).width(Length::Fill),
+                ]
+                .spacing(10)
+                .width(Length::Fill)
+                .height(Length::Fill),
+            )
+            .padding(iced::Padding {
+                top: 0.0,
+                right: (settings.overlay_cut as f32) + 16.0,
+                bottom: (settings.overlay_cut as f32) + 16.0,
+                left: (settings.overlay_cut as f32) + 16.0,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .clip(true)
+            .into();
+        }
         let mut col = column![
             text("🪟 OVERLAY WINDOW SIZING & GEOMETRY")
                 .size(base_sz as f32)
                 .bold()
                 .color(theme.success),
             text("Global dimensions apply to all overlays (unless individually overridden).")
-                .size(scale_sz(0.72) as f32)
-                .color(theme.muted),
+                .size(scale_sz(0.82) as f32)
+                .color(theme.text),
         ]
         .spacing(8);
 
@@ -61,14 +208,14 @@ impl SettingsOverlay {
                         .bold()
                         .color(theme.success),
                     row![
-                        text("Cut:").size(11).bold().color(theme.text),
+                        text("Cut:").size(scale_sz(0.85) as f32).bold().color(theme.text),
                         slider(0..=200, settings.overlay_cut, SettingsMessage::OverlayCut)
                             .width(Length::Fixed(180.0)),
                         text(format!("{}px", settings.overlay_cut))
-                            .size(11)
+                            .size(scale_sz(0.85) as f32)
                             .color(theme.text)
-                            .width(Length::Fixed(50.0)),
-                        text("Angle:").size(11).bold().color(theme.text),
+                            .width(Length::Fixed(62.0)),
+                        text("Angle:").size(scale_sz(0.85) as f32).bold().color(theme.text),
                         slider(
                             5..=85,
                             settings.overlay_angle,
@@ -76,10 +223,10 @@ impl SettingsOverlay {
                         )
                         .width(Length::Fixed(180.0)),
                         text(format!("{}°", settings.overlay_angle))
-                            .size(11)
+                            .size(scale_sz(0.85) as f32)
                             .color(theme.text)
-                            .width(Length::Fixed(40.0)),
-                        button(text("30°").size(11).bold().color(
+                            .width(Length::Fixed(48.0)),
+                        button(text("30°").size(scale_sz(0.85) as f32).bold().color(
                             if settings.overlay_angle == 30 {
                                 theme.success
                             } else {
@@ -101,7 +248,7 @@ impl SettingsOverlay {
                             },
                             ..Default::default()
                         }),
-                        button(text("45°").size(11).bold().color(
+                        button(text("45°").size(scale_sz(0.85) as f32).bold().color(
                             if settings.overlay_angle == 45 {
                                 theme.success
                             } else {
@@ -123,7 +270,7 @@ impl SettingsOverlay {
                             },
                             ..Default::default()
                         }),
-                        button(text("60°").size(11).bold().color(
+                        button(text("60°").size(scale_sz(0.85) as f32).bold().color(
                             if settings.overlay_angle == 60 {
                                 theme.success
                             } else {
@@ -171,12 +318,12 @@ impl SettingsOverlay {
                         .bold()
                         .color(theme.success),
                     text("Leave blank for default (~/Downloads).")
-                        .size(11)
-                        .color(theme.muted),
+                        .size(scale_sz(0.85) as f32)
+                        .color(theme.text),
                     text_input("Default (~/Downloads)", &settings.attachment_download_dir)
                         .on_input(SettingsMessage::AttachmentDownloadDirChanged)
                         .padding(8)
-                        .size(11)
+                        .size(scale_sz(0.85) as f32)
                         .width(Length::Fill),
                 ]
                 .spacing(8),
@@ -193,6 +340,82 @@ impl SettingsOverlay {
             }),
         );
 
+        let mut music_dirs_col = column![
+            row![
+                text("🎵 Music Library Folders")
+                    .size(scale_sz(0.8) as f32)
+                    .bold()
+                    .color(theme.success),
+                row![].width(Length::Fill),
+                button(text("📁 Browse…").size(scale_sz(0.85) as f32).bold().color(theme.background))
+                    .on_press(SettingsMessage::PickMusicDir)
+                    .padding([3, 8])
+                    .style(move |_t, _s| button::Style {
+                        background: Some(iced::Background::Color(theme.text)),
+                        border: iced::Border { color: theme.text, width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+                button(text("+ Add").size(scale_sz(0.85) as f32).bold().color(theme.success))
+                    .on_press(SettingsMessage::AddMusicDir)
+                    .padding([3, 8])
+                    .style(move |_t, _s| button::Style {
+                        background: Some(iced::Background::Color(theme.surface_alt)),
+                        border: iced::Border { color: theme.success, width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+                button(text("↻ Rescan").size(scale_sz(0.85) as f32).bold().color(theme.text))
+                    .on_press(SettingsMessage::RescanMusicLibrary)
+                    .padding([3, 8])
+                    .style(move |_t, _s| button::Style {
+                        background: Some(iced::Background::Color(theme.surface_alt)),
+                        border: iced::Border { color: theme.border, width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center),
+            text("Leave empty for default (~/Music). Supports ~/ paths; subdirectories are scanned recursively.")
+                .size(scale_sz(0.85) as f32)
+                .color(theme.text),
+        ]
+        .spacing(8);
+
+        if settings.music_dirs.is_empty() {
+            music_dirs_col = music_dirs_col.push(text("Using default: ~/Music").size(scale_sz(0.85) as f32).color(theme.text));
+        } else {
+            for (idx, dir) in settings.music_dirs.iter().enumerate() {
+                music_dirs_col = music_dirs_col.push(
+                    row![
+                        text_input("/path/to/music", dir)
+                            .on_input(move |v| SettingsMessage::MusicDirChanged(idx, v))
+                            .padding(6)
+                            .size(scale_sz(0.85) as f32)
+                            .width(Length::Fill),
+                        button(text("✕").size(scale_sz(0.85) as f32).bold().color(theme.danger))
+                            .on_press(SettingsMessage::RemoveMusicDir(idx))
+                            .padding([4, 8])
+                            .style(move |_t, _s| button::Style {
+                                background: Some(iced::Background::Color(theme.surface_alt)),
+                                border: iced::Border { color: theme.danger, width: 1.0, radius: 4.0.into() },
+                                ..Default::default()
+                            }),
+                    ]
+                    .spacing(6)
+                    .align_y(Alignment::Center),
+                );
+            }
+        }
+
+        col = col.push(
+            container(music_dirs_col)
+                .padding([10, 14])
+                .style(move |_t| container::Style {
+                    background: Some(iced::Background::Color(Color::from_rgb8(18, 20, 26))),
+                    border: iced::Border { color: theme.border, width: 1.5, radius: 6.0.into() },
+                    ..Default::default()
+                }),
+        );
+
         col = col.push(
             container(
                 column![
@@ -201,7 +424,7 @@ impl SettingsOverlay {
                         .bold()
                         .color(theme.success),
                     row![
-                        text("Width:").size(11).bold().color(theme.text),
+                        text("Width:").size(scale_sz(0.85) as f32).bold().color(theme.text),
                         slider(
                             400..=2000,
                             settings.overlay_width,
@@ -209,14 +432,14 @@ impl SettingsOverlay {
                         )
                         .width(Length::Fixed(240.0)),
                         text(format!("{}px", settings.overlay_width))
-                            .size(11)
+                            .size(scale_sz(0.85) as f32)
                             .color(theme.text)
-                            .width(Length::Fixed(50.0)),
+                            .width(Length::Fixed(62.0)),
                     ]
                     .spacing(8)
                     .align_y(Alignment::Center),
                     row![
-                        text("Height:").size(11).bold().color(theme.text),
+                        text("Height:").size(scale_sz(0.85) as f32).bold().color(theme.text),
                         slider(
                             250..=1500,
                             settings.overlay_height,
@@ -224,14 +447,14 @@ impl SettingsOverlay {
                         )
                         .width(Length::Fixed(240.0)),
                         text(format!("{}px", settings.overlay_height))
-                            .size(11)
+                            .size(scale_sz(0.85) as f32)
                             .color(theme.text)
-                            .width(Length::Fixed(50.0)),
+                            .width(Length::Fixed(62.0)),
                     ]
                     .spacing(8)
                     .align_y(Alignment::Center),
                     row![
-                        text("Icon Size:").size(11).bold().color(theme.text),
+                        text("Icon Size:").size(scale_sz(0.85) as f32).bold().color(theme.text),
                         slider(
                             48..=160,
                             settings.launcher_icon_size,
@@ -239,14 +462,14 @@ impl SettingsOverlay {
                         )
                         .width(Length::Fixed(240.0)),
                         text(format!("{}px", settings.launcher_icon_size))
-                            .size(11)
+                            .size(scale_sz(0.85) as f32)
                             .color(theme.text)
-                            .width(Length::Fixed(50.0)),
+                            .width(Length::Fixed(62.0)),
                     ]
                     .spacing(8)
                     .align_y(Alignment::Center),
                     row![
-                        text("Clipboard Thumb:").size(11).bold().color(theme.text),
+                        text("Clipboard Thumb:").size(scale_sz(0.85) as f32).bold().color(theme.text),
                         slider(
                             32..=160,
                             settings.clipboard_thumbnail_size,
@@ -254,9 +477,9 @@ impl SettingsOverlay {
                         )
                         .width(Length::Fixed(240.0)),
                         text(format!("{}px", settings.clipboard_thumbnail_size))
-                            .size(11)
+                            .size(scale_sz(0.85) as f32)
                             .color(theme.text)
-                            .width(Length::Fixed(50.0)),
+                            .width(Length::Fixed(62.0)),
                     ]
                     .spacing(8)
                     .align_y(Alignment::Center),
@@ -279,7 +502,7 @@ impl SettingsOverlay {
         let fmt_btn =
             |fmt: ScreenshotSaveFormat, label: &'static str| -> Element<'a, SettingsMessage> {
                 let is_sel = settings.screenshot_save_format == fmt;
-                button(text(label).size(11).bold().color(if is_sel {
+                button(text(label).size(scale_sz(0.85) as f32).bold().color(if is_sel {
                     theme.background
                 } else {
                     theme.text
@@ -310,10 +533,10 @@ impl SettingsOverlay {
                         .bold()
                         .color(theme.success),
                     text("PNG saves in ~0.5s for 4K. JXL is 4-20x slower but 4-5x smaller.")
-                        .size(11)
-                        .color(theme.muted),
+                        .size(scale_sz(0.85) as f32)
+                        .color(theme.text),
                     row![
-                        text("Format:").size(11).bold().color(theme.text),
+                        text("Format:").size(scale_sz(0.85) as f32).bold().color(theme.text),
                         fmt_btn(ScreenshotSaveFormat::Png, "PNG (fast, large)"),
                         fmt_btn(ScreenshotSaveFormat::JxlFast, "JXL (balanced)"),
                         fmt_btn(ScreenshotSaveFormat::JxlBest, "JXL (smallest)"),

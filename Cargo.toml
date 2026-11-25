@@ -6,7 +6,8 @@ authors = ["MoonBeauty"]
 description = "High-performance Wayland desktop shell and overlay matrix in Rust & Iced"
 
 [dependencies]
-mpd_client = "1"
+lofty = "0.25"
+rodio = { version = "0.23", features = ["symphonia-all"] }
 sha2 = "0.10"
 libc = "0.2"
 zeroize = "1"

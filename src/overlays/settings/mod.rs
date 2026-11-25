@@ -170,6 +170,15 @@ pub enum SettingsMessage {
     WindowWidth(String, u32),
     WindowHeight(String, u32),
     AttachmentDownloadDirChanged(String),
+    AddMusicDir,
+    PickMusicDir,
+    MusicDirPicked(Option<String>),
+    MusicDirChanged(usize, String),
+    RemoveMusicDir(usize),
+    RescanMusicLibrary,
+    BrowseNavigate(std::path::PathBuf),
+    BrowseSelectCurrent,
+    BrowseCancel,
     OverlayCut(u32),
     OverlayAngle(u32),
     ResetTooltipSize(String),
@@ -214,6 +223,8 @@ pub struct SettingsOverlay {
     preview_child: Option<std::process::Child>,
     last_preview: std::time::Instant,
     pub detected_gpus: Vec<GpuInfo>,
+    pub browsing_music_dir: Option<std::path::PathBuf>,
+    pub browse_entries: Vec<std::path::PathBuf>,
 }
 
 impl SettingsOverlay {
@@ -226,6 +237,8 @@ impl SettingsOverlay {
             preview_child: None,
             last_preview: std::time::Instant::now() - std::time::Duration::from_secs(60),
             detected_gpus: SystemCollector::list_gpus_sync(),
+            browsing_music_dir: None,
+            browse_entries: Vec::new(),
         }
     }
 
@@ -238,6 +251,8 @@ impl SettingsOverlay {
             preview_child: None,
             last_preview: std::time::Instant::now() - std::time::Duration::from_secs(60),
             detected_gpus: Vec::new(),
+            browsing_music_dir: None,
+            browse_entries: Vec::new(),
         }
     }
 
@@ -284,6 +299,11 @@ impl SettingsOverlay {
                 | SettingsMessage::ScreenshotSaveFormat(_)
                 | SettingsMessage::SizeCommit { .. }
                 | SettingsMessage::AlarmSoundImported(_)
+                | SettingsMessage::AddMusicDir
+                | SettingsMessage::MusicDirPicked(_)
+                | SettingsMessage::MusicDirChanged(_, _)
+                | SettingsMessage::RemoveMusicDir(_)
+                | SettingsMessage::BrowseSelectCurrent
         );
         match message {
             SettingsMessage::TrayIconSize(v) => settings.tray_icon_size = v.clamp(12, 48),
@@ -332,6 +352,7 @@ impl SettingsOverlay {
             }
             SettingsMessage::SelectTab(t) => {
                 self.kill_preview();
+                self.browsing_music_dir = None;
                 self.active_tab = t;
                 if t == SettingsTab::Hardware {
                     self.detected_gpus = SystemCollector::list_gpus_sync();
@@ -666,6 +687,46 @@ impl SettingsOverlay {
             SettingsMessage::AttachmentDownloadDirChanged(v) => {
                 settings.attachment_download_dir = v
             }
+            SettingsMessage::AddMusicDir => {
+                settings.music_dirs.push(String::new());
+            }
+            SettingsMessage::RescanMusicLibrary => {}
+            SettingsMessage::PickMusicDir => {
+                let start = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"));
+                self.refresh_browse_dir(start);
+            }
+            SettingsMessage::BrowseNavigate(dir) => {
+                self.refresh_browse_dir(dir);
+            }
+            SettingsMessage::BrowseSelectCurrent => {
+                if let Some(dir) = self.browsing_music_dir.take() {
+                    let s = dir.to_string_lossy().into_owned();
+                    if !settings.music_dirs.contains(&s) {
+                        settings.music_dirs.push(s);
+                    }
+                }
+                self.browse_entries.clear();
+            }
+            SettingsMessage::BrowseCancel => {
+                self.browsing_music_dir = None;
+                self.browse_entries.clear();
+            }
+            SettingsMessage::MusicDirPicked(Some(dir)) => {
+                if !settings.music_dirs.contains(&dir) {
+                    settings.music_dirs.push(dir);
+                }
+            }
+            SettingsMessage::MusicDirPicked(None) => {}
+            SettingsMessage::MusicDirChanged(idx, v) => {
+                if let Some(entry) = settings.music_dirs.get_mut(idx) {
+                    *entry = v;
+                }
+            }
+            SettingsMessage::RemoveMusicDir(idx) => {
+                if idx < settings.music_dirs.len() {
+                    settings.music_dirs.remove(idx);
+                }
+            }
             SettingsMessage::OverlayCut(v) => {
                 settings.overlay_cut = v.clamp(0, 200);
             }
@@ -800,6 +861,38 @@ impl SettingsOverlay {
         }
     }
 
+    fn refresh_browse_dir(&mut self, dir: std::path::PathBuf) {
+        let mut dirs_found = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    let hidden = p
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.starts_with('.'));
+                    if !hidden {
+                        dirs_found.push(p);
+                    }
+                }
+            }
+        }
+        dirs_found.sort_by(|a, b| {
+            a.file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_lowercase()
+                .cmp(
+                    &b.file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_lowercase(),
+                )
+        });
+        self.browsing_music_dir = Some(dir);
+        self.browse_entries = dirs_found;
+    }
+
     fn kill_preview(&mut self) {
         if let Some(mut c) = self.preview_child.take() {
             let _ = c.kill();
@@ -926,8 +1019,8 @@ impl SettingsOverlay {
 
         let footer_container = container(
             text("ESC or [✕] to dismiss  •  Changes update and save live in real time")
-                .size((scale_sz(0.65)) as f32)
-                .color(theme.muted)
+                .size((scale_sz(0.78)) as f32)
+                .color(theme.text)
                 .align_x(Alignment::Center),
         )
         .width(Length::Fill)

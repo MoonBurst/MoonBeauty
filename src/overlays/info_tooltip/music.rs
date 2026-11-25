@@ -348,7 +348,7 @@ impl App {
         y += act_h + gap * 2.0;
         // ── Search UI ──
         let search_h = 32.0;
-        let search_input = text_input("Search MPD...", &self.music_search_query)
+        let search_input = text_input("Search local music...", &self.music_search_query)
             .on_input(Message::MusicSearchChanged)
             .on_submit(Message::MusicSearchSubmit)
             .padding(6)

@@ -22,6 +22,7 @@
           fontconfig
           freetype
           pipewire
+          alsa-lib
           pam
           dbus
           openssl

@@ -167,7 +167,7 @@ impl SettingsOverlay {
             text("Active GPU (shown in top bar)")
                 .size((scale_sz(0.8)) as f32)
                 .bold()
-                .color(theme.muted),
+                .color(theme.text),
         );
 
         let mut selector_row: iced::widget::Row<'a, SettingsMessage> = iced::widget::Row::new()
@@ -178,7 +178,7 @@ impl SettingsOverlay {
             selector_row = selector_row.push(
                 text("No GPUs detected")
                     .size((scale_sz(0.72)) as f32)
-                    .color(theme.muted),
+                    .color(theme.text),
             );
         } else {
             for gpu in &self.detected_gpus {

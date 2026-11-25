@@ -109,9 +109,31 @@ impl MoonBeautyShellApp {
                 self.weather_tooltip_child = None;
             }
         }
+        let dead = match self.notif_surface_child.as_mut() {
+            Some(c) => matches!(c.try_wait(), Ok(Some(_))),
+            None => true,
+        };
+        if dead {
+            self.notif_surface_child = crate::app::helpers::spawn_notif_surface_child();
+        }
+        let mtime = std::fs::metadata(ShellSettings::config_path())
+            .ok()
+            .and_then(|m| m.modified().ok());
+        if mtime != self.settings_json_mtime {
+            self.settings_json_mtime = mtime;
+            let prev_screen = self.settings.notif_screen_name.clone();
+            let prev_corner = self.settings.notif_corner.clone();
+            self.settings = ShellSettings::load();
+            self.theme = ShellTheme::from_settings(&self.settings);
+            if self.settings.notif_screen_name != prev_screen
+                || self.settings.notif_corner != prev_corner
+            {
+                self.notif_screen_at_startup = self.settings.notif_screen_name.clone();
+                self.restart_notif_surface();
+            }
+        }
         let c1 = self.update(Message::TickClock);
         let c2 = self.update(Message::TickHardware);
-        let c3 = self.update(Message::PollNotifs);
-        return Command::batch(vec![c1, c2, c3]);
+        return Command::batch(vec![c1, c2]);
     }
 }

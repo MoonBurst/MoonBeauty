@@ -133,10 +133,26 @@ impl MoonBeautyShellApp {
                     |name| Message::Settings(SettingsMessage::AlarmSoundImported(name)),
                 );
             }
+            /* PickMusicDir handled in settings_ui */
+            SettingsMessage::RescanMusicLibrary => {
+                return Command::perform(
+                    async move {
+                        moonbeauty::libraries::backend::music::LocalMusicBackend::rescan_library()
+                            .await;
+                    },
+                    |_| Message::Noop,
+                );
+            }
             _ => {}
         }
 
         let is_test = matches!(msg, SettingsMessage::TestNotification);
+        let rescan_music = matches!(
+            msg,
+            SettingsMessage::MusicDirPicked(Some(_))
+                | SettingsMessage::RemoveMusicDir(_)
+                | SettingsMessage::BrowseSelectCurrent
+        );
 
         if is_test {
             return self.test_notification();
@@ -155,6 +171,15 @@ impl MoonBeautyShellApp {
                 tokio::spawn(async {
                     let _ = send_client_command(IpcCommand::ReloadSettings).await;
                 });
+            }
+            if rescan_music {
+                return Command::perform(
+                    async move {
+                        moonbeauty::libraries::backend::music::LocalMusicBackend::rescan_library()
+                            .await;
+                    },
+                    |_| Message::Noop,
+                );
             }
         }
 
