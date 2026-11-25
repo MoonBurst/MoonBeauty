@@ -47,55 +47,45 @@ impl MoonBeautyShellApp {
         }
 
         match msg {
-            SettingsMessage::PickAvatar(idx) => {
+            SettingsMessage::AvatarFilePicked(idx, src_path) => {
+                self.settings_ui
+                    .update(SettingsMessage::BrowseCancel, &mut self.settings);
                 if let Some(p) = self.settings.friend_profiles.get(idx) {
-                    let name = p.name.clone();
+                    let name_clone = p.name.clone();
                     return Command::perform(
                         async move {
-                            let file = rfd::AsyncFileDialog::new()
-                                .add_filter("Images", &["png", "jpg", "jpeg", "webp"])
-                                .pick_file()
-                                .await;
+                            let _ = tokio::task::spawn_blocking(move || {
+                                let av_dir = dirs::data_dir()
+                                    .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+                                    .join("moonbeauty")
+                                    .join("avatars")
+                                    .join(&name_clone);
+                                let _ = std::fs::create_dir_all(&av_dir);
+                                let dest_path = av_dir.join(format!("{}.png", name_clone));
 
-                            if let Some(f) = file {
-                                let src_path = f.path().to_path_buf();
-                                let name_clone = name.clone();
+                                let status = std::process::Command::new("magick")
+                                    .arg(&src_path)
+                                    .args([
+                                        "-trim",
+                                        "+repage",
+                                        "-resize",
+                                        "256x256>",
+                                        "-background",
+                                        "none",
+                                        "-gravity",
+                                        "center",
+                                        "-extent",
+                                        "256x256",
+                                    ])
+                                    .arg(&dest_path)
+                                    .status();
 
-                                // Offload to blocking pool
-                                let _ = tokio::task::spawn_blocking(move || {
-                                    let av_dir = dirs::data_dir()
-                                        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
-                                        .join("moonbeauty")
-                                        .join("avatars")
-                                        .join(&name_clone);
-                                    let _ = std::fs::create_dir_all(&av_dir);
-                                    let dest_path = av_dir.join(format!("{}.png", name_clone));
+                                if let Err(e) = status {
+                                    eprintln!("[avatar-picker] magick failed: {e}");
+                                }
+                            })
+                            .await;
 
-                                    let status = std::process::Command::new("magick")
-                                        .arg(&src_path)
-                                        .args([
-                                            "-trim",
-                                            "+repage",
-                                            "-resize",
-                                            "256x256>",
-                                            "-background",
-                                            "none",
-                                            "-gravity",
-                                            "center",
-                                            "-extent",
-                                            "256x256",
-                                        ])
-                                        .arg(&dest_path)
-                                        .status();
-
-                                    if let Err(e) = status {
-                                        eprintln!("[avatar-picker] magick failed: {e}");
-                                    }
-                                })
-                                .await;
-                            }
-
-                            // Send SIGUSR1 to gracefully restart/clear cache
                             let _ = std::process::Command::new("pkill")
                                 .args(["-SIGUSR1", "-f", "(^|/)moonbeauty --notif-surface$"])
                                 .status();

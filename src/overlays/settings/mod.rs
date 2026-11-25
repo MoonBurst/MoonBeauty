@@ -56,6 +56,12 @@ mod overlays_windows;
 mod ipc_commands;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowseMode {
+    MusicDir,
+    AvatarImage(usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsTab {
     Notifications,
     ColorsStyles,
@@ -179,6 +185,7 @@ pub enum SettingsMessage {
     BrowseNavigate(std::path::PathBuf),
     BrowseSelectCurrent,
     BrowseCancel,
+    AvatarFilePicked(usize, std::path::PathBuf),
     OverlayCut(u32),
     OverlayAngle(u32),
     ResetTooltipSize(String),
@@ -225,6 +232,8 @@ pub struct SettingsOverlay {
     pub detected_gpus: Vec<GpuInfo>,
     pub browsing_music_dir: Option<std::path::PathBuf>,
     pub browse_entries: Vec<std::path::PathBuf>,
+    pub browse_mode: Option<BrowseMode>,
+    pub browse_files: Vec<std::path::PathBuf>,
 }
 
 impl SettingsOverlay {
@@ -239,6 +248,8 @@ impl SettingsOverlay {
             detected_gpus: SystemCollector::list_gpus_sync(),
             browsing_music_dir: None,
             browse_entries: Vec::new(),
+            browse_mode: None,
+            browse_files: Vec::new(),
         }
     }
 
@@ -253,6 +264,8 @@ impl SettingsOverlay {
             detected_gpus: Vec::new(),
             browsing_music_dir: None,
             browse_entries: Vec::new(),
+            browse_mode: None,
+            browse_files: Vec::new(),
         }
     }
 
@@ -353,6 +366,9 @@ impl SettingsOverlay {
             SettingsMessage::SelectTab(t) => {
                 self.kill_preview();
                 self.browsing_music_dir = None;
+                self.browse_mode = None;
+                self.browse_entries.clear();
+                self.browse_files.clear();
                 self.active_tab = t;
                 if t == SettingsTab::Hardware {
                     self.detected_gpus = SystemCollector::list_gpus_sync();
@@ -514,9 +530,14 @@ impl SettingsOverlay {
                     );
                 }
             }
-            SettingsMessage::PickAvatar(_) | SettingsMessage::AvatarUpdated => {
-                // Handled in app/update/settings.rs to allow async file dialogs.
+            SettingsMessage::PickAvatar(idx) => {
+                self.browse_mode = Some(BrowseMode::AvatarImage(idx));
+                let start = dirs::picture_dir()
+                    .or_else(dirs::home_dir)
+                    .unwrap_or_else(|| std::path::PathBuf::from("/"));
+                self.refresh_browse_dir(start);
             }
+            SettingsMessage::AvatarUpdated | SettingsMessage::AvatarFilePicked(_, _) => {}
             SettingsMessage::AddNewProfile => {
                 settings.friend_profiles.push(FriendProfile {
                     name: "new_ping".into(),
@@ -692,6 +713,7 @@ impl SettingsOverlay {
             }
             SettingsMessage::RescanMusicLibrary => {}
             SettingsMessage::PickMusicDir => {
+                self.browse_mode = Some(BrowseMode::MusicDir);
                 let start = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"));
                 self.refresh_browse_dir(start);
             }
@@ -700,16 +722,20 @@ impl SettingsOverlay {
             }
             SettingsMessage::BrowseSelectCurrent => {
                 if let Some(dir) = self.browsing_music_dir.take() {
-                    let s = dir.to_string_lossy().into_owned();
-                    if !settings.music_dirs.contains(&s) {
-                        settings.music_dirs.push(s);
+                    let dir_str = dir.to_string_lossy().into_owned();
+                    if !settings.music_dirs.contains(&dir_str) {
+                        settings.music_dirs.push(dir_str);
                     }
                 }
+                self.browse_mode = None;
                 self.browse_entries.clear();
+                self.browse_files.clear();
             }
             SettingsMessage::BrowseCancel => {
                 self.browsing_music_dir = None;
+                self.browse_mode = None;
                 self.browse_entries.clear();
+                self.browse_files.clear();
             }
             SettingsMessage::MusicDirPicked(Some(dir)) => {
                 if !settings.music_dirs.contains(&dir) {
@@ -863,34 +889,293 @@ impl SettingsOverlay {
 
     fn refresh_browse_dir(&mut self, dir: std::path::PathBuf) {
         let mut dirs_found = Vec::new();
+        let mut files_found = Vec::new();
+        let want_images = matches!(self.browse_mode, Some(BrowseMode::AvatarImage(_)));
+        const IMG_EXTS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif"];
+
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for entry in entries.flatten() {
                 let p = entry.path();
+                let hidden = p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with('.'));
+                if hidden {
+                    continue;
+                }
                 if p.is_dir() {
-                    let hidden = p
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .is_some_and(|n| n.starts_with('.'));
-                    if !hidden {
-                        dirs_found.push(p);
-                    }
+                    dirs_found.push(p);
+                } else if want_images
+                    && p.is_file()
+                    && p.extension()
+                        .and_then(|e| e.to_str())
+                        .is_some_and(|ext| IMG_EXTS.iter().any(|k| ext.eq_ignore_ascii_case(k)))
+                {
+                    files_found.push(p);
                 }
             }
         }
-        dirs_found.sort_by(|a, b| {
-            a.file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_lowercase()
-                .cmp(
-                    &b.file_name()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("")
-                        .to_lowercase(),
-                )
-        });
+        let sort_by_name = |v: &mut Vec<std::path::PathBuf>| {
+            v.sort_by(|a, b| {
+                a.file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .cmp(
+                        &b.file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("")
+                            .to_lowercase(),
+                    )
+            });
+        };
+        sort_by_name(&mut dirs_found);
+        sort_by_name(&mut files_found);
+
         self.browsing_music_dir = Some(dir);
         self.browse_entries = dirs_found;
+        self.browse_files = files_found;
+    }
+
+    pub(super) fn view_in_app_browser<'a>(
+        &'a self,
+        settings: &'a ShellSettings,
+        theme: &'a ShellTheme,
+    ) -> Option<Element<'a, SettingsMessage>> {
+        let current_dir = self.browsing_music_dir.as_ref()?;
+        let mode = self.browse_mode?;
+
+        let base_sz = theme.font_size_overlay;
+        let scale_sz = |factor: f32| -> u16 { ((base_sz as f32) * factor).round().max(9.0) as u16 };
+        let fs_lbl = scale_sz(0.85) as f32;
+
+        let text_col = theme.text;
+        let bg_col = theme.background;
+        let surf_col = theme.surface_alt;
+        let border_col = theme.border;
+        let success_col = theme.success;
+        let danger_col = theme.danger;
+
+        let mut nav_row = row![].spacing(8).align_y(Alignment::Center);
+
+        if let Some(parent) = current_dir.parent() {
+            let p_buf = parent.to_path_buf();
+            nav_row = nav_row.push(
+                button(text("⬆ Up").size(fs_lbl).bold().color(text_col))
+                    .on_press(SettingsMessage::BrowseNavigate(p_buf))
+                    .padding([4, 10])
+                    .style(move |_t, _s| button::Style {
+                        background: Some(iced::Background::Color(surf_col)),
+                        border: iced::Border { color: border_col, width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+            );
+        }
+
+        if let Some(home) = dirs::home_dir() {
+            nav_row = nav_row.push(
+                button(text("🏠 Home").size(fs_lbl).bold().color(text_col))
+                    .on_press(SettingsMessage::BrowseNavigate(home))
+                    .padding([4, 10])
+                    .style(move |_t, _s| button::Style {
+                        background: Some(iced::Background::Color(surf_col)),
+                        border: iced::Border { color: border_col, width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+            );
+        }
+
+        if matches!(mode, BrowseMode::AvatarImage(_)) {
+            if let Some(pics) = dirs::picture_dir() {
+                if pics.exists() {
+                    nav_row = nav_row.push(
+                        button(text("🖼 Pictures").size(fs_lbl).bold().color(text_col))
+                            .on_press(SettingsMessage::BrowseNavigate(pics))
+                            .padding([4, 10])
+                            .style(move |_t, _s| button::Style {
+                                background: Some(iced::Background::Color(surf_col)),
+                                border: iced::Border { color: border_col, width: 1.0, radius: 4.0.into() },
+                                ..Default::default()
+                            }),
+                    );
+                }
+            }
+            if let Some(dl) = dirs::download_dir() {
+                if dl.exists() {
+                    nav_row = nav_row.push(
+                        button(text("📥 Downloads").size(fs_lbl).bold().color(text_col))
+                            .on_press(SettingsMessage::BrowseNavigate(dl))
+                            .padding([4, 10])
+                            .style(move |_t, _s| button::Style {
+                                background: Some(iced::Background::Color(surf_col)),
+                                border: iced::Border { color: border_col, width: 1.0, radius: 4.0.into() },
+                                ..Default::default()
+                            }),
+                    );
+                }
+            }
+        }
+
+        for quick in ["/", "/mnt", "/run/media"] {
+            let qp = std::path::PathBuf::from(quick);
+            if qp.exists() {
+                nav_row = nav_row.push(
+                    button(text(quick).size(fs_lbl).bold().color(text_col))
+                        .on_press(SettingsMessage::BrowseNavigate(qp))
+                        .padding([4, 10])
+                        .style(move |_t, _s| button::Style {
+                            background: Some(iced::Background::Color(surf_col)),
+                            border: iced::Border { color: border_col, width: 1.0, radius: 4.0.into() },
+                            ..Default::default()
+                        }),
+                );
+            }
+        }
+
+        nav_row = nav_row.push(row![].width(Length::Fill));
+
+        if matches!(mode, BrowseMode::MusicDir) {
+            nav_row = nav_row.push(
+                button(text("✓ Add This Folder").size(fs_lbl).bold().color(bg_col))
+                    .on_press(SettingsMessage::BrowseSelectCurrent)
+                    .padding([5, 12])
+                    .style(move |_t, _s| button::Style {
+                        background: Some(iced::Background::Color(success_col)),
+                        border: iced::Border { color: success_col, width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+            );
+        }
+
+        nav_row = nav_row.push(
+            button(text("✕ Cancel").size(fs_lbl).bold().color(danger_col))
+                .on_press(SettingsMessage::BrowseCancel)
+                .padding([5, 12])
+                .style(move |_t, _s| button::Style {
+                    background: Some(iced::Background::Color(surf_col)),
+                    border: iced::Border { color: danger_col, width: 1.0, radius: 4.0.into() },
+                    ..Default::default()
+                }),
+        );
+
+        let mut list_col = column![].spacing(6);
+
+        for entry in &self.browse_entries {
+            let name = entry
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            let nav_target = entry.clone();
+            let mut row_item = row![
+                button(text(format!("📁 {}", name)).size(fs_lbl).color(text_col))
+                    .on_press(SettingsMessage::BrowseNavigate(nav_target))
+                    .padding([6, 10])
+                    .width(Length::Fill)
+                    .style(move |_t, status| button::Style {
+                        background: Some(iced::Background::Color(match status {
+                            button::Status::Hovered => surf_col,
+                            _ => Color::from_rgb8(18, 20, 26),
+                        })),
+                        border: iced::Border { color: border_col, width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center);
+
+            if matches!(mode, BrowseMode::MusicDir) {
+                let add_str = entry.to_string_lossy().into_owned();
+                row_item = row_item.push(
+                    button(text("+ Add").size(fs_lbl).bold().color(success_col))
+                        .on_press(SettingsMessage::MusicDirPicked(Some(add_str)))
+                        .padding([6, 10])
+                        .style(move |_t, _s| button::Style {
+                            background: Some(iced::Background::Color(surf_col)),
+                            border: iced::Border { color: success_col, width: 1.0, radius: 4.0.into() },
+                            ..Default::default()
+                        }),
+                );
+            }
+            list_col = list_col.push(row_item);
+        }
+
+        if let BrowseMode::AvatarImage(profile_idx) = mode {
+            for img in &self.browse_files {
+                let name = img
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                let img_path = img.clone();
+                list_col = list_col.push(
+                    button(
+                        row![
+                            text(format!("🖼 {}", name)).size(fs_lbl).color(success_col),
+                            row![].width(Length::Fill),
+                            text("Click to Pick & Auto-Crop").size(fs_lbl).color(text_col),
+                        ]
+                        .align_y(Alignment::Center),
+                    )
+                    .on_press(SettingsMessage::AvatarFilePicked(profile_idx, img_path))
+                    .padding([6, 10])
+                    .width(Length::Fill)
+                    .style(move |_t, status| button::Style {
+                        background: Some(iced::Background::Color(match status {
+                            button::Status::Hovered => surf_col,
+                            _ => Color::from_rgb8(18, 20, 26),
+                        })),
+                        border: iced::Border { color: success_col, width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+                );
+            }
+            if self.browse_entries.is_empty() && self.browse_files.is_empty() {
+                list_col = list_col.push(
+                    text("(No folders or PNG/JPG/WEBP/GIF images in this directory)")
+                        .size(fs_lbl)
+                        .color(text_col),
+                );
+            }
+        } else if self.browse_entries.is_empty() {
+            list_col = list_col.push(
+                text("(No subdirectories — click 'Add This Folder' to add this directory)")
+                    .size(fs_lbl)
+                    .color(text_col),
+            );
+        }
+
+        let heading = match mode {
+            BrowseMode::MusicDir => "📁 SELECT MUSIC FOLDER",
+            BrowseMode::AvatarImage(_) => "🖼 SELECT AVATAR IMAGE",
+        };
+
+        Some(
+            container(
+                column![
+                    text(heading).size(base_sz as f32).bold().color(success_col),
+                    text(current_dir.to_string_lossy().into_owned())
+                        .size(fs_lbl)
+                        .bold()
+                        .color(text_col),
+                    nav_row,
+                    scrollable(list_col).height(Length::Fill).width(Length::Fill),
+                ]
+                .spacing(10)
+                .width(Length::Fill)
+                .height(Length::Fill),
+            )
+            .padding(iced::Padding {
+                top: 0.0,
+                right: (settings.overlay_cut as f32) + 16.0,
+                bottom: (settings.overlay_cut as f32) + 16.0,
+                left: (settings.overlay_cut as f32) + 16.0,
+            })
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .clip(true)
+            .into(),
+        )
     }
 
     fn kill_preview(&mut self) {

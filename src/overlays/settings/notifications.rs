@@ -9,6 +9,11 @@ impl SettingsOverlay {
     ) -> Element<'a, SettingsMessage> {
         let base_sz = theme.font_size_overlay;
         let scale_sz = |factor: f32| -> u16 { ((base_sz as f32) * factor).round().max(9.0) as u16 };
+        if matches!(self.browse_mode, Some(BrowseMode::AvatarImage(_))) {
+            if let Some(browser) = self.view_in_app_browser(settings, theme) {
+                return browser;
+            }
+        }
         let (_, card_h) = settings.get_window_size("settings", 1260, 840);
         let mut pings_col = column![
             text("CUSTOM PINGS")
