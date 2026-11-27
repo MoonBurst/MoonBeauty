@@ -104,11 +104,6 @@ impl MoonBeautyShellApp {
                 self.standalone_child = None;
             }
         }
-        if let Some(c) = self.weather_tooltip_child.as_mut() {
-            if matches!(c.try_wait(), Ok(Some(_))) {
-                self.weather_tooltip_child = None;
-            }
-        }
         let dead = match self.notif_surface_child.as_mut() {
             Some(c) => matches!(c.try_wait(), Ok(Some(_))),
             None => true,

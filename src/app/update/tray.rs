@@ -54,11 +54,6 @@ impl MoonBeautyShellApp {
         Command::none()
     }
 
-    pub(crate) fn handle_tray_anim(&mut self) -> Command<Message> {
-        self.step_tray_anim();
-        Command::none()
-    }
-
     pub(crate) fn handle_fetch_tray_items(&mut self) -> Command<Message> {
         // Background refresh so tray_items is populated before
         // the user ever clicks the tray capsule. Eliminates the

@@ -22,11 +22,6 @@ impl App {
         let fs = settings.tooltip_font_size;
         let gap = 8.0_f32;
 
-        // Compute exact content height from weeks
-        let total_cells = c.first_day_offset as u32 + c.days_in_month;
-        let weeks = total_cells.div_ceil(7);
-        let _content_h = 40.0 + 36.0 + 24.0 + (weeks as f32) * 50.0 + 20.0;
-
         let header_h = fs as f32 + 16.0;
         let header = row![
             text("CALENDAR")

@@ -84,7 +84,6 @@ impl MoonBeautyShellApp {
             Message::Settings(msg) => return self.handle_settings(msg),
             Message::Lock(msg) => return self.handle_lock(msg),
             Message::TrayWatchdogTick => return self.handle_tray_watchdog(),
-            Message::TrayAnimTick => return self.handle_tray_anim(),
             Message::FetchTrayItems => return self.handle_fetch_tray_items(),
             Message::TrayItemsLoaded(items) => return self.handle_tray_items_loaded(items),
             Message::InBarWeatherTip(m) => {

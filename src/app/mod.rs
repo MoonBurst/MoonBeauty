@@ -34,7 +34,7 @@ use moonbeauty::libraries::process::resolve_exe;
 use iced::widget::{container, Stack};
 use iced::{Element, Length, Padding, Task as Command};
 use moonbeauty::bar::geometry::{capsule_actual_width, capsule_center_x};
-use moonbeauty::bar::tooltip_spawn::{get_screen_width_for, resolve_primary_output};
+use moonbeauty::bar::tooltip_spawn::get_screen_width_for;
 use moonbeauty::libraries::backend::UnifiedTelemetry;
 use moonbeauty::bar::{CapsuleAction, TopBar, TopBarMessage};
 use moonbeauty::libraries::backend::*;
@@ -102,7 +102,6 @@ pub enum Message {
     /// item count (avoids the 206→186 re-animation flicker).
     FetchTrayItems,
     TrayItemsLoaded(Vec<moonbeauty::bar::tray::TrayItem>),
-    TrayAnimTick,
     TrayWatchdogTick,
     InBarWeatherTip(moonbeauty::bar::weather::tooltip::Message),
     InBarSysTip(moonbeauty::overlays::system_tooltip::Message),
@@ -181,7 +180,6 @@ pub enum InBarTooltip {
 }
 
 pub struct MoonBeautyShellApp {
-    pub weather_tooltip_child: Option<std::process::Child>,
     pub settings: ShellSettings,
     pub theme: ShellTheme,
     pub telemetry: UnifiedTelemetry,
@@ -198,8 +196,6 @@ pub struct MoonBeautyShellApp {
     // and the only reader was view_toasts, which ignored it.
     pub notif_screen_at_startup: String,
     pub notif_surface_size: (u32, u32),
-    pub notif_window_id: Option<iced::window::Id>,
-    pub closing_notif_id: Option<iced::window::Id>,
     pub notif_surface_child: Option<std::process::Child>,
     pub in_bar_tooltip: Option<InBarTooltip>,
     pub tooltip_window_id: Option<iced::window::Id>,

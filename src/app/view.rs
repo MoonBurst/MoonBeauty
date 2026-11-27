@@ -31,9 +31,6 @@ impl MoonBeautyShellApp {
     }
 
     pub fn view_window(&self, id: iced::window::Id) -> Element<'_, Message> {
-        if self.notif_window_id == Some(id) || self.closing_notif_id == Some(id) {
-            return self.build_notifs_view();
-        }
         if self.tooltip_window_id == Some(id) || self.closing_tooltip_id == Some(id) {
             return self.build_in_bar_tooltip_view();
         }

@@ -452,9 +452,6 @@ impl MoonBeautyShellApp {
         };
         // resize_sub removed (problem 07): emitted WindowResized whose
         // only consumer ignored the value.
-        let elapsed = self.tray_anim_started_at.elapsed().as_millis() as u64;
-        let anim_active = elapsed < self.tray_anim_duration_ms
-            && (self.tray_anim_width - self.tray_target_width).abs() > 0.01;
         // Standalone window-close listener: when Sway detaches the surface
         // on a TTY switch, it sends a Closed event. By exiting, we let the
         // bar's lockscreen_watchdog see a dead child and respawn it.
@@ -480,11 +477,6 @@ impl MoonBeautyShellApp {
             iced::Subscription::none()
         };
 
-        let anim_sub = if anim_active {
-            iced::time::every(std::time::Duration::from_millis(16)).map(|_| Message::TrayAnimTick)
-        } else {
-            iced::Subscription::none()
-        };
         // Tray watchdog: dedicated 500ms timer while expanded. Fixes the
         // "tray never closes" bug where the Command::perform-based timer
         // silently failed to fire. Polling is cheap — only active while
@@ -547,7 +539,6 @@ impl MoonBeautyShellApp {
             toast_sub,
             email_sync_sub,
             weather_sub,
-            anim_sub,
             esc_sub,
             enter_sub,
             ipc_sub,

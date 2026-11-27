@@ -189,7 +189,6 @@ impl MoonBeautyShellApp {
                 bar_time: ClockBackend::get_bar_time(),
             },
             active_overlay: standalone_target.clone(),
-            weather_tooltip_child: None,
             in_bar_tooltip: None,
             tooltip_window_id: None,
             closing_tooltip_id: None,
@@ -205,8 +204,6 @@ impl MoonBeautyShellApp {
             // window_w removed (problem 07)
             notif_screen_at_startup,
             notif_surface_size: if is_notif_surface { (1, 1) } else { (0, 0) },
-            notif_window_id: None,
-            closing_notif_id: None,
             tray_expanded: false,
             tray_items: Vec::new(),
             tray_anim_width: tray_width_px,

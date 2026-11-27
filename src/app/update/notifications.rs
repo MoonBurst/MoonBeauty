@@ -288,12 +288,6 @@ impl MoonBeautyShellApp {
             self.settings = ShellSettings::load();
             self.theme = ShellTheme::from_settings(&self.settings);
         }
-        if !self.is_notif_surface
-            && !self.is_standalone
-            && self.settings.notif_screen_name != self.notif_screen_at_startup
-        {
-            self.notif_screen_at_startup = self.settings.notif_screen_name.clone();
-        }
         if let Some(rx) = self.notif_rx.as_ref() {
             while let Ok(n) = rx.try_recv() {
                 let is_test = n.app_name == "Diagnostics";
@@ -424,66 +418,6 @@ impl MoonBeautyShellApp {
                     return Command::batch(vec![
                         Command::done(Message::ResizeNotifSurface(None, want.0, want.1)),
                         Command::done(Message::SetToastInputRegion(None, rects)),
-                    ]);
-                }
-            } else if self.notifs.active_toasts.is_empty() {
-                if let Some(win_id) = self.notif_window_id.take() {
-                    self.closing_notif_id = Some(win_id);
-                    self.notif_surface_size = (0, 0);
-                    self.last_toast_count = 0;
-                    return Command::done(Message::CloseNotifLayer(win_id));
-                }
-            } else if self.notif_window_id.is_none() {
-                let win_id = iced::window::Id::unique();
-                self.notif_window_id = Some(win_id);
-                self.notif_surface_size = (big_w, big_h);
-                self.last_toast_count = toast_count;
-                let corner = &self.settings.notif_corner;
-                let is_top = corner.contains("top");
-                let is_right = corner.contains("right");
-                let anchor = match (is_top, is_right) {
-                    (true, true) => {
-                        iced_layershell::reexport::Anchor::Top
-                            | iced_layershell::reexport::Anchor::Right
-                    }
-                    (true, false) => {
-                        iced_layershell::reexport::Anchor::Top
-                            | iced_layershell::reexport::Anchor::Left
-                    }
-                    (false, true) => {
-                        iced_layershell::reexport::Anchor::Bottom
-                            | iced_layershell::reexport::Anchor::Right
-                    }
-                    (false, false) => {
-                        iced_layershell::reexport::Anchor::Bottom
-                            | iced_layershell::reexport::Anchor::Left
-                    }
-                };
-                let layer_settings = iced_layershell::reexport::NewLayerShellSettings {
-                    size: Some((big_w, big_h)),
-                    layer: iced_layershell::reexport::Layer::Overlay,
-                    anchor,
-                    exclusive_zone: Some(-1),
-                    margin: None,
-                    keyboard_interactivity:
-                        iced_layershell::reexport::KeyboardInteractivity::None,
-                    output_option: iced_layershell::reexport::OutputOption::None,
-                    events_transparent: false,
-                    namespace: Some("moonbeauty-notifs".into()),
-                };
-                let rects = self.compute_toast_rects();
-                return Command::batch(vec![
-                    Command::done(Message::OpenNotifLayer(win_id, layer_settings)),
-                    Command::done(Message::SetToastInputRegion(Some(win_id), rects)),
-                ]);
-            } else if want != self.notif_surface_size || count_changed {
-                if let Some(win_id) = self.notif_window_id {
-                    self.notif_surface_size = want;
-                    self.last_toast_count = toast_count;
-                    let rects = self.compute_toast_rects();
-                    return Command::batch(vec![
-                        Command::done(Message::ResizeNotifSurface(Some(win_id), want.0, want.1)),
-                        Command::done(Message::SetToastInputRegion(Some(win_id), rects)),
                     ]);
                 }
             }

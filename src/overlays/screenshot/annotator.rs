@@ -1507,21 +1507,6 @@ pub fn save_annotated_image(
                     .to_string_lossy()
                     .to_string();
 
-                // Get existing IDs to find the new one
-                let mut existing_clip_ids = std::collections::HashSet::new();
-                if let Ok(list_out) = std::process::Command::new("cliphist")
-                    .args(["list"])
-                    .output()
-                {
-                    for line in String::from_utf8_lossy(&list_out.stdout).lines() {
-                        if let Some((id_str, _)) = line.split_once('\t') {
-                            if let Ok(id) = id_str.parse::<u64>() {
-                                existing_clip_ids.insert(id);
-                            }
-                        }
-                    }
-                }
-
                 // Index by reference; URI-list is served once at the end of the loop.
                 let display_name = format!("📸 {}", filename);
                 let _ = crate::overlays::clipboard::ClipboardOverlay::add_entry(

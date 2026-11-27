@@ -308,25 +308,15 @@ impl App {
     }
 
     fn subscription(&self) -> iced::Subscription<Message> {
-        // ESC + blur + diagnostic event logging. The eprintlns are temporary
-        // while we diagnose why ESC isn't reaching the tooltip — removed
-        // once confirmed.
         iced::event::listen_with(|event, _status, _window| {
-            match event {
-                iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                    key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
-                    ..
-                }) => {
-                    Some(Message::Dismiss)
-                }
-                iced::Event::Window(iced::window::Event::Focused) => {
-                    None
-                }
-                iced::Event::Window(iced::window::Event::Unfocused) => {
-                    None
-                }
-                _ => None,
-            }
+            let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+                ..
+            }) = event
+            else {
+                return None;
+            };
+            Some(Message::Dismiss)
         })
     }
     fn theme(&self) -> Theme {

@@ -1013,47 +1013,16 @@ impl NotificationOverlay {
             // the summary. Runs after the primary extraction so we can
             // also improve cases where the original path fell back to
             // the app name or used an action phrase as the "name".
-            let needs_better_sender =
-                sender.is_empty() || sender == a || looks_like_action(&sender);
-            if needs_better_sender {
-                if let Some(name) = extract_name_from_summary(&s) {
-                    crate::dbg_log!(
-                        "[tts-rescue] summary-extract name={:?} from summary={:?}",
-                        name,
-                        s
-                    );
-                    sender = name;
-                } else if let Some(name) = extract_from_phrase(&s) {
-                    crate::dbg_log!(
-                        "[tts-rescue] from-phrase name={:?} from summary={:?}",
-                        name,
-                        s
-                    );
-                    sender = name;
-                } else if sender.is_empty() || looks_like_action(&sender) {
-                    sender = a.clone();
-                }
-            }
-
-            // Rescue: if primary extraction produced the app name,
-            // an empty sender, or an action phrase, try to pull a
-            // clean person name out of the summary. Horizon puts
-            // the sender name directly in summary with no separator.
             let needs_tts_rescue = sender.is_empty() || sender == a || looks_like_action(&sender);
             if needs_tts_rescue {
                 let sender_before = sender.clone();
-                let mut rescued: Option<String> = None;
-                if let Some(n) = extract_name_from_summary(&s) {
-                    rescued = Some(n);
-                } else if let Some(n) = extract_from_phrase(&s) {
-                    rescued = Some(n);
-                } else if looks_like_clean_name(&s) {
-                    rescued = Some(s.trim().to_string());
-                }
+                let rescued = extract_name_from_summary(&s)
+                    .or_else(|| extract_from_phrase(&s))
+                    .or_else(|| looks_like_clean_name(&s).then(|| s.trim().to_string()));
                 match rescued {
                     Some(n) => {
                         crate::dbg_log!(
-                            "[tts-rescue2] summary={:?} sender {:?} -> {:?}",
+                            "[tts-rescue] summary={:?} sender {:?} -> {:?}",
                             s,
                             sender_before,
                             n
@@ -1061,9 +1030,9 @@ impl NotificationOverlay {
                         sender = n;
                     }
                     None => {
-                        if looks_like_action(&sender) || sender == a {
+                        if sender.is_empty() || looks_like_action(&sender) || sender == a {
                             crate::dbg_log!(
-                                "[tts-rescue2] no name in summary={:?}, using app={:?}",
+                                "[tts-rescue] no name in summary={:?}, using app={:?}",
                                 s,
                                 a
                             );

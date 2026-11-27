@@ -73,16 +73,6 @@ impl MoonBeautyShellApp {
     /// the body keeps the extracted logic byte-for-byte identical
     /// to the inline version; no per-site &str/String juggling.
     pub(crate) fn dismiss_tooltip_child(&mut self) -> Command<Message> {
-        if let Some(mut c) = self.weather_tooltip_child.take() {
-            let pid = c.id() as libc::pid_t;
-            #[allow(unsafe_code)]
-            unsafe {
-                libc::kill(pid, libc::SIGTERM);
-            }
-            std::thread::spawn(move || {
-                let _ = c.wait();
-            });
-        }
         self.in_bar_tooltip = None;
         if let Some(wid) = self.tooltip_window_id.take() {
             self.closing_tooltip_id = Some(wid);
@@ -110,17 +100,6 @@ impl MoonBeautyShellApp {
         // Recent click => use cursor position for dynamic placement.
         // Fallback to capsule_center_x if no click in last 5s (e.g. IPC trigger).
         let recent_click = self.last_cursor_time.elapsed() < std::time::Duration::from_secs(5);
-        // Toggle off if already open
-        let running = self
-            .weather_tooltip_child
-            .as_mut()
-            .and_then(|c| c.try_wait().ok())
-            .is_some_and(|status| status.is_none());
-        if running {
-            eprintln!("[tooltip] Already open; toggling off via SIGTERM (animate)");
-            return self.dismiss_tooltip_child();
-        }
-        self.weather_tooltip_child = None;
 
         let target_output = if self.settings.notif_screen_name != "Auto"
             && self.settings.notif_screen_name != "Auto (Primary)"
@@ -188,15 +167,6 @@ impl MoonBeautyShellApp {
             cx < (sw as i32) / 2
         };
         let (tip_w, _tip_h) = self.settings.tooltip_size(&id);
-        let _tip_output =
-            if self.settings.bar_monitor != "All" && !self.settings.bar_monitor.is_empty() {
-                Some(self.settings.bar_monitor.clone())
-            } else {
-                std::env::var("MBS_OUTPUT")
-                    .ok()
-                    .filter(|s| !s.is_empty())
-                    .or_else(resolve_primary_output)
-            };
 
         // Finding 76: per-capsule tooltip bias.
         let (bias_l, bias_r) = moonbeauty::bar::capsules::tooltip_bias(&id, &self.theme);

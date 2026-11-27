@@ -1,97 +1,9 @@
 //! Tooltip child process spawning.
 //!
-//! `Message::TopBar` gathers the params for a tooltip (position, size,
-//! direction, output) and hands them to `spawn()`, which builds the
-//! `Command` with all the env vars and spawns the popup process.
-//!
-//! Extracted from `main.rs` so the spawn logic isn't tangled up with
-//! the bar's event dispatch.
-
-use std::io;
-use std::path::PathBuf;
-use std::process::Child;
+//! Height calculation, offset bias env helpers, and Wayland output lookup.
 
 use crate::libraries::backend::UnifiedTelemetry;
 use crate::libraries::config::ShellSettings;
-
-/// All data needed to spawn a tooltip popup.
-pub struct SpawnRequest<'a> {
-    pub id: &'a str,
-    pub exe: PathBuf,
-    pub output: Option<&'a str>,
-    pub tooltip_w: u32,
-    pub tooltip_h: u32,
-    pub drop_ms: u32,
-    pub expand_ms: u32,
-    pub capsule_cx: i32,
-    pub capsule_w: f32,
-    pub screen_w: u32,
-    pub slant_l: &'a str,
-    pub slant_r: &'a str,
-    pub grow_right: bool,
-    /// Finding 76: per-capsule bias, added to the settings' global
-    /// tooltip_offset_left/right inside each tooltip spawner.
-    /// Positive = shift further inward (same sign as the global).
-    pub offset_left_extra: i32,
-    pub offset_right_extra: i32,
-}
-
-pub fn spawn(req: &SpawnRequest) -> io::Result<Child> {
-    let mut cmd = std::process::Command::new(&req.exe);
-
-    if req.id == "weather" {
-        cmd.arg("--weather-tooltip");
-    } else if matches!(
-        req.id,
-        "calendar" | "music" | "unified" | "net" | "custom" | "clock"
-    ) {
-        cmd.arg("--info-tooltip").env("MBS_INFO_MODE", req.id);
-    } else {
-        cmd.arg("--sys-tooltip").env("MBS_SYS_TARGET", req.id);
-    }
-
-    if let Some(out) = req.output {
-        cmd.env("MBS_OUTPUT", out);
-    }
-
-    cmd.env(
-        "MBS_TOOLTIP_W",
-        req.tooltip_w.max(req.capsule_w as u32).to_string(),
-    )
-    .env("MBS_TOOLTIP_H", req.tooltip_h.to_string())
-    .env("MBS_TOOLTIP_DROP_MS", req.drop_ms.to_string())
-    .env("MBS_TOOLTIP_EXPAND_MS", req.expand_ms.to_string())
-    .env("MBS_SCREEN_W", req.screen_w.to_string())
-    .env("MBS_SLANT_L", req.slant_l)
-    .env("MBS_SLANT_R", req.slant_r)
-    .env("MBS_GROW_RIGHT", if req.grow_right { "1" } else { "0" })
-    .env("MBS_CAPSULE_CX", req.capsule_cx.to_string())
-    .env("MBS_CAPSULE_W", req.capsule_w.to_string())
-    .env(
-        "MBS_TOOLTIP_OFFSET_LEFT_EXTRA",
-        req.offset_left_extra.to_string(),
-    )
-    .env(
-        "MBS_TOOLTIP_OFFSET_RIGHT_EXTRA",
-        req.offset_right_extra.to_string(),
-    );
-
-    eprintln!(
-        "[spawn] id={:?} w={} h={} cx={} cap_w={:.1} sw={} L={} R={} grow_right={} out={:?}",
-        req.id,
-        req.tooltip_w,
-        req.tooltip_h,
-        req.capsule_cx,
-        req.capsule_w,
-        req.screen_w,
-        req.slant_l,
-        req.slant_r,
-        req.grow_right,
-        req.output
-    );
-
-    cmd.spawn()
-}
 
 /// Compute the popup height for a given tooltip id.
 ///

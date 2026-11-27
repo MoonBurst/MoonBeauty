@@ -571,19 +571,6 @@ impl App {
     pub fn view(&self) -> Element<'_, Message> {
         let settings = &self.settings;
         let theme = &self.theme;
-        let _content_h = match &self.data {
-            Some(InfoData::Calendar(c)) => {
-                let total_cells = c.first_day_offset as u32 + c.days_in_month;
-                let weeks = total_cells.div_ceil(7);
-                40.0 + 36.0 + 24.0 + (weeks as f32) * 50.0 + 20.0 + settings.bar_height as f32
-            }
-            Some(InfoData::Music(_)) => 520.0 + settings.bar_height as f32,
-            Some(InfoData::Unified(..)) => 400.0 + settings.bar_height as f32,
-            Some(InfoData::Net(_)) => 450.0 + settings.bar_height as f32,
-            Some(InfoData::Clock(_)) => 320.0 + settings.bar_height as f32,
-            Some(InfoData::Custom) => 300.0 + settings.bar_height as f32,
-            None => self.h as f32,
-        };
         let effective_h = self.h as f32;
 
         let is_clock = self.mode == "clock";
