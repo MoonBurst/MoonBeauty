@@ -4,7 +4,6 @@ use iced::{Alignment, Element, Length, Padding};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tokio::process::Command;
 
 use crate::libraries::config::settings::ShellSettings;
 use crate::libraries::config::theme::ShellTheme;
@@ -184,14 +183,7 @@ impl NotesOverlay {
             NotesMessage::DeleteNote(id) => {
                 self.delete_note_advance(id);
             }
-            NotesMessage::CopyNote(content) => {
-                tokio::spawn(async move {
-                    let _ = Command::new("wl-copy").arg(&content).status().await;
-                    let _ = Command::new("notify-send")
-                        .args(["-a", "Notes", "Note Copied", &content])
-                        .spawn();
-                });
-            }
+            NotesMessage::CopyNote(_) => {}
             NotesMessage::SelectNext => {
                 let visible = self.visible_notes();
                 if visible.is_empty() {

@@ -24,9 +24,8 @@ impl TrayWatcher {
         service: String,
         #[zbus(header)] hdr: zbus::message::Header<'_>,
     ) -> zbus::fdo::Result<()> {
-        // Finding 54: bound input length + item count. A same-user process
-        // can call this in a loop with unique strings; unbounded HashSet
-        // growth OOMs the bar → lockscreen children die.
+        // Bound input length + item count: a same-user process calling this in a
+        // loop with unique strings would otherwise OOM the bar via HashSet growth.
         const MAX_SERVICE_LEN: usize = 250;
         const MAX_ITEMS: usize = 500;
         if service.len() > MAX_SERVICE_LEN {
@@ -133,13 +132,64 @@ pub fn spawn() {
 use sha2::Digest;
 
 #[derive(Debug, Clone)]
+pub enum TrayIconHandle {
+    Svg(iced::widget::svg::Handle),
+    Rgba(iced::widget::image::Handle),
+}
+
+#[derive(Debug, Clone)]
 pub struct TrayItem {
     pub bus: String,
     pub path: String,
     pub id: String,
     pub title: String,
     pub icon_path: Option<String>,
+    pub icon_handle: Option<TrayIconHandle>,
     pub tooltip: String,
+}
+
+fn load_tray_icon_handle(path: &str) -> Option<TrayIconHandle> {
+    let p = std::path::Path::new(path);
+    if !p.exists() {
+        return None;
+    }
+    if path.ends_with(".svg") {
+        return Some(TrayIconHandle::Svg(iced::widget::svg::Handle::from_path(
+            path,
+        )));
+    }
+    let bytes = std::fs::read(p).ok()?;
+    let rgba = image::load_from_memory(&bytes).ok()?.to_rgba8();
+    if !rgba.pixels().any(|px| px[3] > 10) {
+        eprintln!(
+            "[tray-render] image {:?} is fully transparent, using fallback",
+            path
+        );
+        return None;
+    }
+    let (w, h) = rgba.dimensions();
+    Some(TrayIconHandle::Rgba(
+        iced::widget::image::Handle::from_rgba(w, h, rgba.into_raw()),
+    ))
+}
+
+async fn resolve_icon_handle(
+    cache: &[TrayItem],
+    icon_path: Option<&str>,
+) -> Option<TrayIconHandle> {
+    let path = icon_path?;
+    if let Some(cached) = cache
+        .iter()
+        .find(|i| i.icon_path.as_deref() == Some(path))
+        .and_then(|i| i.icon_handle.clone())
+    {
+        return Some(cached);
+    }
+    let owned = path.to_string();
+    tokio::task::spawn_blocking(move || load_tray_icon_handle(&owned))
+        .await
+        .ok()
+        .flatten()
 }
 
 pub async fn fetch_tray_items(cache: Vec<TrayItem>) -> Vec<TrayItem> {
@@ -172,11 +222,8 @@ pub async fn fetch_tray_items(cache: Vec<TrayItem>) -> Vec<TrayItem> {
         }
     };
 
-    // Finding 56: cap enumeration. Chained from finding 54 — a hostile
-    // process that registered N names now drives N Proxy::new calls,
-    // each blocking up to 25s on timeout. 200 is 10× real systems; caps
-    // worst-case to 200 * 25s = 83 min. Combined with the refetch
-    // cadence, only one stalled fetch at a time.
+    // Cap enumeration so a peer registering many names cannot drive unbounded
+    // Proxy::new calls; 200 is ~10x real systems.
     const MAX_ITEMS: usize = 200;
     if raw_items.len() > MAX_ITEMS {
         crate::dbg_log!(
@@ -202,9 +249,8 @@ pub async fn fetch_tray_items(cache: Vec<TrayItem>) -> Vec<TrayItem> {
         let Some((bus, path)) = parse_registered(&raw) else {
             continue;
         };
-        // Finding 56: per-item timeout (3s). Bounds the total fetch time
-        // when combined with MAX_ITEMS. A hung peer no longer stalls the
-        // whole enumeration at the D-Bus default 25s.
+        // Per-item timeout (2s): bounds total fetch time when combined with
+        // MAX_ITEMS so a hung peer does not stall at the D-Bus default 25s.
         let proxy_result = tokio::time::timeout(
             std::time::Duration::from_secs(2),
             zbus::Proxy::new(
@@ -233,7 +279,7 @@ pub async fn fetch_tray_items(cache: Vec<TrayItem>) -> Vec<TrayItem> {
                 continue;
             }
         };
-        // Finding 38: cap SNI strings before display.
+        // Cap SNI strings before display.
         const MAX_ID: usize = 128;
         const MAX_TITLE: usize = 512;
         const MAX_ICON_NAME: usize = 128;
@@ -278,6 +324,7 @@ pub async fn fetch_tray_items(cache: Vec<TrayItem>) -> Vec<TrayItem> {
                 }
             }
         }
+        let icon_handle = resolve_icon_handle(&cache, icon_path.as_deref()).await;
         let tooltip = match proxy
             .get_property::<(String, Vec<(i32, i32, Vec<u8>)>, String, String)>("ToolTip")
             .await
@@ -322,6 +369,7 @@ pub async fn fetch_tray_items(cache: Vec<TrayItem>) -> Vec<TrayItem> {
                     id,
                     title: title_clean.clone(),
                     icon_path,
+                    icon_handle,
                     tooltip,
                 };
             }
@@ -335,6 +383,7 @@ pub async fn fetch_tray_items(cache: Vec<TrayItem>) -> Vec<TrayItem> {
             id,
             title,
             icon_path,
+            icon_handle,
             tooltip,
         });
     }
@@ -387,9 +436,8 @@ pub async fn get_menu_tree(bus: &str, path: &str) -> Option<(String, Vec<TrayMen
         children: Vec<zbus::zvariant::OwnedValue>,
         depth: usize,
     ) -> Vec<TrayMenuItem> {
-        // Finding 34: cap recursion depth. Real dbusmenu trees are 2-4
-        // levels; a hostile provider returns 10000-deep nesting → stack
-        // overflow → shell crash → lockscreen child dies → unlock window.
+        // Cap recursion depth; real dbusmenu trees are 2-4 levels deep and
+        // excessive nesting would overflow the stack.
         const MAX_DEPTH: usize = 16;
         if depth > MAX_DEPTH {
             eprintln!(
@@ -430,12 +478,8 @@ pub async fn get_menu_tree(bus: &str, path: &str) -> Option<(String, Vec<TrayMen
             });
         }
 
-        // Finding 57: cap flat width per level. Real dbusmenu trees are
-        // <20 items wide; a hostile single-level 1M-children response
-        // allocates 1M TrayMenuItem before depth guard (34) can fire.
-        // Cap at 1000 per level — recursion depth 16 with cap 1000 means
-        // worst case is 16 × 1000 = 16K items in memory regardless of
-        // tree shape.
+        // Cap flat width per level (depth 16 × width 1000 = 16K items max) so a
+        // wide single-level response cannot exhaust memory before the depth guard fires.
         const MAX_ITEMS_PER_LEVEL: usize = 1000;
         for c in children {
             if items.len() >= MAX_ITEMS_PER_LEVEL {
@@ -500,42 +544,10 @@ fn parse_registered(s: &str) -> Option<(String, String)> {
     }
 }
 
-/// Resolve an SNI icon name to a normalized, content-hashed PNG/SVG in
-/// `$XDG_RUNTIME_DIR/mbs-tray/`.
-///
-/// **When to use this:** for tray icons (SNI items registered with
-/// `org.kde.StatusNotifierWatcher`) and any other caller that needs a
-/// **render-stable** icon path for the whole session.
-///
-/// **Difference from `overlays::notifications::resolve_icon_name`:**
-///   - Raster icons are ALWAYS re-encoded through ImageMagick
-///     (`-strip`, `png:color-type=6`). This strips malformed chunks
-///     (e.g. Steam's broken iCCP) that iced's strict decoder rejects
-///     but libpng-adjacent decoders tolerate. Tray slots are rendered
-///     continuously for the whole session — a broken decode means a
-///     permanently blank slot.
-///   - The output filename gets a content hash (`icon-<safe>-<sha8>.png`).
-///     Iced's image cache is keyed on path; without a hash, changing
-///     file contents in place leaves iced serving stale 1x1 decodes.
-///   - SVG files bypass ImageMagick (iced has native SVG support),
-///     but still get hashed for the same cache-bust reason.
-///   - The fast path (`$XDG_RUNTIME_DIR/mbs-tray/icon-<safe>.<ext>` exists
-///     and has non-zero size) skips all of the above; subsequent refetches
-///     of the same icon are O(1) stat calls.
-///
-/// **Cost vs notifications:** one ImageMagick subprocess per *new* icon,
-/// amortized to zero across the session. Notifications skip this entirely
-/// because they're transient — a broken avatar just falls back to the
-/// default icon on the next toast.
-///
-/// **Fallback chain** if the source can't be decoded after re-encode:
-///   → return `None`, renderer shows the initial letter (from `title`,
-///     falling back to `id` and then `tooltip`).
-/// Finding 06: cap the tray icon cache directory at 20 MB. SNI items are
-/// untrusted — without a cap, a hostile app pins arbitrarily many icons
-/// into $XDG_RUNTIME_DIR/mbs-tray (tmpfs), growing until session OOM.
-/// Cached hits bypass this (they're already counted); only new resolves
-/// are declined when over budget.
+/// Cap the tray icon cache directory at 20 MB. SNI items are untrusted —
+/// without a cap, a hostile app could pin arbitrarily many icons into
+/// `$XDG_RUNTIME_DIR/mbs-tray` (tmpfs) until session OOM.
+/// Cached hits bypass this check; only new resolutions are declined when over budget.
 fn tray_cache_budget_ok(dir: &std::path::Path) -> bool {
     const MAX: u64 = 20 * 1024 * 1024;
     let total: u64 = std::fs::read_dir(dir)
@@ -556,19 +568,17 @@ fn tray_cache_budget_ok(dir: &std::path::Path) -> bool {
     true
 }
 
-/// Finding 27: canonicalize an icon candidate and verify it stays under
-/// its declared root. Blocks symlink-to-sensitive-file: `~/.local/share/
-/// icons/hicolor/48x48/apps/foo.png -> /etc/passwd` is rejected rather
-/// than handed to `std::fs::read` + `image::load_from_memory`.
+/// Resolve an SNI icon name to a normalized, content-hashed PNG/SVG in
+/// `$XDG_RUNTIME_DIR/mbs-tray/`.
 ///
-/// Both canonicalizations can fail (broken symlink, race, missing root);
-/// caller treats `None` as "try next candidate", which is the safe default.
+/// Output filenames include a content hash (`icon-<safe>-<sha8>.png`) so
+/// iced's path-keyed image cache invalidates when file contents change.
+/// Falls back to `None` (initial letter rendered) if decoding fails.
 fn resolve_icon(icon_name: &str) -> Option<String> {
     if icon_name.is_empty() {
         return None;
     }
-    // Finding 09: SNI items come from untrusted D-Bus peers. Reject
-    // absolute paths (a read primitive via existence check + decode).
+    // SNI items come from untrusted D-Bus peers; reject absolute paths and traversal.
     if icon_name.starts_with('/')
         || icon_name.contains("..")
         || icon_name.contains('/')
@@ -629,13 +639,12 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
         }
     }
 
-    // Finding 06: refuse NEW resolutions when the cache is over budget.
-    // Cached hits above already returned; existing icons stay visible.
+    // Refuse new resolutions when the cache is over budget; cached hits above still render.
     if !tray_cache_budget_ok(&runtime_dir) {
         return None;
     }
 
-    // Locate the source file — theme search only (finding 09).
+    // Locate the source file via icon theme search only.
     let source: std::path::PathBuf = {
         let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
         let roots = [
@@ -660,7 +669,7 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
                         .join("apps")
                         .join(format!("{}.{}", icon_name, ext));
                     if candidate.exists() {
-                        // Finding 27: canonicalize + verify under root.
+                        // Canonicalize + verify under root to block symlink escapes.
                         if let Some(canon) = crate::libraries::process::safe_icon_candidate(&candidate, root) {
                             found = Some(canon);
                             break 'search;
@@ -686,10 +695,7 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
         found?
     };
 
-    // Finding 27: cap source file size before decode. `image::load_from_memory`
-    // fully decodes into memory; a 500 MB PNG in an icon theme would OOM
-    // the shell before any post-decode check could fire. 4 MB is generous
-    // for a real tray icon (typical: 2-40 KB).
+    // Cap source file size before decode so oversized theme assets cannot OOM the shell.
     const MAX_ICON_BYTES: u64 = 4 * 1024 * 1024;
     match std::fs::metadata(&source) {
         Ok(meta) if meta.len() > MAX_ICON_BYTES => {
@@ -709,7 +715,7 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
     }
 
     // Decide destination extension. SVG → keep as SVG (iced has svg handle).
-    // Everything else → normalize to PNG (ImageMagick rewrites cleanly).
+    // Everything else → normalize to PNG.
     let src_ext = source.extension().and_then(|s| s.to_str()).unwrap_or("png");
     let is_svg_src = src_ext.eq_ignore_ascii_case("svg");
 
@@ -737,9 +743,6 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
         Some(final_path.to_string_lossy().into_owned())
     };
 
-    // Finding 07: ImageMagick availability probe removed entirely.
-    // The tray renderer now has zero subprocess decoders.
-
     // ── SVG path: no re-encode, just copy ──────────────────────────
     if is_svg_src {
         match std::fs::copy(&source, &base_dest) {
@@ -751,19 +754,10 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
         }
     }
 
-    // ── Raster path: ALWAYS normalize via ImageMagick ──────────────
-    // Rationale: some shipped PNGs (notably Steam's steam_tray_mono.png)
-    // are structurally valid enough that `image` crate's header parser
-    // accepts them, but iced's render pipeline fails at pixel data (or
-    // fails to render silently). Re-encoding through ImageMagick strips
-    // malformed chunks (broken iCCP, etc.) and guarantees a clean PNG
-    // iced can render.
-    // Finding 27-residual: dimension gate BEFORE decode. A 4 MB PNG can
-    // decompress to hundreds of MB of RGBA (bomb ratio ~1000:1). The
-    // 4 MB input cap (batch 4) bounds the compressed size but not the
-    // decoded output. `into_dimensions()` reads only the header —
-    // typically <1KB — so rejecting early avoids the pixel allocation.
-    // Real tray icons are ≤256×256; 1024×1024 gives 4× headroom.
+    // ── Raster path: in-process decode + re-encode via `image` crate ──
+    // Dimension gate BEFORE decode: a small compressed PNG can expand to hundreds
+    // of MB of RGBA; `into_dimensions()` reads only the header so rejecting >1024×1024
+    // avoids the pixel allocation.
     if let Ok(bytes) = std::fs::read(&source) {
         let dims = image::ImageReader::new(std::io::Cursor::new(&bytes))
             .with_guessed_format()
@@ -787,13 +781,7 @@ fn resolve_icon(icon_name: &str) -> Option<String> {
         }
     }
 
-    // Finding 07: no ImageMagick fallback. `image` crate is the only
-    // decoder. If it fails, we return None and the renderer shows the
-    // item title's first letter. No subprocess, no RCE surface.
-    eprintln!(
-        "[tray-icon] {} `image` crate failed to decode; no fallback (finding 07)",
-        icon_name
-    );
+    eprintln!("[tray-icon] {} `image` crate failed to decode", icon_name);
     None
 }
 

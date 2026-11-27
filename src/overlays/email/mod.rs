@@ -13,14 +13,9 @@ pub const COMPOSE_BODY_ID: &str = "compose_body";
 pub const COMPOSE_MANUAL_ATTACH_ID: &str = "compose_manual_attach";
 pub const EMAIL_SEARCH_ID: &str = "email_search";
 
-/// Finding 25: reject auto-opening attachments whose extension could
-/// yield code execution when double-clicked on a default config.
-/// A hostile sender delivering `invoice.pdf.desktop` looks like a PDF to
-/// the user but routes xdg-open → desktop file Exec= → RCE.
-fn is_safe_to_auto_open(path: &std::path::Path) -> bool {
-    // Finding 25: default-deny allowlist. Only known-safe media/doc
-    // formats auto-open. Replaces a denylist that could not anticipate
-    // new macro formats (.docm/.xlsm) or multi-step archives (.tar.gz).
+/// Reject auto-opening attachments whose extension could yield code execution on double-click.
+pub fn is_safe_to_auto_open(path: &std::path::Path) -> bool {
+    // Default-deny allowlist: only known-safe media/doc formats auto-open.
     const ALLOW_EXT: &[&str] = &[
         "png", "jpg", "jpeg", "gif", "webp", "svg",
         "pdf", "txt", "md", "csv",
@@ -174,9 +169,6 @@ impl EmailOverlay {
             if !f.is_empty() && !folders.contains(&f) {
                 folders.push(f);
             }
-
-
-
         }
         Self {
             folders,
@@ -521,9 +513,6 @@ impl EmailOverlay {
                 self.compose_to.clear();
                 self.compose_subject.clear();
                 self.compose_attachments.clear();
-                // Send path: stay 3-pane. The ✓ Message sent confirmation
-                // (delivered as MessageLoaded after the async send) renders
-                // there. Clear reply flag so a later Enter isn't misread.
                 self.reply_from_fullview = false;
             }
             EmailMessage::CancelCompose => {
@@ -643,92 +632,8 @@ impl EmailOverlay {
             EmailMessage::FocusPrevPane => {
                 self.focus_pane = self.focus_pane.saturating_sub(1);
             }
-            EmailMessage::OpenInBrowser => {
-                if let Some(id) = &self.active_mail_id {
-                    let cache_file = dirs::data_dir()
-                        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
-                        .join("moonbeauty/email_cache")
-                        .join(&self.active_folder)
-                        .join(format!("{}.eml", id));
-                    if cache_file.exists() {
-                        let _ = std::process::Command::new("xdg-open")
-                            .arg(cache_file)
-                            .spawn();
-                    }
-                }
-            }
-            EmailMessage::SaveAttachment(name) => {
-                if let Some(email) = &self.parsed_email {
-                    if let Some((_, data)) = email.attachments.iter().find(|(n, _)| n == &name) {
-                        // Sanitize: keep only the basename, strip leading dots.
-                        // Otherwise `../../.bashrc` from a malicious email would
-                        // overwrite the user's shell init.
-                        let safe_name: String = std::path::Path::new(&name)
-                            .file_name()
-                            .and_then(|s| s.to_str())
-                            .map(|s| s.trim_start_matches('.').to_string())
-                            .filter(|s| !s.is_empty())
-                            .unwrap_or_else(|| "attachment".to_string());
-                        let settings = crate::libraries::config::settings::ShellSettings::load();
-                        let home =
-                            dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
-                        let download_dir = if !settings.attachment_download_dir.trim().is_empty() {
-                            std::path::PathBuf::from(settings.attachment_download_dir.trim())
-                        } else {
-                            // Prefer XDG download dir, then ~/Downloads, then ~
-                            let xdg = dirs::download_dir();
-                            let fallback_dl = home.join("Downloads");
-                            match xdg {
-                                Some(d) => d,
-                                None if fallback_dl.exists() => fallback_dl,
-                                None => {
-                                    // Create ~/Downloads if it doesn't exist
-                                    let _ = std::fs::create_dir_all(&fallback_dl);
-                                    fallback_dl
-                                }
-                            }
-                        };
-                        let _ = std::fs::create_dir_all(&download_dir);
-                        let out_path = unique_download_path(&download_dir, &safe_name);
-                        crate::dbg_log!("[attach] saving to {:?}", out_path);
-                        if crate::libraries::process::private_write_new(&out_path, data).is_ok() {
-                            if is_safe_to_auto_open(&out_path) {
-                                let _ = std::process::Command::new("notify-send")
-                                    .args([
-                                        "-a",
-                                        "Email",
-                                        "Attachment Saved",
-                                        &format!("Saved to {}", out_path.display()),
-                                    ])
-                                    .spawn();
-                                let _ = std::process::Command::new("xdg-open")
-                                    .arg(&out_path)
-                                    .spawn();
-                            } else {
-                                let _ = std::process::Command::new("notify-send")
-                                    .args([
-                                        "-a",
-                                        "Email",
-                                        "Attachment Saved",
-                                        &format!(
-                                            "Saved (not auto-opened for safety) → {}",
-                                            out_path.display()
-                                        ),
-                                    ])
-                                    .spawn();
-                            }
-                        } else {
-                            let _ = std::process::Command::new("notify-send")
-                                .args([
-                                    "-a",
-                                    "Email",
-                                    "Save Failed",
-                                    &format!("Could not write to {}", out_path.display()),
-                                ])
-                                .spawn();
-                        }
-                    }
-                }
+            EmailMessage::OpenInBrowser | EmailMessage::SaveAttachment(_) => {
+                /* handled in app/update/email.rs */
             }
             EmailMessage::OpenSearch => {
                 if !self.is_composing && !self.is_logging_in && !self.is_adding_folder {
@@ -1698,7 +1603,7 @@ impl EmailOverlay {
         );
 
         // Fullscreen: single-column preview with a back button.
-        // 3-pane: folders | list | preview (existing layout).
+        // 3-pane: folders | list | preview.
         let main_row: Element<'a, EmailMessage> = if self.fullscreen_read
             && self.parsed_email.is_some()
             && !self.is_composing
@@ -1975,8 +1880,6 @@ impl EmailOverlay {
     }
 }
 
-
-
 impl EmailOverlay {
     fn save_current_draft(&self) {
         let to = &self.compose_to;
@@ -2046,7 +1949,7 @@ mod search_delete_tests {
     }
 }
 
-fn unique_download_path(dir: &std::path::Path, safe_name: &str) -> std::path::PathBuf {
+pub fn unique_download_path(dir: &std::path::Path, safe_name: &str) -> std::path::PathBuf {
     let direct = dir.join(safe_name);
     if !direct.exists() {
         return direct;

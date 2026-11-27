@@ -270,9 +270,9 @@ impl AppLauncher {
                         }
                     } else {
                         self.music_focus_idx = match self.music_focus_idx {
-                            3 | 4 | 5 | 6 => (self.music_focus_idx + 1).min(6),
+                            3..=6 => (self.music_focus_idx + 1).min(6),
                             7 | 8 => (self.music_focus_idx + 1).min(8),
-                            9 | 10 | 11 => (self.music_focus_idx + 1).min(11),
+                            9..=11 => (self.music_focus_idx + 1).min(11),
                             _ => self.music_focus_idx,
                         };
                         return iced::widget::operation::focus(FOCUS_DUMMY_ID);
@@ -296,9 +296,9 @@ impl AppLauncher {
                         }
                     } else {
                         self.music_focus_idx = match self.music_focus_idx {
-                            3 | 4 | 5 | 6 => (self.music_focus_idx - 1).max(3),
+                            3..=6 => (self.music_focus_idx - 1).max(3),
                             7 | 8 => (self.music_focus_idx - 1).max(7),
-                            9 | 10 | 11 => (self.music_focus_idx - 1).max(9),
+                            9..=11 => (self.music_focus_idx - 1).max(9),
                             _ => self.music_focus_idx,
                         };
                         return iced::widget::operation::focus(FOCUS_DUMMY_ID);
@@ -321,9 +321,9 @@ impl AppLauncher {
                             0 => 1,
                             1 => 2,
                             2 => 4, // Volume -> Play
-                            3 | 4 | 5 | 6 => 7, // Controls -> Folder
+                            3..=6 => 7, // Controls -> Folder
                             7 | 8 => 9, // Act -> Local
-                            9 | 10 | 11 => 12, // Sources -> Results
+                            9..=11 => 12, // Sources -> Results
                             _ => 12,
                         };
                         if self.music_focus_idx == 0 { return iced::widget::operation::focus(MUSIC_SEARCH_ID); }
@@ -350,9 +350,9 @@ impl AppLauncher {
                             0 => 0,
                             1 => 0,
                             2 => 1,
-                            3 | 4 | 5 | 6 => 2, // Controls -> Volume
+                            3..=6 => 2, // Controls -> Volume
                             7 | 8 => 4, // Act -> Play
-                            9 | 10 | 11 => 7, // Sources -> Folder
+                            9..=11 => 7, // Sources -> Folder
                             12 => 11, // Results -> Browser
                             _ => 0,
                         };

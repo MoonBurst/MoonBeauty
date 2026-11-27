@@ -139,11 +139,6 @@ fn label_moonbeauty_from_cmdline(name: &str, cmdline: &[u8]) -> String {
     }
     let role = if args.contains(&"--notif-surface") {
         "notifs"
-    } else if args.contains(&"--sys-tooltip")
-        || args.contains(&"--weather-tooltip")
-        || args.contains(&"--info-tooltip")
-    {
-        "tooltip"
     } else if args.contains(&"--overlay") {
         "overlay"
     } else if args.contains(&"--lockscreen") || args.contains(&"--lockscreen-instance") {
@@ -313,33 +308,28 @@ impl SystemCollector {
                                         if let Some(rss_bytes) =
                                             read_proc_ram_bytes(&entry.path(), use_pss)
                                         {
-                                                    // Only dedupe Firefox/Chrome-style
-                                                    // renderer subprocesses (name has
-                                                    // " #N" suffix). Ordinary processes
-                                                    // like "moonbeauty" can legitimately
-                                                    // run as multiple PIDs (bar +
-                                                    // notif-surface) and should all
-                                                    // appear in the tooltip.
-                                                    if !name.contains(" #") {
-                                                        procs_ram_raw.push((
-                                                            pid,
-                                                            label_moonbeauty_role(pid, name),
-                                                            rss_bytes,
-                                                        ));
-                                                    } else {
-                                                        let base_name = name
-                                                            .split(" #")
-                                                            .next()
-                                                            .unwrap_or("")
-                                                            .to_string();
-                                                        if seen_ram.insert(base_name) {
-                                                            procs_ram_raw.push((
-                                                                pid,
-                                                                name.to_string(),
-                                                                rss_bytes,
-                                                            ));
-                                                        }
-                                                    }
+                                            // Only dedupe browser-style renderer subprocesses (" #N");
+                                            // keep distinct multi-process entries like moonbeauty.
+                                            if !name.contains(" #") {
+                                                procs_ram_raw.push((
+                                                    pid,
+                                                    label_moonbeauty_role(pid, name),
+                                                    rss_bytes,
+                                                ));
+                                            } else {
+                                                let base_name = name
+                                                    .split(" #")
+                                                    .next()
+                                                    .unwrap_or("")
+                                                    .to_string();
+                                                if seen_ram.insert(base_name) {
+                                                    procs_ram_raw.push((
+                                                        pid,
+                                                        name.to_string(),
+                                                        rss_bytes,
+                                                    ));
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -477,9 +467,8 @@ impl SystemCollector {
             .and_then(|s| s.trim().parse::<u8>().ok())
             .unwrap_or(0);
 
-        // Enumerate all hwmon entries under the card's device. The old code
-        // hardcoded `hwmon0`, which on amdgpu/AMD setups does not exist;
-        // amdgpu typically registers as hwmon2 or hwmon3.
+        // Enumerate all hwmon entries under the card's device; amdgpu
+        // typically registers as hwmon2 or hwmon3 rather than hwmon0.
         let mut temp_c: u32 = 0;
         let mut power_w: u32 = 0;
         if let Ok(entries) = fs::read_dir(format!("{}/hwmon", base)) {
@@ -597,7 +586,7 @@ impl SystemCollector {
         let mut chosen_rx = 0;
         let mut chosen_tx = 0;
 
-        // Read directly from /proc/net/dev to bypass sysinfo 0.31 bugs
+        // Read directly from /proc/net/dev
         if let Ok(dev) = fs::read_to_string("/proc/net/dev") {
             for line in dev.lines().skip(2) {
                 let parts: Vec<&str> = line.split_whitespace().collect();
@@ -669,15 +658,12 @@ impl SystemCollector {
             let cache = PING_CACHE.get_or_init(|| Mutex::new(None));
             let mut g = cache.lock().unwrap();
             if g.as_ref()
-                .map_or(true, |(t, _)| t.elapsed().as_secs() >= 15)
+                .is_none_or(|(t, _)| t.elapsed().as_secs() >= 15)
             {
                 let mut new_ping = "OFFLINE".to_string();
                 if let Ok(addr) = "1.1.1.1:80".parse() {
                     let t0 = std::time::Instant::now();
-                    // #3: 400ms -> 150ms. A reachable host responds in
-                    // <50ms; >150ms is functionally offline for UI
-                    // feedback. Cuts worst-case blocking 60% even
-                    // before spawn_blocking.
+                    // 150ms timeout: reachable hosts respond in <50ms; >150ms is offline for UI feedback.
                     if std::net::TcpStream::connect_timeout(
                         &addr,
                         std::time::Duration::from_millis(150),
@@ -798,8 +784,7 @@ impl SystemCollector {
         procs.sort_by(|a, b| {
             let parse = |s: &str| -> f32 {
                 let parts: Vec<&str> = s.split_whitespace().collect();
-                let p1 = parts
-                    .get(0)
+                let p1 = parts.first()
                     .unwrap_or(&"0")
                     .trim_start_matches('▼')
                     .trim_end_matches("/s");
@@ -827,9 +812,6 @@ impl SystemCollector {
     }
 
     pub fn get_top_net_procs() -> Vec<ProcessItem> {
-        // Cached for 15s. The `ss` subprocess takes 20-50ms and this is
-        // called synchronously on the UI thread every hardware tick — which
-        // is 2s by default. Throttling removes real UI jank.
         use std::sync::{Mutex, OnceLock};
         use std::time::Instant;
         static CACHE: OnceLock<Mutex<(Option<Instant>, Vec<ProcessItem>)>> = OnceLock::new();
@@ -872,7 +854,7 @@ impl SystemCollector {
                             procs.push(ProcessItem {
                                 pid,
                                 name,
-                                metric: "net".into(), // Changed from "active"
+                                metric: "net".into(),
                                 is_highlight: false,
                             });
                         }
@@ -999,8 +981,6 @@ impl SystemCollector {
                     let device = parts[5].trim();
                     let is_nv = vendor.contains("NVIDIA");
 
-                    // Precompute nv_idx from the current state of gpus
-                    // (borrow ends before we mutate gpus below).
                     let nv_idx: u32 = gpus.iter().filter(|g| g.is_nvidia).count() as u32;
 
                     let card_id = find_drm_card_for_pci(&pci_addr).unwrap_or_else(|| {
@@ -1442,8 +1422,8 @@ mod tests {
             "MoonBeauty (notifs)"
         );
         assert_eq!(
-            label_moonbeauty_from_cmdline("moonbeauty", b"/bin/moonbeauty\0--sys-tooltip\0"),
-            "MoonBeauty (tooltip)"
+            label_moonbeauty_from_cmdline("moonbeauty", b"/bin/moonbeauty\0--tray-context-menu\0"),
+            "MoonBeauty (tray)"
         );
         assert_eq!(
             label_moonbeauty_from_cmdline("moonbeauty", b"/bin/moonbeauty\0--audio-daemon\0"),

@@ -39,12 +39,10 @@ impl MoonBeautyShellApp {
                 loop {
                     match listener.accept() {
                         Ok((mut stream, _)) => {
-                            // Finding 49: 1s timeout bounds per-connection
-                            // accept-loop block. Was 3s; a stalled client
-                            // held the accept loop for 3s per connection.
+                            // 1s timeout bounds per-connection accept-loop blocking.
                             let _ =
                                 stream.set_read_timeout(Some(std::time::Duration::from_secs(1)));
-                            // Finding 37: cap read at 4 MB.
+                            // Cap IPC read at 4 MB.
                             let mut buf = Vec::new();
                             let mut limited = std::io::Read::take(&mut stream, 4 * 1024 * 1024);
                             if let Err(e) = limited.read_to_end(&mut buf) {
@@ -130,8 +128,8 @@ impl MoonBeautyShellApp {
         // Spawn exactly one wl-paste watcher. Kill any orphaned watcher
         // from previous runs first — the shell pkill pattern anchors on
         // "moonbeauty$", but the watcher cmdline ends with
-        // "--clipboard-ingest" and so escapes it, causing N-duplicate
-        // clipboard entries after N bar restarts.
+        // "--clipboard-ingest" and so escapes it, causing duplicate
+        // clipboard entries after bar restarts.
         if standalone_target.is_none() && !is_notif_surface {
             let _ = std::process::Command::new("pkill")
                 .args(["-f", "wl-paste --watch.*(moonbeauty|moon-beauty-shell)"])
@@ -146,9 +144,7 @@ impl MoonBeautyShellApp {
 
         let is_bar = !is_standalone && !is_notif_surface;
         let notif_rx = if is_notif_surface {
-            // Finding 55: bounded (256). notify-send can be called at
-            // arbitrary rate by any same-user process; unbounded channel
-            // OOMs the shell under load. 256 is 64× the visible toast cap.
+            // Bounded channel (256) so notification floods cannot OOM the shell.
             let (tx, rx) = std::sync::mpsc::sync_channel(256);
             moonbeauty::overlays::notifications::spawn(tx);
             Some(rx)
@@ -162,6 +158,12 @@ impl MoonBeautyShellApp {
             crate::app::helpers::spawn_notif_surface_child()
         } else {
             None
+        };
+
+        let (init_notify_paused, init_notify_count) = if is_bar {
+            moonbeauty::overlays::notifications::read_bar_status()
+        } else {
+            (false, 0)
         };
 
         let notif_screen_at_startup = settings.notif_screen_name.clone();
@@ -187,6 +189,18 @@ impl MoonBeautyShellApp {
                 podman: Default::default(),
                 borg: Default::default(),
                 bar_time: ClockBackend::get_bar_time(),
+                next_alarm_epoch: if is_bar {
+                    let now = chrono::Local::now().timestamp();
+                    RemindersOverlay::load()
+                        .iter()
+                        .filter(|e| e.target_epoch > now)
+                        .map(|e| e.target_epoch)
+                        .min()
+                } else {
+                    None
+                },
+                notify_paused: init_notify_paused,
+                notify_count: init_notify_count,
             },
             active_overlay: standalone_target.clone(),
             in_bar_tooltip: None,
@@ -201,7 +215,6 @@ impl MoonBeautyShellApp {
             settings_json_mtime: std::fs::metadata(ShellSettings::config_path())
                 .ok()
                 .and_then(|m| m.modified().ok()),
-            // window_w removed (problem 07)
             notif_screen_at_startup,
             notif_surface_size: if is_notif_surface { (1, 1) } else { (0, 0) },
             tray_expanded: false,
@@ -264,17 +277,10 @@ impl MoonBeautyShellApp {
             annotator: {
                 let mut a = AnnotatorOverlay::new();
                 if let Ok(p) = std::env::var("MBS_ANNOTATOR_PATH") {
-                    // Finding 46: reject non-absolute / traversal paths
-                    // before reading. Same-user IPC can set this env;
-                    // path validation + the byte cap in load_image
-                    // together bound the exposure.
+                    // Reject non-absolute / traversal paths and confine to mbs-tmp
+                    // before reading to close IPC path-injection.
                     let pb = std::path::PathBuf::from(&p);
                     let safe = pb.is_absolute() && !p.contains("..");
-                    // Item 7: also require mbs-tmp. `is_absolute` +
-                    // `!contains("..")` alone still permits e.g.
-                    // /home/user/.config/email.json. Narrowing to the
-                    // shell's own scratch dir closes the IPC-path-injection
-                    // surface.
                     let in_tmp = moonbeauty::libraries::process::path_is_under_mbs_tmp(&pb);
                     if !safe {
                         eprintln!("[annotator] rejecting unsafe MBS_ANNOTATOR_PATH: {:?}", p);
@@ -323,11 +329,8 @@ impl MoonBeautyShellApp {
             last_active_pending_written: None,
         };
 
-        // Bar-only init tasks. Overlays (--notes, --clipboard, --settings,
-        // …) and the notif-surface don't render weather/tray/email — the
-        // bar's TopBar::view is the only consumer. Firing them per-spawn
-        // was costing 2 curl subprocesses (~20 ms each) plus a potential
-        // feedback loop through the weather subscription.
+        // Bar-only init tasks. Overlays and the notif-surface don't render
+        // weather/tray/email — the bar's TopBar::view is the only consumer.
         let is_bar = !is_standalone && !is_notif_surface;
         let mut init_tasks: Vec<Command<Message>> = Vec::new();
         if is_bar {
@@ -402,10 +405,8 @@ impl MoonBeautyShellApp {
             ));
         }
 
-        // Todo autofocus: same pattern as launcher/calc/pass — schedule
-        // the input focus, then retry after 100ms in case the compositor
-        // delivers window focus late (standalone layer surfaces sometimes
-        // need this nudge).
+        // Todo autofocus: schedule input focus, then retry after 100ms in case
+        // the compositor delivers window focus late on standalone layer surfaces.
         if matches!(app.active_overlay, Some(OverlayTarget::Todo)) {
             init_tasks.push(
                 iced::widget::operation::focus(moonbeauty::overlays::todo::TODO_INPUT_ID)
@@ -468,15 +469,12 @@ impl MoonBeautyShellApp {
         }
 
         // History: on open, scroll to the auto-selected newest (bottom) row.
-        // Immediate pass is usually enough; the delayed retry catches the
-        // case where the scrollable hasn't been laid out yet when the
-        // first scroll_to fires.
+        // The delayed retry catches the case where the scrollable hasn't been laid out yet.
         if matches!(
             app.active_overlay,
             Some(OverlayTarget::NotificationsHistory)
         ) {
             // Force scroll to the absolute bottom on mount.
-            // Using f32::MAX is the standard iced idiom to pin to the end.
             init_tasks.push(iced::widget::operation::scroll_to(
                 iced::widget::Id::new("history_list"),
                 iced::widget::scrollable::AbsoluteOffset {

@@ -43,5 +43,3 @@ pub use unicode::{UnicodeMessage, UnicodeOverlay};
 pub use websearch::{WebSearchMessage, WebSearchOverlay};
 
 pub use screenshot::watermark::{add_plate_watermark, reveal};
-
-pub mod tooltips;

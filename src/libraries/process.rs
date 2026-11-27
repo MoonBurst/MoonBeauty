@@ -46,38 +46,13 @@ pub fn was_sigterm_signaled() -> bool {
     SIGTERM_FLAG.load(Ordering::SeqCst)
 }
 
-/// Resolve the current executable path, stripping the " (deleted)" suffix
-/// that `/proc/PID/exe` appends after `cargo build` replaces a running binary.
-/// Whitelist acceptable characters for an app_id / desktop-entry ID.
-///
-/// Freedesktop app_id values are reverse-DNS names like
-/// `org.mozilla.firefox`, plus legacy names like `firefox` or
-/// `steam_app_1234`. All of these consist only of `[A-Za-z0-9._-]`.
-/// Anything outside that set is a red flag:
-///
-/// * swaymsg command mode uses `[app_id="..."]` syntax. A `"` or `]`
-///   in the id breaks out of the criteria brackets and lets an
-///   attacker append arbitrary sway commands (`exec sh -c evil`).
-/// * gtk-launch treats its argument as a desktop-entry ID under the
-///   standard XDG applications dirs. A path separator or `--` prefix
-///   is at best an unrelated file lookup, at worst a flag injection
-///   for downstream tools.
-///
-/// Additionally reject `..` so an attacker can't point at a file
-/// outside the desktop-entries roots if any downstream tool ever
-/// canonicalizes the path.
 /// Sanitize a folder name derived from an untrusted source (email
 /// `From:` display name, IMAP folder name) before use as a path
 /// component.
 ///
 /// Every character not in `[A-Za-z0-9 _\-().\[\]]` is replaced with
-/// `_`. Leading dots are stripped (kills hidden files, `.` and `..`),
-/// and residual `..` substrings are collapsed to `_`. Result is capped
-/// at 64 bytes. Empty input becomes `"unnamed"`.
-///
-/// Known-good names like `"Steam"`, `"Acme Corp."`, or `"[Gmail]"`
-/// pass through unchanged. Non-ASCII characters become `_` (senders
-/// are almost always ASCII; acceptable tradeoff).
+/// `_`. Leading dots are stripped, residual `..` substrings are collapsed
+/// to `_`, and result length is capped at 64 bytes. Empty becomes `"unnamed"`.
 pub fn sanitize_folder_name(s: &str) -> String {
     let mut out: String = s
         .chars()
@@ -108,8 +83,7 @@ pub fn sanitize_folder_name(s: &str) -> String {
 }
 
 /// Ensure `path` exists and is a directory at mode 0700. If it already
-/// exists with looser permissions (0755, 0750, …), tightens them. Does
-/// not fail if the directory is already 0700.
+/// exists with looser permissions, tightens them.
 fn ensure_private_dir(path: &std::path::Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
     if !path.exists() {
@@ -123,24 +97,6 @@ fn ensure_private_dir(path: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Return `$XDG_RUNTIME_DIR`.
-///
-/// **Panics if `XDG_RUNTIME_DIR` is unset.** No silent fallback to
-/// `/tmp`: that directory is world-listable and readable, so any file
-/// placed there is visible to other local users, and predictable names
-/// enable symlink-squatting attacks. `XDG_RUNTIME_DIR` is 0700 per the
-/// XDG spec, guaranteed on any conformant Wayland session. If it is
-/// missing, the session is broken and the shell cannot safely write
-/// per-session state.
-///
-/// Creates the directory at 0700 if somehow absent (conformant sessions
-/// always pre-create it, but defense-in-depth costs nothing). Tightens
-/// any pre-existing looser mode.
-///
-/// This matches the behavior already implemented in
-/// `ipc::protocol::get_socket_path` and
-/// `overlays::lockscreen::coordinator::spawn` — those modules refused
-/// to fall back for exactly the same reason.
 fn chmod_mode(path: &std::path::Path, mode: u32) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
     let mut perms = std::fs::metadata(path)?.permissions();
@@ -153,14 +109,8 @@ fn chmod_mode(path: &std::path::Path, mode: u32) -> std::io::Result<()> {
 
 /// Overwrite `path` with `bytes` at mode 0600.
 ///
-/// Use this for shell-owned runtime files under `$XDG_RUNTIME_DIR`.
-/// Unlike `std::fs::write`, which inherits umask (022 → 0644), this
-/// guarantees 0600 so contents stay private even if the parent
-/// directory mode ever drifts.
-///
-/// Handles pre-existing files at 0644: `OpenOptions::mode()` only
-/// applies at file creation, so an explicit `chmod_mode` after open is
-/// required to fix stale permissions.
+/// Unlike `std::fs::write` (which inherits umask), this enforces 0600
+/// even on pre-existing files via an explicit `chmod_mode` after open.
 pub fn private_write_file(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
     use std::os::unix::fs::OpenOptionsExt as _;
@@ -174,10 +124,7 @@ pub fn private_write_file(path: &std::path::Path, bytes: &[u8]) -> std::io::Resu
     f.write_all(bytes)
 }
 
-/// Read N bytes from /dev/urandom. Falls back to a time+pid mix if
-/// /dev/urandom is unreadable (should never happen on Linux; portable
-/// code shouldn't panic on missing special files, but the fallback is
-/// only for collision resistance, not crypto).
+/// Read N bytes from /dev/urandom, falling back to a time+pid mix if unreadable.
 fn urandom_bytes<const N: usize>() -> [u8; N] {
     use std::io::Read;
     let mut buf = [0u8; N];
@@ -198,11 +145,7 @@ fn urandom_bytes<const N: usize>() -> [u8; N] {
     buf
 }
 
-/// 16-hex-char random token suitable for filename suffixes.
-///
-/// 8 bytes from `/dev/urandom` → 16 hex chars. Collision probability is
-/// negligible; the point is unpredictability, so a same-user sibling
-/// process cannot symlink-squat a path generated from this token.
+/// 16-hex-char random token suitable for unpredictable filename suffixes.
 pub fn random_token() -> String {
     let bytes = urandom_bytes::<8>();
     let mut out = String::with_capacity(16);
@@ -213,43 +156,19 @@ pub fn random_token() -> String {
 }
 
 /// `$XDG_RUNTIME_DIR/mbs-tmp`, created at 0700.
-///
-/// All transient shell files (screenshots, tray-menu handoffs, annotator
-/// intermediates) live here rather than directly in `/tmp`. Isolation
-/// comes from two layers: this directory is 0700, and every file within
-/// it gets a random suffix (see `mbs_unique_tmp`).
 pub fn mbs_tmp_dir() -> std::path::PathBuf {
     mbs_subdir("mbs-tmp")
 }
 
 /// Generate a unique path under `mbs_tmp_dir()`.
-///
-/// Format: `<mbs-tmp>/<prefix>-<16-hex>.<ext>`.
-///
-/// Does **not** create the file — callers must use `private_create_new`
-/// (or `private_write_new`) so the open is `O_CREAT | O_EXCL`, which
-/// atomically rejects symlinks and pre-existing files. Do not use
-/// `File::create()` on the returned path: that follows symlinks and
-/// would defeat the entire purpose.
+/// Callers must open via `private_create_new` / `private_write_new` (`O_CREAT | O_EXCL`).
 pub fn mbs_unique_tmp(prefix: &str, ext: &str) -> std::path::PathBuf {
     mbs_tmp_dir().join(format!("{}-{}.{}", prefix, random_token(), ext))
 }
 
-/// Open `path` for writing with `O_CREAT | O_EXCL` at mode 0600.
-///
-/// Fails with `AlreadyExists` if anything (regular file, symlink,
-/// directory) currently exists at `path`. This is the safe primitive for
-/// writes to attacker-predictable names: the syscall cannot be tricked
-/// into following a symlink or truncating a pre-placed file.
 /// True iff `path` resolves under `$XDG_RUNTIME_DIR/mbs-tmp/`.
-///
-/// Used by `--freeze-fragment` (item 6) and the annotator handoff
-/// (item 7) to reject attacker-controlled paths. Canonicalizes both
-/// sides so symlinks can't escape: a symlink inside mbs-tmp that
-/// points to `/etc/passwd` is rejected because the resolved target
-/// is outside. If `path` doesn't exist yet, canonicalizes its parent
-/// and appends the basename — handles `state_file`, which is created
-/// later by `write_state_file`.
+/// Used by `--freeze-fragment` and the annotator handoff to reject
+/// arbitrary paths. Canonicalizes parent when the file does not yet exist.
 pub fn path_is_under_mbs_tmp(path: &std::path::Path) -> bool {
     let root = mbs_tmp_dir();
     let Ok(canon_root) = std::fs::canonicalize(&root) else {
@@ -265,6 +184,8 @@ pub fn path_is_under_mbs_tmp(path: &std::path::Path) -> bool {
     canon.is_some_and(|c| c.starts_with(&canon_root))
 }
 
+/// Open `path` for writing with `O_CREAT | O_EXCL` at mode 0600.
+/// Fails with `AlreadyExists` if any file or symlink exists at `path`.
 pub fn private_create_new(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt as _;
     std::fs::OpenOptions::new()
@@ -274,21 +195,21 @@ pub fn private_create_new(path: &std::path::Path) -> std::io::Result<std::fs::Fi
         .open(path)
 }
 
-/// `private_create_new` + write all bytes. Convenience wrapper for the
-/// common "one-shot write to a unique path" case.
+/// `private_create_new` + write all bytes.
 pub fn private_write_new(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
     let mut f = private_create_new(path)?;
     f.write_all(bytes)
 }
 
+/// Return `$XDG_RUNTIME_DIR` (ensured 0700). Panics if unset — refuses `/tmp` fallback.
 pub fn mbs_runtime_dir() -> std::path::PathBuf {
     let dir = std::env::var_os("XDG_RUNTIME_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
             panic!(
                 "XDG_RUNTIME_DIR is not set — refusing to fall back to /tmp \
-                 for per-session state (see findings 04, 11, 12)"
+                 for per-session state"
             )
         });
     let _ = ensure_private_dir(&dir);
@@ -296,50 +217,13 @@ pub fn mbs_runtime_dir() -> std::path::PathBuf {
 }
 
 /// `mbs_runtime_dir().join(name)`, created at 0700 if missing.
-///
-/// Use this instead of `std::env::temp_dir()` or
-/// `std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp")` for
-/// any per-session file the shell writes. Common callers:
-/// `mbs_subdir("mbs-tray")`, `mbs_subdir("mbs-email-images")`, etc.
 pub fn mbs_subdir(name: &str) -> std::path::PathBuf {
     let path = mbs_runtime_dir().join(name);
     let _ = ensure_private_dir(&path);
     path
 }
 
-/// Walk `$XDG_RUNTIME_DIR` and tighten every `mbs-*` subdirectory
-/// (and its immediate children) to 0700/0600.
-///
-/// Does **not** create new dirs — only fixes pre-existing ones left
-/// over from builds that predated the `mbs_subdir` migration. Cheap
-/// (one readdir); call once at process startup.
-///
-/// This closes the gap left by the lazy `mbs_subdir` path: a
-/// directory from a pre-fix build stays at 0755 forever if its code
-/// path (e.g. `read_message` with images, `grim_capture`) never runs.
-/// Startup sweep fixes them unconditionally.
-/// Walk `$XDG_RUNTIME_DIR` and tighten every shell-owned file and
-/// directory to 0700 (dirs) / 0600 (files).
-///
-/// Shell-owned = name starts with `mbs-` or `moonbeauty`.
-/// Covers:
-///   - mbs-tray/, mbs-clip/, mbs-email-images/, mbs-annotator/ (dirs)
-///     and their immediate children
-///   - moonbeauty-{dnd,held-notifs.json,active-count,notif-cmd}
-///   - mbs-email-notified.txt
-///   - moon-beauty-lock-*.sock
-///
-/// Why this exists (findings 11, 12): a subdir created by a pre-fix
-/// build stays at 0755 forever if its code path never runs again (e.g.
-/// mbs-email-images only touched when opening an email with images).
-/// Startup sweep fixes them unconditionally.
-///
-/// Called from `MoonBeautyShellApp::new_app` in every process the
-/// shell spawns (bar, notif-surface, each standalone overlay).
 /// Prune standalone log files from `mbs_tmp_dir()`.
-///
-/// Each `spawn_standalone` call creates `mbs-standalone-<token>.log`.
-/// Without pruning, months of use accumulate hundreds of files on tmpfs.
 /// Keep the 20 most recent, delete anything older than 1 hour.
 pub fn prune_standalone_logs() {
     let dir = mbs_tmp_dir();
@@ -376,6 +260,8 @@ pub fn prune_standalone_logs() {
     }
 }
 
+/// Walk `$XDG_RUNTIME_DIR` and tighten every shell-owned (`mbs-*` / `moonbeauty*`)
+/// file and directory to 0700 / 0600 on startup.
 pub fn tighten_existing_runtime_state() {
     let Some(xdg) = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from) else {
         return;
@@ -421,18 +307,12 @@ pub fn is_safe_app_id(s: &str) -> bool {
 }
 
 /// Canonicalize an icon candidate and verify it stays under its
-/// declared root. Blocks symlink-to-sensitive-file — same class as the
-/// tray/watcher.rs version added for finding 27. Used by launcher.rs
-/// and any future icon resolver that wants the same guarantee.
+/// declared root (or `/nix/store/` on NixOS). Blocks symlink escapes.
 pub fn safe_icon_candidate(candidate: &std::path::Path, root: &std::path::Path) -> Option<PathBuf> {
     let canon = std::fs::canonicalize(candidate).ok()?;
     let canon_root = std::fs::canonicalize(root).ok()?;
-    // Finding 64: also accept canonical targets under /nix/store/.
-    // NixOS icons are symlinks from /run/current-system/sw/share/icons
-    // (or /usr/share/icons) into /nix/store/.../share/icons. The store
-    // is read-only and content-addressed — no attacker can drop files
-    // there. A hostile symlink to /etc/passwd or ~/.ssh/id_rsa still
-    // canonicalizes outside both roots and gets rejected.
+    // Also accept canonical targets under /nix/store/ because NixOS icons
+    // are symlinks into the read-only content-addressed store.
     const NIX_STORE: &str = "/nix/store/";
     if canon.starts_with(&canon_root) || canon.starts_with(NIX_STORE) {
         Some(canon)
@@ -445,11 +325,7 @@ pub fn safe_icon_candidate(candidate: &std::path::Path, root: &std::path::Path) 
     }
 }
 
-/// Read a JSON file with a size cap. Returns None on missing / oversized
-/// / malformed. Used by every user-state loader (settings, todos,
-/// reminders, held notifs, dictionaries, caches) to prevent a hostile
-/// same-user process from OOMing the shell at next launch with a
-/// multi-GB file.
+/// Read a JSON file with a size cap. Returns None on missing / oversized / malformed.
 pub fn read_json_capped<T: serde::de::DeserializeOwned>(
     path: &std::path::Path,
     max_bytes: u64,
@@ -472,10 +348,7 @@ pub fn read_json_capped<T: serde::de::DeserializeOwned>(
     }
 }
 
-/// Spawn a command and reap it in a detached thread. Prevents zombie
-/// accumulation when the Child handle is dropped without wait (finding
-/// 48). Suitable for fire-and-forget spawns like notify-send, xdg-open,
-/// wl-copy.
+/// Spawn a command and reap it in a detached thread to prevent zombie accumulation.
 pub fn spawn_and_reap(cmd: &mut std::process::Command) -> std::io::Result<u32> {
     let mut child = cmd.spawn()?;
     let pid = child.id();
@@ -486,10 +359,7 @@ pub fn spawn_and_reap(cmd: &mut std::process::Command) -> std::io::Result<u32> {
 }
 
 /// Like `spawn_and_reap`, but sets `PR_SET_PDEATHSIG(SIGKILL)` so the
-/// child cannot outlive the parent even on crash. Use for long-lived
-/// children that hold shell state (notif-surface). One-shots
-/// (notify-send, xdg-open) stay on plain spawn_and_reap — PDEATHSIG
-/// would kill them mid-flight if the shell exits first.
+/// child cannot outlive the parent even on crash.
 pub fn spawn_and_reap_pdeathsig(cmd: &mut std::process::Command) -> std::io::Result<u32> {
     #[cfg(target_os = "linux")]
     {
@@ -510,6 +380,8 @@ pub fn spawn_and_reap_pdeathsig(cmd: &mut std::process::Command) -> std::io::Res
     Ok(pid)
 }
 
+/// Resolve the current executable path, stripping the " (deleted)" suffix
+/// that `/proc/PID/exe` appends after `cargo build` replaces a running binary.
 pub fn resolve_exe() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -524,27 +396,15 @@ pub fn resolve_exe() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("moonbeauty"))
 }
 
-/// Finding 07 defense-in-depth: write a restrictive ImageMagick
-/// policy.xml to a private per-session dir and return that dir. The
-/// caller sets `MAGICK_CONFIGURE_PATH` to it so all ImageMagick child
-/// processes inherit the restriction.
-///
-/// Denylist: coders with RCE history (MVG, MSL, MSL2, MSVG, PS/EPS/PDF/
-/// XPS via ghostscript delegate, URL-fetching pseudo-coders, PLT), plus
-/// a blanket delegate+filter block and `@file` inclusion. Whitelisted
-/// coders (PNG, MPR, XC, etc.) are untouched, so annotator/watermark
-/// continue to work.
-///
-/// Idempotent. Returns `None` only if `$XDG_RUNTIME_DIR` is unset — the
-/// caller skips setting the env var in degraded sessions rather than
-/// crashing the whole shell.
+/// Write a restrictive ImageMagick policy.xml to a private per-session dir
+/// and return that dir so child processes can inherit `MAGICK_CONFIGURE_PATH`.
 pub fn ensure_imagemagick_policy() -> Option<PathBuf> {
     let xdg = std::env::var_os("XDG_RUNTIME_DIR")?;
     let dir = PathBuf::from(xdg).join("mbs-imagemagick");
     let _ = ensure_private_dir(&dir);
     let policy = dir.join("policy.xml");
     const CONTENT: &str = r#"<policymap>
-  <!-- Finding 07: block delegate + filter execution (ghostscript, rsvg, etc.) -->
+  <!-- Block delegate + filter execution (ghostscript, rsvg, etc.) -->
   <policy domain="delegate" rights="none" pattern="*" />
   <policy domain="filter" rights="none" pattern="*" />
 
@@ -729,11 +589,6 @@ mod runtime_dir_tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
-    /// Only meaningful when running under a real Wayland session (test
-    /// runner inherits XDG_RUNTIME_DIR). Under `nix develop` it may be
-    /// set; in CI it may not. Skip if absent — the two pure tests above
-    /// already prove the helper, and the runtime sweep in Command B is
-    /// verified separately at the shell level.
     #[test]
     fn mbs_subdir_lands_under_xdg() {
         let Some(xdg) = std::env::var_os("XDG_RUNTIME_DIR") else {
@@ -934,18 +789,7 @@ mod unique_tmp_tests {
 }
 
 /// Chmod the shell's user-content files and their parent directories to
-/// safe permissions. Idempotent; prints only when a change is made.
-///
-/// Files that contain user content (settings including password_cmd,
-/// notes, todos, clipboard index with content previews, friend profiles
-/// with tts templates, local_sort sender display names, reminders) were
-/// previously written with `fs::write`, which inherits umask (022 -> 0644).
-/// That made them world-readable on any host with a default umask. The
-/// save paths now use `private_write_file`; this sweep fixes pre-existing
-/// files that were written by a pre-fix build and never touched again.
-///
-/// Directories are tightened to 0700 so future leaks via any residual
-/// 0644 file are contained by the parent directory.
+/// safe permissions (0600 files, 0700 dirs). Idempotent.
 pub fn tighten_user_state_files() {
     use std::os::unix::fs::PermissionsExt as _;
     fn chmod(p: &std::path::Path, mode: u32) {

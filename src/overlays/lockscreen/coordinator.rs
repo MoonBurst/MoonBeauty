@@ -14,7 +14,7 @@
 //!   ←  Success              auth succeeded, prepare to be killed
 //!
 //! Hotplug: subscribe to `swaymsg -t subscribe -m '["output"]'`.
-//! `added` → spawn child; `removed` → kill child.
+//! `added` → spawn child; `removed` → keep child as blocker.
 
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
@@ -69,10 +69,7 @@ fn resolve_user() -> String {
         .clone()
 }
 
-/// First 8 hex chars of SHA-256(input). Used so the coordinator log shows
-/// a stable fingerprint of the captured password — the user can compute the
-/// same hash of their real password to definitively prove the buffer is
-/// correct (or not) without ever logging the plaintext.
+/// First 8 hex chars of SHA-256(input) for debug logging without logging plaintext.
 fn sha256_prefix(s: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
@@ -284,7 +281,7 @@ impl LockCoordinator {
             eprintln!("[lock-coord] FATAL: XDG_RUNTIME_DIR is not set; refusing to place lockscreen socket in shared /tmp");
             std::process::exit(1);
         });
-        eprintln!("[lock-coord-v225] START pid={}", std::process::id());
+        eprintln!("[lock-coord] START pid={}", std::process::id());
         let pid = std::process::id();
         let socket_path =
             PathBuf::from(&runtime_dir).join(format!("moon-beauty-lock-{}.sock", pid));
@@ -319,8 +316,7 @@ impl LockCoordinator {
         // Startup diagnostic: report what auth strategies are usable.
         // Logs a clear WARNING when no strategy can succeed — the
         // lockscreen will fail closed (refuse all passwords) rather than
-        // silently accept any input, and the warning tells the user
-        // exactly which config line to fix.
+        // silently accept any input.
         {
             let pam_bin = find_bin("pamtester");
             let sudo_bin = find_bin("sudo");
@@ -346,14 +342,14 @@ impl LockCoordinator {
             }
         }
 
-        eprintln!("[lock-coord-v225] binding socket at {:?}", socket_path);
+        eprintln!("[lock-coord] binding socket at {:?}", socket_path);
         let listener = match std::os::unix::net::UnixListener::bind(&socket_path) {
             Ok(l) => {
                 let _ = std::fs::set_permissions(&socket_path, {
                     use std::os::unix::fs::PermissionsExt;
                     std::fs::Permissions::from_mode(0o600)
                 });
-                eprintln!("[lock-coord-v225] socket bound OK");
+                eprintln!("[lock-coord] socket bound OK");
                 l
             }
             Err(e) => {
@@ -382,7 +378,7 @@ impl LockCoordinator {
                     *primary_output.lock().unwrap() = Some(output.clone());
                 }
                 eprintln!(
-                    "[lock-coord-v225] spawning child for output={:?} primary={}",
+                    "[lock-coord] spawning child for output={:?} primary={}",
                     output, is_primary
                 );
                 Self::spawn_child(output, &socket_path, &children, is_primary);
@@ -404,11 +400,7 @@ impl LockCoordinator {
             let mut peers: Vec<Peer> = Vec::new();
             let mut buffer = String::new();
             let mut next_id: usize = 1;
-            // Finding 30: PAM/sudo account-lockout DoS mitigation.
-            // A hostile same-user process can open the coordinator socket
-            // and spam Submit to force N failed auths, tripping
-            // pam_faillock/sudo lockout for the legitimate user.
-            // Exponential backoff caps the attacker's rate to ~1/16s.
+            // Rate-limit Submit to mitigate PAM/sudo account-lockout DoS.
             let mut last_failed_submit: Option<std::time::Instant> = None;
             let mut fail_streak: u32 = 0;
 
@@ -440,14 +432,9 @@ impl LockCoordinator {
                     match change {
                         "added" => {
                             tokio::time::sleep(Duration::from_millis(300)).await;
-                            // Kill any blocker/orphan before spawning fresh.
-                            // Brief gap here is unavoidable; the important
-                            // guarantee is that we get a working child.
                             let is_primary = {
                                 let mut po = primary_output_watch.lock().unwrap();
                                 if po.as_deref() == Some(output.as_str()) {
-                                    // Replacing the primary; new one is
-                                    // also primary.
                                     *po = None;
                                     true
                                 } else if po.is_none() {
@@ -471,13 +458,9 @@ impl LockCoordinator {
                         }
                         "removed" => {
                             // Do NOT kill the child. On TTY switch, sway
-                            // may emit "removed" for outputs that are
-                            // temporarily unavailable. Killing the child
-                            // here creates an unlocked-screen window until
-                            // "added" fires and a fresh child boots.
-                            // Instead, leave the child alive as a blocker.
-                            // The "added" branch below cleans it up before
-                            // spawning a fresh one.
+                            // may emit "removed" for temporarily unavailable
+                            // outputs; keeping the child alive as a blocker
+                            // avoids an unlocked-screen window.
                             eprintln!(
                                 "[lock-coord] hotplug: output removed: {:?} (child kept as blocker)",
                                 output
@@ -490,18 +473,10 @@ impl LockCoordinator {
 
 
             // ── TTY return watcher ──
-            // When the user switches to another VT and back, sway drops
-            // the layer surfaces held by our lockscreen children but does
-            // not send Closed. The children stay alive with no visible
-            // surface. We capture the desktop TTY at watcher-startup and
-            // respawn on return-to-desktop. Switching away does nothing
-            // (surfaces hidden anyway).
-            //
-            // Safe now that only the primary child is Exclusive: three
-            // simultaneous Exclusive surfaces was what caused the earlier
-            // focus-flap regression. With primary/secondary split, respawn
-            // order is primary-first (300ms settle, then secondaries 200ms
-            // apart) so sway has clean windows to composite.
+            // When switching to another VT and back, sway drops the layer
+            // surfaces held by lockscreen children without sending Closed.
+            // Respawn primary-first on return-to-desktop so sway gets fresh
+            // surfaces with only one Exclusive keyboard grab.
             let children_tty = children.clone();
             let socket_tty = socket_path.clone();
             let primary_tty = primary_output.clone();
@@ -577,11 +552,6 @@ impl LockCoordinator {
             });
 
             // ── Watchdog: respawn dead children ──
-            // A dead child = dead lock surface = visible desktop = the
-            // security hole the user reported. This polls every 200ms;
-            // worst-case unlock window is ~200ms + child boot time.
-            // Mitigation, not cure — check /tmp/mbs-standalone-lockscreen.log
-            // for the underlying panic (RUST_BACKTRACE is set on children).
             let children_watchdog = children.clone();
             let socket_watchdog = socket_path.clone();
             let primary_output_watchdog = primary_output.clone();
@@ -634,10 +604,8 @@ impl LockCoordinator {
             });
 
             // ── Signal handlers ──
-            // logind/PAM/session events sometimes send SIGUSR1/USR2/SIGHUP.
-            // Default disposition is TERMINATE. That would kill the
-            // coordinator, orphan every child, and unlock the screen.
-            // Ignore them (log for diagnosis).
+            // Ignore SIGUSR1/USR2/SIGHUP so session events don't kill the
+            // coordinator and orphan lockscreen children.
             let children_sig = children.clone();
             let socket_path_sig = socket_path.clone();
             tokio::spawn(async move {
@@ -692,7 +660,7 @@ impl LockCoordinator {
                     Some((peer_id, msg)) = event_rx.recv() => {
                         match msg {
                             LockIpc::Key(s) => {
-                                // Finding 35: cap buffer + per-message length.
+                                // Cap buffer and per-message length.
                                 const MAX_BUF: usize = 256;
                                 const MAX_PER_KEY: usize = 64;
                                 let room = MAX_BUF.saturating_sub(buffer.chars().count());
@@ -723,30 +691,9 @@ impl LockCoordinator {
                                 Self::broadcast(&mut peers, &LockIpc::BufferUpdate(n)).await;
                             }
                             LockIpc::Submit => {
-                                // Finding 30: rate-limit auth spawns to prevent
-                                // hostile same-user Submit spam from tripping
-                                // PAM/sudo account-lockout (pam_faillock).
-                                //
-                                // Empty buffer: rejected BEFORE the streak
-                                // counter so an attacker sending empty Submit
-                                // can't inflate fail_streak and rate-limit the
-                                // legit user without any real PAM attempt.
-                                //
-                                // Backoff: min(1s * 2^fail_streak, 16s). First
-                                // attempt is never rate-limited.
-                                //
-                                // Correction to earlier claim: this caps at 16s
-                                // after 4 failures, but a same-user attacker
-                                // holding the coordinator socket can still reach
-                                // 5+ submits in ~3s (1+2+4), which trips
-                                // pam_faillock's tighter Fedora/RHEL default of
-                                // 3-per-10min. The backoff defends against rapid
-                                // PAM spawn from a compromised shell, not against
-                                // a determined same-user attacker who already has
-                                // socket access. Mitigating that fully requires a
-                                // hard cap at 2 failures (breaks legitimate UX)
-                                // or a pam_faillock exemption for the pamtester
-                                // service. Neither is implemented.
+                                // Exponential backoff (1s * 2^fail_streak, capped at 16s)
+                                // limits rapid PAM/sudo auth spawns. Empty submissions are
+                                // rejected before incrementing fail_streak.
                                 let now = std::time::Instant::now();
                                 let exponent = fail_streak.min(4);
                                 let min_delay = Duration::from_millis(
@@ -756,9 +703,7 @@ impl LockCoordinator {
                                     .map(|prev| now.duration_since(prev) < min_delay)
                                     .unwrap_or(false);
                                 if buffer.is_empty() {
-                                    eprintln!(
-                                        "[lock-coord] ignoring empty Submit (finding 30)"
-                                    );
+                                    eprintln!("[lock-coord] ignoring empty Submit");
                                 } else if too_soon {
                                     eprintln!(
                                         "[lock-coord] Submit rate-limited (fail_streak={}, min_delay={:?})",
@@ -776,9 +721,7 @@ impl LockCoordinator {
                                         tokio::time::sleep(Duration::from_millis(200)).await;
                                         Self::kill_all(&children);
                                         let _ = std::fs::remove_file(&socket_path);
-                                        // std::process::exit skips Drop. Zeroize
-                                        // explicitly so the successful password
-                                        // isn't left in the process's freed heap.
+                                        // std::process::exit skips Drop; zeroize explicitly.
                                         buffer.zeroize();
                                         std::process::exit(0);
                                     } else {
@@ -788,12 +731,7 @@ impl LockCoordinator {
                                             "[lock-coord] auth failed (fail_streak={})",
                                             fail_streak
                                         );
-                                        // Zeroize before clear: String::clear
-                                        // only sets len=0, leaving the password
-                                        // bytes in the freed-but-not-overwritten
-                                        // capacity. A same-user process with
-                                        // ptrace access can recover the password
-                                        // from /proc/<pid>/mem otherwise.
+                                        // Zeroize before clear so password bytes aren't left in freed capacity.
                                         buffer.zeroize();
                                         buffer.clear();
                                         Self::broadcast(&mut peers, &LockIpc::Reset).await;
@@ -886,9 +824,7 @@ impl LockCoordinator {
             return false;
         }
 
-        // ── Debug bypass: compile-time opt-in only (finding 05) ──
-        // Release builds: no code path exists. To diagnose in a dev
-        // build: cargo build --features lock-debug-bypass
+        // ── Debug bypass: compile-time opt-in only ──
         #[cfg(feature = "lock-debug-bypass")]
         if let Ok(debug_pass) = std::env::var("MBS_LOCK_DEBUG_PASS") {
             if !debug_pass.is_empty() && debug_pass == clean {
@@ -907,15 +843,10 @@ impl LockCoordinator {
             eprintln!("[lock-coord] auth attempt: len={}", clean.chars().count());
         }
 
-        // Zeroizing: overwrites the password bytes on drop, including
-        // through early returns and panics. Without this, the freshly
-        // formatted String sits in freed heap until overwritten.
+        // Zeroizing overwrites the password bytes on drop, including on early returns.
         let pass_line = Zeroizing::new(format!("{}\n", clean));
 
         // ── Strategy 0: pamtester ──
-        // Talks to real PAM auth (the same stack login(1) uses). The only
-        // strategy in this file guaranteed to require the actual password.
-        // Try it first.
         {
             let user = resolve_user();
             let pam_bin =
@@ -964,10 +895,6 @@ impl LockCoordinator {
         }
 
         // ── Strategy 1: sudo -S -k -v, guarded by NOPASSWD check ──
-        // `sudo -v` returns 0 with ANY input on hosts where the invoking
-        // user has a NOPASSWD sudoers rule (common: wheel, docker,
-        // podman). Detect this and skip sudo entirely — it cannot serve
-        // as an auth oracle when it never asks for a password.
         if sudo_is_nopasswd() {
             eprintln!("[lock-coord] sudo is NOPASSWD — refusing to use it as auth oracle");
         } else {
@@ -1014,15 +941,6 @@ impl LockCoordinator {
                 Err(e) => eprintln!("[lock-coord] sudo spawn: {}", e),
             }
         }
-
-        // Strategies 2 (script + sudo -k -v) and 3 (su -c true <self>)
-        // are REMOVED:
-        //   - Strategy 2 has identical bypass semantics to the sudo check
-        //     above (a NOPASSWD rule makes both succeed with any input)
-        //     and is redundant with the guarded sudo.
-        //   - Strategy 3 succeeds WITHOUT prompting when <user> equals
-        //     the invoking user (no user transition = no PAM check), so
-        //     it is a bypass on every Linux host with util-linux su.
 
         eprintln!("[lock-coord] ALL AUTH STRATEGIES FAILED");
         false

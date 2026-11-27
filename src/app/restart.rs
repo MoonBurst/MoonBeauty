@@ -2,7 +2,7 @@
 //!
 //! Three-path restart logic:
 //!   1. systemctl user unit active → kill ppid=1 orphans, then delegate
-//!   2. no unit → pkill bar + watchers + tooltips, then respawn
+//!   2. no unit → pkill bar + watchers + notif-surface, then respawn
 //!   3. exit immediately if --restart-bar absent
 
 use moonbeauty::libraries::process::resolve_exe;
@@ -10,11 +10,9 @@ use moonbeauty::libraries::process::resolve_exe;
 pub fn run(args: &[String]) {
     // Restart bar (used by Settings when changing monitor)
     if args.iter().any(|a| a == "--restart-bar") {
-        // F1: Under systemd with Restart=always, pkill+spawn races the
-        // service auto-restart and produces two bars for ~1s. But an
-        // orphaned bar (parent died → re-parented to PID 1, no unit,
-        // `systemctl status` says not-found) is invisible to every
-        // scope-aware check. So:
+        // Under systemd with Restart=always, pkill+spawn races the
+        // service auto-restart and produces two bars for ~1s. An orphaned
+        // bar (re-parented to PID 1, no unit) is invisible to scope checks:
         //   1. Kill orphans first (ppid=1, not under any unit)
         //   2. Delegate to systemctl if a unit is active
         //   3. Fall through to pkill+spawn otherwise
@@ -62,24 +60,21 @@ pub fn run(args: &[String]) {
             std::process::exit(0);
         }
 
-        // Kill orphaned clipboard watchers FIRST. Their cmdline ends with
-        // "--clipboard-ingest" (not "moonbeauty$"), so the
-        // anchored shell pkill below never matches them. Without this,
-        // every restart spawns a new watcher and the clipboard UI ends
-        // up with N copies of each item after N restarts.
+        // Kill orphaned clipboard watchers first: their cmdline ends with
+        // "--clipboard-ingest", so the anchored shell pkill below misses them
+        // and restarts would create duplicate clipboard entries.
         let _ = std::process::Command::new("pkill")
             .args(["-f", "wl-paste --watch.*moonbeauty"])
             .status();
-        // Finding 22: anchored patterns — require path-prefix before the
-        // binary name and end-of-argv after the flag. Prevents matching
-        // scripts / editors that merely mention the strings.
+        // Anchored patterns require a path-prefix before the binary name
+        // and end-of-argv after the flag so unrelated scripts aren't matched.
         let _ = std::process::Command::new("pkill")
             .args(["-f", "(^|/)(moonbeauty|moon-beauty-shell)$"])
             .status();
         let _ = std::process::Command::new("pkill")
             .args([
                 "-f",
-                "(^|/)(moonbeauty|moon-beauty-shell) (--(sys|weather|alarm|info)-tooltip|--tray-popup|--notif-surface)$",
+                "(^|/)(moonbeauty|moon-beauty-shell) --notif-surface$",
             ])
             .status();
         std::thread::sleep(std::time::Duration::from_millis(400));

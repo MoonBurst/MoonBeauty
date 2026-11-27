@@ -165,10 +165,8 @@ pub struct ParallelogramBg {
     pub border_color: Color,
     pub border_width: f32,
     /// Per-frame counter. Iced 0.14's reactive renderer skips repaints
-    /// when the widget tree is identical. Bumping this every view() call
-    /// changes the hidden marker text, forcing the tree to diff and the
-    /// canvas to redraw. Without this, animated tooltips tick at ~20fps
-    /// instead of 60fps because iced coalesces identical frames.
+    /// when the widget tree is identical. Varying a layout widget via this
+    /// counter forces the tree to diff and the canvas to redraw at 60fps.
     pub frame: u64,
 }
 
@@ -189,14 +187,9 @@ impl ParallelogramBg {
             .width(Length::Fixed(w))
             .height(Length::Fixed(h))
             .into();
-        // V228: force tree diff. Iced 0.14 skips repaints when widget trees are
-        // identical (reactive rendering). Bumping a hidden text widget's content
-        // every frame invalidates the enclosing Stack, forcing the canvas below
-        // it to redraw. Without this, tick-only animation runs at ~20fps.
-        // Force a tree diff using a zero-size Space widget. Varying its
-        // width by a fraction of a pixel changes the layout tree, which
-        // forces iced to redraw the canvas underneath. This bypasses
-        // cosmic-text shaping entirely, saving 2-3ms per frame.
+        // Force a tree diff using a zero-height Space widget whose width
+        // toggles by frame % 2 so Iced 0.14 redraws the canvas at 60fps
+        // without cosmic-text shaping overhead.
         let marker_w = (self.frame % 2) as f32;
         let marker_el: Element<'static, Message> = iced::widget::Space::new()
             .width(Length::Fixed(marker_w))
@@ -561,5 +554,29 @@ impl<Message> canvas::Program<Message> for OctagonCanvas {
         }
 
         vec![frame.into_geometry()]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compute, compute_close_from};
+
+    #[test]
+    fn mid_open_close_does_not_snap_above_captured_size() {
+        let mid = compute(90.0, 100.0, 380.0, 420.0, 12.0, 42.0, 180.0, 162.0);
+        let closed = compute_close_from(
+            0.0,
+            mid.w,
+            mid.h,
+            mid.opacity,
+            100.0,
+            380.0,
+            12.0,
+            42.0,
+            180.0,
+        );
+        assert!((closed.w - mid.w).abs() < 0.01);
+        assert!((closed.h - mid.h).abs() < 0.01);
+        assert!((closed.opacity - mid.opacity).abs() < 0.01);
     }
 }

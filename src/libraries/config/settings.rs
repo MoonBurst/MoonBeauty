@@ -72,7 +72,7 @@ fn default_profile_color() -> String {
 }
 
 pub fn find_friend_profiles_path() -> PathBuf {
-    // Finding 20: XDG data only — cwd-relative candidates dropped.
+    // XDG data only (no cwd-relative fallback).
     let base = dirs::data_dir().expect(
         "XDG_DATA_HOME or HOME must be set; refusing to load friend_profiles.json from cwd",
     );
@@ -97,7 +97,7 @@ pub fn find_friend_profiles_path() -> PathBuf {
 }
 
 pub fn load_friend_profiles() -> Vec<FriendProfile> {
-    // Finding 47: 4 MB cap.
+    // 4 MB cap.
     crate::libraries::process::read_json_capped::<Vec<FriendProfile>>(
         &find_friend_profiles_path(),
         4 * 1024 * 1024,
@@ -120,8 +120,10 @@ pub fn save_friend_profiles(profiles: &[FriendProfile]) -> Result<(), std::io::E
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ScreenshotSaveFormat {
     /// Fast: ~0.5s for 4K, ~15MB. Universally pasteable.
+    #[default]
     Png,
     /// Balanced: ~2-4s for 4K, ~4MB.
     JxlFast,
@@ -129,11 +131,6 @@ pub enum ScreenshotSaveFormat {
     JxlBest,
 }
 
-impl Default for ScreenshotSaveFormat {
-    fn default() -> Self {
-        Self::Png
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GpuThresholds {
@@ -729,10 +726,7 @@ impl ShellSettings {
 
     pub fn load() -> Self {
         let path = Self::config_path();
-        // Log only under explicit debug — LockscreenOverlay::view calls
-        // this every frame, and 3 lock children × 60 fps = 180 log lines
-        // per second floods the log past anything useful. Gate behind
-        // MBS_SETTINGS_DEBUG so diagnostics can still turn it on.
+        // Gate behind MBS_SETTINGS_DEBUG so 60fps view() calls don't spam logs.
         if std::env::var_os("MBS_SETTINGS_DEBUG").is_some() {
             eprintln!(
                 "[settings] config_path = {:?} exists={}",
@@ -740,7 +734,7 @@ impl ShellSettings {
                 path.exists()
             );
         }
-        // Finding 47: 2 MB cap on settings.json.
+        // 2 MB cap on settings.json.
         if let Some(mut settings) =
             crate::libraries::process::read_json_capped::<ShellSettings>(&path, 2 * 1024 * 1024)
         {
@@ -800,8 +794,6 @@ impl ShellSettings {
         fs::rename(tmp_path, &path)?;
 
         let _ = save_friend_profiles(&self.friend_profiles);
-        // Finding 15: gate the completion log too (write line above is
-        // already gated by MBS_SETTINGS_DEBUG).
         if std::env::var_os("MBS_SETTINGS_DEBUG").is_some() {
             eprintln!("[save] OK -> {:?}", path);
         }

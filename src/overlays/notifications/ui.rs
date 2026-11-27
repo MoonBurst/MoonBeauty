@@ -1,381 +1,17 @@
 use chrono::Local;
-use iced::widget::{button, column, container, pin, row, scrollable, text, MouseArea, Stack};
-use iced::{Alignment, Element, Length, Padding};
+use iced::Element;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::Instant;
 
+use super::icon_resolve::{avatar_path_for, resolve_desktop_icon, resolve_icon_name};
+use super::view::{history_icon_hex_size, history_row_height, HISTORY_ROW_GAP};
 use crate::libraries::config::settings::ShellSettings;
-use crate::libraries::config::theme::{hex_to_color, ShellTheme};
-use crate::libraries::style::shape_box::{AngledHexGeometry, ShapeBox, ShapeType, SlantSide};
-use crate::libraries::style::TextExt;
-
-// ── Icon resolution from desktop entries ──────────────────────────
-//
-// Real system notifications don't carry file paths — they carry a
-// `desktop_entry` hint like "firefox" or "org.gnome.Nautilus".
-// Resolve that to the actual icon PNG/SVG by:
-//   1. Finding the .desktop file
-//   2. Parsing its Icon= field
-//   3. Locating the icon in the theme search paths
-//
-// Falls back to app_name-based lookup if desktop_entry is missing.
-
-/// Search the standard freedesktop icon theme dirs for a file named
-/// `<name>.{png,svg,xpm}`.
-///
-/// **When to use this:** for notification avatars (chat app icons, email
-/// client icons) and anywhere else that has an icon *name* to resolve
-/// (e.g. from a `.desktop` file's `Icon=` field).
-///
-/// **Difference from `bar::tray::watcher::resolve_icon`:**
-///   - This function does NOT normalize the icon bytes. It returns the
-///     source path directly.
-///   - The tray version ALWAYS runs the file through ImageMagick
-///     (`-strip`) and appends a content hash, because iced's image
-///     cache is keyed on path and the tray's files live for the whole
-///     session. Notifications are rendered once per toast — a cache
-///     hit is less critical, so we skip the normalization cost.
-///   - The tray version is stricter about decode validity because a
-///     broken icon means a permanently-broken capsule slot; a broken
-///     notification avatar just falls back to the default icon.
-///
-/// **Theme coverage:** hicolor first, then Adwaita/breeze/Papirus/Yaru/
-/// Numix. Also `/usr/share/pixmaps` and Nix paths for flat/old apps.
-fn resolve_icon_name(name: &str) -> Option<String> {
-        crate::libraries::process::resolve_icon_path(name).map(|p| p.to_string_lossy().into_owned())
-    }
-
-/// Given a desktop-entry hint (e.g. `"firefox"`, `"org.mozilla.firefox"`),
-/// find its `.desktop` file under the standard applications dirs, read
-/// the `Icon=` field from `[Desktop Entry]`, then resolve that icon name
-/// via `resolve_icon_name`.
-///
-/// **When to use this:** when the notification's `desktop_entry` hint is
-/// available (from the `desktop-entry` hint field of the D-Bus Notify
-/// call). This is the most reliable way to get an app's *actual* icon —
-/// SNI/tray apps sometimes use a different icon than the launcher entry,
-/// but for notifications the desktop-entry is authoritative.
-///
-/// **Fallback order** for notification avatars in push_notification:
-///   1. Friend profile avatar (`resources/<name>/<name>.png`)
-///   2. `resources/fallback.png`
-///   3. `resolve_desktop_icon(desktop_entry)` — this function
-///   4. `resolve_icon_name(app_name)` — pure name lookup
-///
-/// So this is called before the name-only fallback because a matching
-/// `.desktop` file gives higher confidence than a guessed icon name.
-fn resolve_desktop_icon(entry: &str) -> Option<String> {
-    let clean = entry.trim_end_matches(".desktop").trim();
-    if clean.is_empty() {
-        return None;
-    }
-    // Reject traversal and absolute paths in desktop_entry hint (finding 08).
-    if clean.starts_with('/') || clean.contains("..") || clean.contains('/') || clean.contains('\\')
-    {
-        crate::dbg_log!("[notif-icon] reject unsafe desktop_entry: {:?}", entry);
-        return None;
-    }
-
-    let home = dirs::home_dir()?;
-    let user = std::env::var("USER").unwrap_or_else(|_| "user".into());
-    let dirs = vec![
-        PathBuf::from("/etc/profiles/per-user")
-            .join(&user)
-            .join("share/applications"),
-        PathBuf::from("/run/current-system/sw/share/applications"),
-        PathBuf::from("/usr/share/applications"),
-        home.join(".local/share/applications"),
-        home.join(".nix-profile/share/applications"),
-        PathBuf::from("/var/lib/flatpak/exports/share/applications"),
-        home.join(".local/share/flatpak/exports/share/applications"),
-    ];
-
-    // Try direct filename matches first (fast path). Cover common variants:
-    //   firefox          → firefox.desktop
-    //   org.mozilla.firefox → org.mozilla.firefox.desktop
-    //   org.mozilla.firefox.desktop → already has extension
-    let candidates = [
-        format!("{}.desktop", clean),
-        format!("{}.desktop", clean.to_lowercase()),
-    ];
-
-    for dir in &dirs {
-        for fname in &candidates {
-            let path = dir.join(fname);
-            if let Some(icon) = read_icon_from_desktop(&path) {
-                return Some(icon);
-            }
-        }
-    }
-
-    // Fallback: scan ALL .desktop files in these dirs and look for one
-    // whose Name= (case-insensitive) matches `clean` or whose filename
-    // stem equals `clean`. Handles cases like app_name="Mozilla Firefox"
-    // matching "firefox.desktop" whose Name="Firefox".
-    let lower_target = clean.to_lowercase();
-    for dir in &dirs {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) != Some("desktop") {
-                continue;
-            }
-            let stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_lowercase();
-            let stem_matches = stem == lower_target
-                || stem.ends_with(&format!(".{}", lower_target))
-                || lower_target.ends_with(&format!(".{}", stem));
-
-            // Read the Name= field from the main section
-            let Ok(content) = std::fs::read_to_string(&path) else {
-                continue;
-            };
-            let mut name_match = false;
-            let mut in_main = false;
-            let mut icon_line: Option<String> = None;
-            for line in content.lines() {
-                let line = line.trim();
-                if line.starts_with('[') {
-                    in_main = line.eq_ignore_ascii_case("[Desktop Entry]");
-                    continue;
-                }
-                if !in_main {
-                    continue;
-                }
-                if let Some(v) = line.strip_prefix("Name=") {
-                    let n = v.trim().to_lowercase();
-                    if n == lower_target || lower_target.contains(&n) || n.contains(&lower_target) {
-                        name_match = true;
-                    }
-                }
-                if let Some(v) = line.strip_prefix("Icon=") {
-                    if icon_line.is_none() {
-                        icon_line = Some(v.trim().to_string());
-                    }
-                }
-            }
-            if !(stem_matches || name_match) {
-                continue;
-            }
-            if let Some(icon_name) = icon_line {
-                if let Some(p) = resolve_icon_name(&icon_name) {
-                    return Some(p);
-                }
-            }
-        }
-    }
-
-    // Last resort: use the entry itself as an icon name (covers cases
-    // where the icon exists but no .desktop file does).
-    resolve_icon_name(clean)
-}
-
-/// Helper: read Icon= from a specific .desktop file's [Desktop Entry]
-/// section, then resolve the icon name to a path.
-fn read_icon_from_desktop(path: &std::path::Path) -> Option<String> {
-    let content = std::fs::read_to_string(path).ok()?;
-    let mut in_main = false;
-    for line in content.lines() {
-        let line = line.trim();
-        if line.starts_with('[') {
-            in_main = line.eq_ignore_ascii_case("[Desktop Entry]");
-            continue;
-        }
-        if !in_main {
-            continue;
-        }
-        if let Some(v) = line.strip_prefix("Icon=") {
-            let icon_name = v.trim();
-            if icon_name.is_empty() {
-                continue;
-            }
-            return resolve_icon_name(icon_name);
-        }
-    }
-    None
-}
-
-// ── History row geometry (single source of truth) ─────────────────
-// Used by both view_history() and scroll_offset_for_selected() so
-// scroll always lands on the correct row regardless of text length.
-// Icon size is now dynamic — passed in from settings.launcher_icon_size
-// so the history icons match the launcher exactly.
-const HISTORY_ROW_PAD_X: f32 = 20.0;
-const HISTORY_ROW_PAD_Y: f32 = 12.0;
-const HISTORY_ROW_GAP: f32 = 10.0;
-const HISTORY_ROW_MIN_H: f32 = 72.0;
-
-/// Hexagon wrap size around an icon. Must satisfy:
-///   interior = hex_size - 2*cut ≥ icon_size
-///   cut = 10% of hex_size  →  interior = 0.80 * hex_size
-///   hex_size ≥ 1.25 * icon_size.
-/// Use 1.40 for visible margin.
-fn history_icon_hex_size(icon_size: f32) -> f32 {
-    icon_size * 1.40
-}
-
-/// Compute the (shape, outer box size) for the toast icon wrapper.
-/// `notif_shape` is the same field used for the notification card, so
-/// the icon visually follows the card it lives in. `icon_size` is the
-/// user-configured inner icon size (settings.notif_icon_size).
-///
-/// Hex uses the same 1.40× rule as history avatars so the octagon
-/// cut corners do not clip the icon.
-fn notif_icon_box_shape(notif_shape: &str, icon_size: f32) -> (ShapeType, f32) {
-    let s = icon_size.clamp(16.0, 128.0);
-    match notif_shape.to_lowercase().as_str() {
-        "hex" | "hexagon" => {
-            // 1.25 is the exact minimum to keep the square icon's
-            // corners from being clipped by the hexagon's cut corners
-            // (interior = box - 2*cut = 0.80 * box; 0.80 * 1.25 = 1.0).
-            // 1.28 adds a hair of margin for the border and antialiasing.
-            // Previously 1.40 left a visible gap between icon and frame.
-            let hex_size = s * 1.28;
-            let min_cut = ((hex_size - s) as u16).saturating_add(1);
-            let cut = ((hex_size * 0.25) as u16).max(min_cut).max(6);
-            (ShapeType::Hexagon { cut }, hex_size)
-        }
-        "slant" => (
-            ShapeType::Slant {
-                left: SlantSide::Right,
-                right: SlantSide::Right,
-            },
-            s + 12.0,
-        ),
-        "flat" => (ShapeType::Flat, s + 4.0),
-        _ => {
-            let radius = ((s * 0.15) as u16).max(4);
-            (ShapeType::Rounded(radius), s + 8.0)
-        }
-    }
-}
-
-fn history_row_height(
-    toast: &NotificationToast,
-    row_w: f32,
-    fs: f32,
-    fs_sm: f32,
-    icon_size: f32,
-) -> f32 {
-    let icon_hex_size = history_icon_hex_size(icon_size);
-    let text_area_w = (row_w - icon_hex_size - 16.0 - HISTORY_ROW_PAD_X * 2.0).max(100.0);
-    let char_w = (fs_sm * 0.55).max(6.0);
-    let chars_per_line = (text_area_w / char_w).max(20.0) as usize;
-    let body_len = toast.body.chars().count();
-    let body_lines = body_len.div_ceil(chars_per_line).max(1);
-    let header_h = fs * 1.2;
-    let line_h = fs_sm * 1.2;
-    let text_h =
-        HISTORY_ROW_PAD_Y + header_h + 4.0 + (body_lines as f32) * line_h + HISTORY_ROW_PAD_Y;
-    // Row must fit the icon hexagon + padding, otherwise the hexagon
-    // extends past the row background and looks like it's "breaking out".
-    let icon_h = icon_hex_size + HISTORY_ROW_PAD_Y * 2.0;
-    text_h.max(HISTORY_ROW_MIN_H).max(icon_h)
-}
-
-use std::collections::{HashSet, VecDeque};
-use std::sync::Mutex;
-
-/// IDs we've already logged icon decisions for. Prevents per-frame
-/// log spam (view_history is called on every Tick message, ~1/sec).
-static LOGGED_ICONS: Mutex<Option<HashSet<u32>>> = Mutex::new(None);
-
-/// $XDG_DATA_HOME/moonbeauty/avatars (created if missing).
-/// The pre-fix code resolved `resources/{name}/{name}.png` relative to
-/// process cwd, which is `/` or `~` under systemd — never the repo.
-/// Migrate to XDG, matching finding 20's handling of
-/// friend_profiles.json and contacts.txt.
-fn avatars_dir() -> std::path::PathBuf {
-    let base = dirs::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
-        .join("moonbeauty")
-        .join("avatars");
-    let _ = std::fs::create_dir_all(&base);
-    base
-}
-
-/// One-shot migration: copy resources/{name}/{name}.png into the XDG
-/// avatars dir on first run. Tries cwd-relative first, then
-/// $CARGO_MANIFEST_DIR/resources (dev builds). Non-destructive —
-/// skips when XDG target already exists.
-fn migrate_resources_to_xdg(name: &str) {
-    let xdg = avatars_dir().join(name).join(format!("{}.png", name));
-    if xdg.exists() {
-        return;
-    }
-    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
-    candidates.push(
-        std::path::Path::new("resources")
-            .join(name)
-            .join(format!("{}.png", name)),
-    );
-    if let Some(m) = option_env!("CARGO_MANIFEST_DIR") {
-        candidates.push(
-            std::path::Path::new(m)
-                .join("resources")
-                .join(name)
-                .join(format!("{}.png", name)),
-        );
-    }
-    for legacy in candidates {
-        if !legacy.exists() {
-            continue;
-        }
-        if let Some(parent) = xdg.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        match std::fs::copy(&legacy, &xdg) {
-            Ok(n) => eprintln!("[avatar-migrate] {:?} -> {:?} ({} bytes)", legacy, xdg, n),
-            Err(e) => eprintln!("[avatar-migrate] {} failed: {}", name, e),
-        }
-        return;
-    }
-}
-
-/// Resolve the friend avatar. Priority:
-///   1. $XDG_DATA_HOME/moonbeauty/avatars/{name}/{name}.png
-///   2. $XDG_DATA_HOME/moonbeauty/avatars/fallback.png
-///   3. legacy resources/{name}/{name}.png
-///   4. legacy resources/fallback.png
-fn avatar_path_for(name: &str) -> Option<String> {
-    migrate_resources_to_xdg(name);
-    let xdg = avatars_dir();
-    let specific = xdg.join(name).join(format!("{}.png", name));
-    if specific.exists() {
-        return Some(specific.to_string_lossy().into_owned());
-    }
-    let fallback = xdg.join("fallback.png");
-    if fallback.exists() {
-        return Some(fallback.to_string_lossy().into_owned());
-    }
-    let legacy_specific = std::path::Path::new("resources")
-        .join(name)
-        .join(format!("{}.png", name));
-    if legacy_specific.exists() {
-        return Some(legacy_specific.to_string_lossy().into_owned());
-    }
-    let legacy_fallback = std::path::Path::new("resources").join("fallback.png");
-    if legacy_fallback.exists() {
-        return Some(legacy_fallback.to_string_lossy().into_owned());
-    }
-    None
-}
-
-fn should_log_icon(id: u32) -> bool {
-    let mut guard = match LOGGED_ICONS.lock() {
-        Ok(g) => g,
-        Err(_) => return true, // poisoned → log
-    };
-    let set = guard.get_or_insert_with(HashSet::new);
-    set.insert(id)
-}
+use crate::libraries::config::theme::ShellTheme;
+use crate::libraries::style::shape_box::AngledHexGeometry;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationToast {
@@ -449,16 +85,15 @@ pub enum NotifMessage {
 
 pub struct NotificationOverlay {
     /// Icon resolution cache. Keys are "app_name|desktop_entry" (empty
-    /// when desktop_entry is None). First toast per app does the
-    /// 168-1000 stat() lookups; subsequent toasts reuse the cached
-    /// result. Bounded at 200 entries (personal shell has ~10 apps;
-    /// 200 guards against runaway unique app_names from a noisy client).
+    /// when desktop_entry is None). First toast per app pays the
+    /// stat() lookup cost; subsequent toasts reuse the cached result.
+    /// Bounded at 200 entries.
     pub icon_cache: std::collections::HashMap<String, Option<String>>,
     pub active_toasts: Vec<NotificationToast>,
     /// Overflow queue. When `active_toasts` hits the visible limit (4),
     /// new toasts land here instead of evicting the oldest. `tick_toasts`
     /// pulls from the front of this queue whenever an active toast
-    /// expires or is dismissed, restoring the "wait your turn" behavior.
+    /// expires or is dismissed.
     pub pending_toasts: VecDeque<NotificationToast>,
     pub history: Vec<NotificationToast>,
     pub show_history: bool,
@@ -468,7 +103,9 @@ pub struct NotificationOverlay {
     pub selected_history_id: Option<u32>,
     pub last_saved: Instant,
     pub history_dirty: bool,
+    pub state_reader: super::state::NotifStateReader,
     history_file_sig: Option<(Option<std::time::SystemTime>, u64, u64)>,
+    logged_icons: Mutex<HashSet<u32>>,
 }
 
 impl Default for NotificationOverlay {
@@ -478,6 +115,14 @@ impl Default for NotificationOverlay {
 }
 
 impl NotificationOverlay {
+    pub(super) fn should_log_icon(&self, id: u32) -> bool {
+        let mut guard = match self.logged_icons.lock() {
+            Ok(g) => g,
+            Err(_) => return true,
+        };
+        guard.insert(id)
+    }
+
     fn history_file_sig() -> Option<(Option<std::time::SystemTime>, u64, u64)> {
         use std::os::unix::fs::MetadataExt as _;
         let meta = std::fs::metadata(Self::history_path()).ok()?;
@@ -511,7 +156,9 @@ impl NotificationOverlay {
             selected_history_id,
             last_saved: Instant::now(),
             history_dirty: false,
+            state_reader: super::state::NotifStateReader::new(),
             history_file_sig,
+            logged_icons: Mutex::new(HashSet::new()),
         }
     }
 
@@ -528,12 +175,14 @@ impl NotificationOverlay {
             selected_history_id: None,
             last_saved: Instant::now(),
             history_dirty: false,
+            state_reader: super::state::NotifStateReader::new(),
             history_file_sig: None,
+            logged_icons: Mutex::new(HashSet::new()),
         }
     }
 
     fn history_path() -> PathBuf {
-        // Finding 23: OTP codes / private URLs must not land in world-readable /tmp.
+        // Keep notification history out of world-readable /tmp (may contain OTPs/URLs).
         dirs::cache_dir()
             .expect("XDG_CACHE_HOME or HOME must be set; refusing to persist notification history to /tmp")
             .join("moonbeauty_notification_history.json")
@@ -544,7 +193,7 @@ impl NotificationOverlay {
     /// fed directly into iced's `scroll_to` AbsoluteOffset.
     ///
     /// Returns None if no item is selected. Result is measured from the
-    /// top of the scrollable's content; view_history uses the same
+    /// top of the scrollable's content; render_history uses the same
     /// row geometry so the two always agree.
     pub fn scroll_offset_for_selected(
         &self,
@@ -576,9 +225,7 @@ impl NotificationOverlay {
 
     pub fn load_history() -> Vec<NotificationToast> {
         let path = Self::history_path();
-        // Finding 45: file-size pre-check. A pre-fix history file with
-        // 8 GB of notifications would OOM on read_to_string + serde +
-        // to_string_pretty-for-migration. Reset if over cap.
+        // Pre-check file size to avoid OOM on oversized history files.
         const MAX_HISTORY_BYTES: u64 = 8 * 1024 * 1024;
         match std::fs::metadata(&path) {
             Ok(m) if m.len() > MAX_HISTORY_BYTES => {
@@ -596,9 +243,7 @@ impl NotificationOverlay {
         if path.exists() {
             if let Ok(raw) = fs::read_to_string(&path) {
                 if let Ok(mut items) = serde_json::from_str::<Vec<NotificationToast>>(&raw) {
-                    // Migrate: entries saved before V354 have no avatar_path
-                    // (or have a stale one from the old weak resolver).
-                    // Retry with the improved chain.
+                    // Backfill missing avatar_path entries on load.
                     let mut migrated = false;
                     let mut still_missing = 0;
                     for item in items.iter_mut() {
@@ -676,13 +321,11 @@ impl NotificationOverlay {
         let path = Self::history_path();
         if let Ok(data) = serde_json::to_string_pretty(&self.history) {
             let tmp = path.with_extension("tmp");
-            // Finding 23 regression: history contains OTPs and private
-            // URLs. `fs::write` inherits umask (022 → 0644). Route through
-            // the same 0600 helper the rest of the file already uses.
-            if crate::libraries::process::private_write_file(&tmp, data.as_bytes()).is_ok() {
-                if fs::rename(tmp, &path).is_ok() {
-                    self.history_file_sig = Self::history_file_sig();
-                }
+            // Write at 0600 (history may contain OTPs and private URLs).
+            if crate::libraries::process::private_write_file(&tmp, data.as_bytes()).is_ok()
+                && fs::rename(tmp, &path).is_ok()
+            {
+                self.history_file_sig = Self::history_file_sig();
             }
         }
     }
@@ -716,8 +359,7 @@ impl NotificationOverlay {
         actions: Vec<String>,
         settings: &ShellSettings,
     ) {
-        // Finding 55: payloads pre-capped at NotifServer::notify
-        // ingress (dbus.rs). Re-capping here would duplicate work.
+        // Payloads are pre-capped at NotifServer::notify ingress.
         self.active_toasts.retain(|t| t.id != id);
         self.pending_toasts.retain(|t| t.id != id);
 
@@ -749,17 +391,8 @@ impl NotificationOverlay {
         } else {
             settings.palette.base05.clone()
         };
-        // Resolve avatar. Order of preference:
-        //   1. Friend-profile specific avatar
-        //   2. Fallback avatar file
-        //   3. Desktop-entry icon (real app icon from .desktop → Icon=)
-        //   4. App-name based icon lookup
-        // Logs every decision so we can debug missing icons.
         // Icon resolution cache: first toast per (app_name, desktop_entry)
-        // pair pays the 168-1000 stat() cost; subsequent toasts are
-        // instant. Without this, every notification on NixOS spends
-        // ~500-800ms scanning icon theme directories before the toast
-        // can render — the "1 second behind" the user sees.
+        // pays the stat() cost on NixOS; subsequent toasts are instant.
         let avatar_path: Option<String> = if let Some(p) = matched_profile {
             // Profile matches are highly specific. Resolve them every time.
             // If we cache them under "app_name", Bob will inherit Alice's avatar!
@@ -846,9 +479,6 @@ impl NotificationOverlay {
             app_name, tts_pending, summary,
         );
 
-        // Populate TTS fields on the item before routing it. Previously
-        // this happened via `active_toasts.last_mut()` after push; the
-        // queue routing below makes that unsafe, so we set it here.
         let mut item = item;
         item.tts_summary = summary.to_string();
         item.tts_body = body.to_string();
@@ -857,15 +487,15 @@ impl NotificationOverlay {
         item.tts_pending = tts_pending;
         item.tts_read_body = tts_read_body;
 
-        if dnd_active() {
+        if super::state::dnd_active() {
             eprintln!(
                 "[dnd] holding notification back while paused: {:?}",
                 summary
             );
             self.push_to_history(item.clone());
-            let mut held = load_held_notifs();
+            let mut held = super::state::load_held_notifs();
             held.push(item);
-            save_held_notifs(&held);
+            super::state::save_held_notifs(&held);
             eprintln!("[dnd] total notifications held: {}", held.len());
             return;
         }
@@ -906,255 +536,20 @@ impl NotificationOverlay {
         app_name: &str,
         summary: &str,
         body: &str,
-        _custom_readout: Option<&str>,
+        custom_readout: Option<&str>,
         tts_command: Option<String>,
         volume: u32,
         read_body: bool,
     ) {
-        let a = app_name.to_string();
-        let s = summary.to_string();
-        let b = body.to_string();
-        let mut readout_template = _custom_readout.map(|s| s.to_string()).unwrap_or_else(|| {
-            let lower = format!("{} {}", s, b).to_lowercase();
-            if lower.contains("logged in") || lower.contains("signed in") {
-                "{sender} has logged in".to_string()
-            } else {
-                "Message from {sender}".to_string()
-            }
-        });
-        if !read_body {
-            for pat in [
-                ": {body}", ": $body", ": {message}", ": $message",
-                " - {body}", " - $body", " - {message}", " - $message",
-                " {body}", " $body", " {message}", " $message",
-                "{body}", "$body", "{message}", "$message",
-            ] {
-                readout_template = readout_template.replace(pat, "");
-            }
-            readout_template = readout_template
-                .trim()
-                .trim_end_matches(':')
-                .trim()
-                .to_string();
-        }
-
-        std::thread::spawn(move || {
-            // Smart sender extraction
-            let mut sender = String::new();
-            let mut msg = b.clone();
-
-            // 1. Try to parse "Alice: Hello" from the body
-            if let Some(idx) = b.find(':') {
-                let prefix = b[..idx].trim();
-                if !prefix.is_empty() && prefix.len() < 30 && !prefix.contains("http") {
-                    sender = prefix.to_string();
-                    msg = b[idx + 1..].trim().to_string();
-                }
-            }
-
-            // 2. If no sender found, check if the summary is a real name
-            if sender.is_empty() {
-                let lower = s.to_lowercase();
-                let is_generic = lower.contains("new message")
-                    || lower.contains("new voice")
-                    || lower.contains("voice activity")
-                    || lower.contains("notification")
-                    || lower == "test"
-                    || looks_like_action(&s);
-
-                if !is_generic {
-                    sender = s.clone();
-                    // Strip common login suffixes so "{sender} has logged in"
-                    // doesn't become "Player has logged in has logged in".
-                    let lower_sender = sender.to_lowercase();
-                    for suffix in [
-                        " has logged in",
-                        " has signed in",
-                        " is now online",
-                        " logged in",
-                    ] {
-                        if lower_sender.ends_with(suffix) {
-                            sender = sender[..sender.len() - suffix.len()].trim().to_string();
-                            break;
-                        }
-                    }
-                } else {
-                    // Summary is generic. Try to find the real sender:
-                    //   "New Voice from Alice" -> "Alice"
-                    //   "Alice spoke in room"  -> "Alice"
-                    //   "Alice" (short body)   -> "Alice"
-                    //   else                   -> app name
-                    if let Some(name) = extract_from_phrase(&s) {
-                        sender = name;
-                    } else if let Some(name) = extract_leading_name(&b) {
-                        let remaining = b[name.len()..].trim().to_string();
-                        sender = name;
-                        if !remaining.is_empty() {
-                            msg = remaining;
-                        }
-                    } else {
-                        sender = a.clone();
-                    }
-                }
-            }
-
-            // Belt-and-suspenders: reject any sender that still looks
-            // like an action phrase, using the app name instead.
-            if !sender.is_empty() && looks_like_action(&sender) {
-                crate::dbg_log!(
-                    "[tts-sanitize] rejecting action-phrase sender={:?}, using app={:?}",
-                    sender,
-                    a
-                );
-                sender = a.clone();
-            }
-
-            // Post-process: try to rescue a bad sender by looking in
-            // the summary. Runs after the primary extraction so we can
-            // also improve cases where the original path fell back to
-            // the app name or used an action phrase as the "name".
-            let needs_tts_rescue = sender.is_empty() || sender == a || looks_like_action(&sender);
-            if needs_tts_rescue {
-                let sender_before = sender.clone();
-                let rescued = extract_name_from_summary(&s)
-                    .or_else(|| extract_from_phrase(&s))
-                    .or_else(|| looks_like_clean_name(&s).then(|| s.trim().to_string()));
-                match rescued {
-                    Some(n) => {
-                        crate::dbg_log!(
-                            "[tts-rescue] summary={:?} sender {:?} -> {:?}",
-                            s,
-                            sender_before,
-                            n
-                        );
-                        sender = n;
-                    }
-                    None => {
-                        if sender.is_empty() || looks_like_action(&sender) || sender == a {
-                            crate::dbg_log!(
-                                "[tts-rescue] no name in summary={:?}, using app={:?}",
-                                s,
-                                a
-                            );
-                            sender = a.clone();
-                        }
-                    }
-                }
-            }
-
-            let template_has_body = ["{body}", "$body", "{message}", "$message"]
-                .iter()
-                .any(|k| readout_template.contains(k));
-            let is_login_rule = {
-                let low = readout_template.to_lowercase();
-                low.contains("logged in") || low.contains("signed in")
-            };
-            let mut spoken = readout_template.clone();
-            for (key, val) in [
-                // The new smart sender variables
-                ("{sender}", &sender),
-                ("$sender", &sender),
-                ("{user}", &sender),
-                ("$user", &sender),
-                ("{name}", &sender),
-                ("$name", &sender),
-                // The raw message body (without "Alice: ")
-                ("{message}", &msg),
-                ("$message", &msg),
-                ("{body}", &msg),
-                ("$body", &msg),
-                // The raw summary/title
-                ("{summary}", &s),
-                ("$summary", &s),
-                // The app name (Horizon, Discord, etc.)
-                ("{app}", &a),
-                ("$app", &a),
-                ("{app_name}", &a),
-                ("$app_name", &a),
-                ("{appname}", &a),
-                ("$appname", &a),
-            ] {
-                spoken = spoken.replace(key, val);
-            }
-
-            if read_body && !template_has_body && !is_login_rule {
-                let clean_msg = msg.trim();
-                if !clean_msg.is_empty() && !clean_msg.eq_ignore_ascii_case(&sender) {
-                    spoken = format!("{}: {}", spoken.trim_end(), clean_msg);
-                }
-            }
-
-            crate::dbg_log!("[tts-trace] app={:?} summary={:?} body={:?}", a, s, b);
-            crate::dbg_log!(
-                "[tts-trace] extracted sender={:?} message={:?}",
-                sender,
-                msg
-            );
-            crate::dbg_log!(
-                "[tts-trace] template={:?} -> spoken={:?}",
-                readout_template,
-                spoken
-            );
-
-            if let Some(cmd) = tts_command {
-                let vol_str = format!("{:.2}", (volume as f32) / 100.0);
-                let script = if cmd.contains("{text}") {
-                    cmd.replace("{text}", "\"$1\"")
-                        .replace("{volume}", &vol_str)
-                } else {
-                    format!("{} \"$1\"", cmd)
-                };
-                match std::process::Command::new("sh")
-                    .args(["-c", &script, "--", &spoken])
-                    .output()
-                {
-                    Ok(o) => eprintln!(
-                        "[tts] custom exit={:?} stderr={}",
-                        o.status.code(),
-                        String::from_utf8_lossy(&o.stderr)
-                            .trim()
-                            .chars()
-                            .take(200)
-                            .collect::<String>(),
-                    ),
-                    Err(e) => eprintln!("[tts] custom spawn failed: {e}"),
-                }
-                return;
-            }
-
-            let candidates: Vec<String> = vec![
-                "/run/current-system/sw/bin/sage-tts".into(),
-                "sage-tts".into(),
-                "spd-say".into(),
-                "espeak-ng".into(),
-                "espeak".into(),
-            ];
-            let mut tried: Vec<String> = Vec::new();
-            for bin in &candidates {
-                tried.push(bin.clone());
-                let mut cmd = std::process::Command::new(bin);
-                if bin.contains("espeak") {
-                    let amp = (volume * 2).min(200).to_string();
-                    cmd.args(["-a", &amp]);
-                }
-                match cmd.arg(&spoken).output() {
-                    Ok(o) => {
-                        let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
-                        let really_ok =
-                            o.status.success() && !stderr.contains("daemon not running");
-                        if really_ok {
-                            return;
-                        }
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                    Err(e) => {
-                        eprintln!("[tts] spawn {} failed: {e}", bin);
-                        return;
-                    }
-                }
-            }
-            eprintln!("[tts] NO TTS BINARY FOUND; tried {:?}", tried);
-        });
+        super::tts::speak_tts(
+            app_name,
+            summary,
+            body,
+            custom_readout,
+            tts_command,
+            volume,
+            read_body,
+        );
     }
 
     pub fn tick_toasts(&mut self, hold_duration_sec: u64, volume: u32) {
@@ -1182,9 +577,8 @@ impl NotificationOverlay {
 
         let mut removed_any = false;
         self.active_toasts.retain(|t| {
-            // Note: We DO NOT skip is_urgent here. If the user explicitly
-            // dismissed an urgent toast, exit_started_at is set and we
-            // need to actually remove it after the animation finishes.
+            // Do not skip is_urgent here so explicitly dismissed urgent toasts
+            // finish their exit animation and get removed.
             match t.exit_started_at {
                 Some(start) => {
                     if start.elapsed() < exit_duration {
@@ -1308,10 +702,8 @@ impl NotificationOverlay {
                 self.selected_history_id = None;
                 self.mark_history_dirty();
                 self.save_history_immediate();
-                if let Ok(mut g) = LOGGED_ICONS.lock() {
-                    if let Some(set) = g.as_mut() {
-                        set.clear();
-                    }
+                if let Ok(mut g) = self.logged_icons.lock() {
+                    g.clear();
                 }
             }
             NotifMessage::DeleteHistory(id) => {
@@ -1364,7 +756,9 @@ impl NotificationOverlay {
                     };
                 }
             }
-            NotifMessage::HistoryScrollTo(_) | NotifMessage::HistoryActivateSelected | NotifMessage::FinishHistoryActivation => {}
+            NotifMessage::HistoryScrollTo(_)
+            | NotifMessage::HistoryActivateSelected
+            | NotifMessage::FinishHistoryActivation => {}
             NotifMessage::ToggleHistoryDrawer => {
                 self.show_history = !self.show_history;
             }
@@ -1379,1026 +773,16 @@ impl NotificationOverlay {
         theme: &'a ShellTheme,
         settings: &'a ShellSettings,
     ) -> Element<'a, NotifMessage> {
-        let card_w = settings.notif_card_width as f32;
-        let card_h = settings.notif_card_height as f32;
-
-        let shape = match settings.notif_shape.to_lowercase().as_str() {
-            "hex" | "hexagon" => ShapeType::Hexagon { cut: 14 },
-            "slant" => ShapeType::Slant {
-                left: SlantSide::Right,
-                right: SlantSide::Right,
-            },
-            "flat" => ShapeType::Flat,
-            _ => ShapeType::Rounded(10),
-        };
-
-        let from_right = settings.notif_corner.contains("right");
-
-        let mut deck = Stack::new();
-        let ordered: Vec<(usize, &NotificationToast)> =
-            self.active_toasts.iter().enumerate().collect();
-
-        let strip_w =
-            settings.notif_card_width as f32 + 2.0 * settings.notif_margin_x as f32 + 100.0;
-        let strip_margin = settings.notif_margin_x as f32;
-
-        // Iterate in reverse: newest pushed first (bottom z-order, tucked
-        // behind/above), oldest pushed last (top z-order, front card in view).
-        // As the oldest toast expires or is dismissed, newer toasts drop down
-        // into the front slot.
-        for (i, toast) in ordered.into_iter().rev() {
-            let id = toast.id;
-            let border_c = hex_to_color(&toast.border_color);
-
-            let elapsed_ms = toast.created_at.elapsed().as_millis() as f32;
-            let slide_ms: f32 = if settings.notif_slide_in_ms == 0 {
-                250.0
-            } else {
-                settings.notif_slide_in_ms.max(50) as f32
-            };
-            let pause_ms = settings.notif_drop_pause_ms as f32;
-            let drop_ms = 250.0_f32;
-            let drop_dist = settings.notif_drop_distance_px as f32;
-            let exit_ms = 300.0_f32;
-
-            // Phase 1: Slide in horizontally from offscreen
-            let slide_progress = (elapsed_ms / slide_ms).clamp(0.0, 1.0);
-            let slide_ease = 1.0 - (1.0 - slide_progress).powi(3);
-
-            // Phase 3: Slide away horizontally to the right on expiration / dismissal
-            let exit_progress = toast
-                .exit_started_at
-                .map(|s| (s.elapsed().as_millis() as f32 / exit_ms).clamp(0.0, 1.0))
-                .unwrap_or(0.0);
-            let exit_ease = exit_progress * exit_progress * exit_progress;
-
-            // Compute resting and offscreen coordinates without compressing the card width
-            let (resting_x, offscreen_x) = if from_right {
-                (strip_w - card_w - strip_margin, strip_w)
-            } else {
-                (strip_margin, -card_w)
-            };
-
-            // Interpolate position: offscreen -> resting -> offscreen (on exit)
-            let enter_x = offscreen_x + (resting_x - offscreen_x) * slide_ease;
-            let x_pos = enter_x + (offscreen_x - resting_x) * exit_ease;
-
-            // Phase 2: Vertical drop down (starts after horizontal entry + pause)
-            let drop_start = slide_ms + pause_ms;
-            let drop_progress = ((elapsed_ms - drop_start) / drop_ms).clamp(0.0, 1.0);
-            let drop_ease = 1.0 - (1.0 - drop_progress).powi(3);
-            let drop_extra = (1.0 - drop_ease) * (-drop_dist);
-
-            let peek = (settings.notif_stack_overlap as f32).abs().max(4.0);
-
-            let shift_progress = toast
-                .slot_shift_start
-                .map(|s| (s.elapsed().as_millis() as f32 / 200.0).min(1.0))
-                .unwrap_or(1.0);
-            let shift_ease = 1.0 - (1.0 - shift_progress).powi(3);
-            let shift_offset = (1.0 - shift_ease) * (-peek);
-            let fixed_base = drop_dist + 4.0 * peek;
-            let slot_y = fixed_base - (i as f32) * peek + shift_offset;
-            let y_pos = (slot_y + drop_extra).max(0.0);
-
-            let card_bg = ShapeBox::new()
-                .shape(shape)
-                .background(theme.background)
-                .border(border_c, theme.border_width)
-                .size(Length::Fixed(card_w), Length::Fixed(card_h));
-
-            let toast_text_color = hex_to_color(&toast.text_color);
-            let avatar: Element<'_, NotifMessage> = if let Some(ref path) = toast.avatar_path {
-                let icon_size = (settings.notif_icon_size as f32).clamp(16.0, 128.0);
-                let (box_shape, box_size) = notif_icon_box_shape(&settings.notif_shape, icon_size);
-                let icon_element: Element<'_, NotifMessage> = if path.ends_with(".svg") {
-                    iced::widget::svg(iced::widget::svg::Handle::from_path(path.clone()))
-                        .width(Length::Fixed(icon_size))
-                        .height(Length::Fixed(icon_size))
-                        .into()
-                } else {
-                    iced::widget::image(iced::widget::image::Handle::from_path(path.clone()))
-                        .width(Length::Fixed(icon_size))
-                        .height(Length::Fixed(icon_size))
-                        .content_fit(iced::ContentFit::Cover)
-                        .into()
-                };
-                let mut shape_box = ShapeBox::new()
-                    .shape(box_shape)
-                    .background(theme.background)
-                    .border(theme.border, theme.control_border_width)
-                    .size(Length::Fixed(box_size), Length::Fixed(box_size));
-                if matches!(box_shape, ShapeType::Slant { .. }) {
-                    shape_box = shape_box.slant_width(icon_size * 0.15);
-                }
-                Stack::new()
-                    .push(shape_box.view())
-                    .push(
-                        container(icon_element)
-                            .width(Length::Fixed(box_size))
-                            .height(Length::Fixed(box_size))
-                            .center_x(Length::Fill)
-                            .center_y(Length::Fill)
-                            .clip(true),
-                    )
-                    .into()
-            } else {
-                container(text("")).width(Length::Fixed(0.0)).into()
-            };
-            // Full-body activate area. Padding lives INSIDE the
-            // MouseArea (via the container), and both the container and
-            // inner row are Fill height. Result: the entire toast body —
-            // including what was previously the 14px border — activates
-            // on click. No vertical centering gap.
-            let custom_actions: Vec<(&str, &str)> = toast
-                .actions
-                .chunks_exact(2)
-                .filter(|pair| pair[0] != "default" && !pair[1].is_empty())
-                .map(|pair| (pair[0].as_str(), pair[1].as_str()))
-                .collect();
-            let has_custom_actions = !custom_actions.is_empty();
-
-            let toast_body = MouseArea::new(
-                container(
-                    row![avatar, {
-                        // Security: render app_name on the toast body.
-                        let summary_row = if toast.app_name.is_empty() {
-                            column![text(&toast.summary)
-                                .size((settings.notif_summary_size) as f32)
-                                .bold()
-                                .color(toast_text_color)
-                                .width(Length::Fill)
-                                .wrapping(iced::widget::text::Wrapping::WordOrGlyph)]
-                        } else {
-                            column![
-                                text(&toast.summary)
-                                    .size((settings.notif_summary_size) as f32)
-                                    .bold()
-                                    .color(toast_text_color)
-                                    .width(Length::Fill)
-                                    .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
-                                text(format!("via {}", toast.app_name))
-                                    .size((settings.notif_summary_size.saturating_sub(2)) as f32)
-                                    .color(theme.focus)
-                                    .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
-                            ]
-                        };
-                        let text_col = column![
-                            summary_row.width(Length::Fill),
-                            text(&toast.body)
-                                .size((settings.notif_body_size) as f32)
-                                .color(toast_text_color)
-                                .width(Length::Fill)
-                                .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
-                        ];
-                        text_col.width(Length::Fill).spacing(2)
-                    },]
-                    .spacing(12)
-                    .align_y(Alignment::Center)
-                    .width(Length::Fill)
-                    .height(Length::Fill),
-                )
-                .padding(if has_custom_actions {
-                    Padding {
-                        top: 10.0,
-                        right: 14.0,
-                        bottom: 4.0,
-                        left: 14.0,
-                    }
-                } else {
-                    Padding {
-                        top: 14.0,
-                        right: 14.0,
-                        bottom: 14.0,
-                        left: 14.0,
-                    }
-                })
-                .width(Length::Fill)
-                .height(Length::Fill),
-            )
-            .on_press(NotifMessage::ActivateToast(id));
-
-            let left_col: Element<'_, NotifMessage> = if has_custom_actions {
-                let mut actions_row = row![].spacing(6).align_y(Alignment::Center);
-                let act_fs = (settings.notif_body_size.saturating_sub(4)).clamp(10, 14) as f32;
-                for (action_key, action_label) in custom_actions.into_iter().take(4) {
-                    let key_owned = action_key.to_string();
-                    let label_owned = action_label.to_string();
-                    let bg_col = theme.surface_alt;
-                    let border_col = border_c;
-                    let fg_col = toast_text_color;
-                    let act_btn = button(
-                        text(label_owned)
-                            .size(act_fs)
-                            .bold()
-                            .wrapping(iced::widget::text::Wrapping::None),
-                    )
-                    .on_press(NotifMessage::InvokeToastAction(id, key_owned))
-                    .padding([3, 10])
-                    .style(move |_t, status| {
-                        let (bg, tc) = match status {
-                            button::Status::Hovered | button::Status::Pressed => {
-                                (border_col, iced::Color::BLACK)
-                            }
-                            _ => (bg_col, fg_col),
-                        };
-                        button::Style {
-                            background: Some(iced::Background::Color(bg)),
-                            border: iced::Border {
-                                color: border_col,
-                                width: 1.0,
-                                radius: 4.0.into(),
-                            },
-                            text_color: tc,
-                            ..Default::default()
-                        }
-                    });
-                    actions_row = actions_row.push(act_btn);
-                }
-                column![
-                    toast_body,
-                    container(actions_row).padding(Padding {
-                        top: 0.0,
-                        right: 14.0,
-                        bottom: 10.0,
-                        left: 14.0,
-                    }),
-                ]
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .into()
-            } else {
-                toast_body.into()
-            };
-
-            // Full-height close column. 48px wide, Fill height, ✕ centered
-            // vertically (matches the previous visual), but the whole
-            // column is now one big dismiss target.
-            let close_btn = button(text("✕").size(12).color(theme.muted))
-                .on_press(NotifMessage::DismissToast(id))
-                .padding(0)
-                .width(Length::Fixed(48.0))
-                .height(Length::Fill)
-                .style(|_t, _s| button::Style {
-                    background: None,
-                    ..Default::default()
-                });
-
-            let content = row![left_col, close_btn]
-                .spacing(0)
-                .width(Length::Fill)
-                .height(Length::Fill);
-
-            let toast_card = container(Stack::new().push(card_bg.view()).push(content))
-                .width(Length::Fixed(card_w))
-                .height(Length::Fixed(card_h));
-
-            // Pin widget directly positions the card without applying flex compression
-            deck = deck.push(pin(toast_card).x(x_pos).y(y_pos));
-        }
-
-        // Clip container to ensure the card cleanly enters and exits across the strip boundary
-        let clipped_strip = container(deck)
-            .width(Length::Fixed(strip_w))
-            .height(Length::Fill)
-            .clip(true);
-
-        container(clipped_strip)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(if from_right {
-                iced::alignment::Horizontal::Right
-            } else {
-                iced::alignment::Horizontal::Left
-            })
-            .into()
+        super::view::render_toasts(self, theme, settings)
     }
 
     pub fn view_history<'a>(
         &'a self,
         theme: &'a ShellTheme,
-        settings: &crate::libraries::config::settings::ShellSettings,
+        settings: &ShellSettings,
     ) -> Element<'a, NotifMessage> {
-        let (win_w, win_h) = settings.get_window_size("history", 960, 720);
-
-        let cut_f = theme.overlay_cut;
-        let angle_deg = theme.overlay_angle;
-        let pad_top = 20.0_f32;
-        let pad_bottom = 20.0_f32;
-        let (header_inset, body_inset, footer_inset) =
-            AngledHexGeometry::new(win_w, win_h, cut_f, angle_deg).standard_insets();
-
-        let fs = theme.font_size_overlay as f32;
-        let fs_sm = fs * 0.85;
-        let gap = 10.0;
-        let row_w = win_w - body_inset * 2.0;
-
-        let mut list_col = column![].spacing(gap);
-
-        if self.history.is_empty() {
-            list_col = list_col.push(
-                container(
-                    text("No notifications in history.")
-                        .size(fs)
-                        .color(theme.muted),
-                )
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center_x(Length::Fill)
-                .center_y(Length::Fill),
-            );
-        } else {
-            // Render in reverse so newest is at the bottom.
-            // Compute approximate row height from body text so ShapeBox
-            // and content are both fixed at the same size (Fill+Shrink
-            // collapses to 0 in iced 0.14).
-            for toast in self.history.iter().rev() {
-                let id = toast.id;
-                let log_now = should_log_icon(id);
-                let is_sel = self.selected_history_id == Some(id);
-
-                // Icon size matches the launcher slider setting.
-                // Hexagon sized large enough that its cut corners can't
-                // clip the icon's corners (see history_icon_hex_size).
-                let icon_size = settings.launcher_icon_size as f32;
-                let icon_hex_size = history_icon_hex_size(icon_size);
-                let hist_min_cut = ((icon_hex_size - icon_size) as u16).saturating_add(1);
-                let icon_hex_cut: u16 = ((icon_hex_size * 0.25) as u16).max(hist_min_cut).max(8);
-
-                let inner_icon: Element<'a, NotifMessage> = if let Some(ref path) =
-                    toast.avatar_path
-                {
-                    if std::path::Path::new(path).exists() {
-                        crate::dbg_log!("[notif-render] id={} icon=OK {}", id, path);
-                        if path.ends_with(".svg") {
-                            iced::widget::svg(iced::widget::svg::Handle::from_path(path.clone()))
-                                .width(Length::Fixed(icon_size))
-                                .height(Length::Fixed(icon_size))
-                                .into()
-                        } else {
-                            iced::widget::image(iced::widget::image::Handle::from_path(
-                                path.clone(),
-                            ))
-                            .width(Length::Fixed(icon_size))
-                            .height(Length::Fixed(icon_size))
-                            .content_fit(iced::ContentFit::Contain)
-                            .into()
-                        }
-                    } else {
-                        if log_now {
-                            crate::dbg_log!("[notif-render] id={} icon=MISSING {}", id, path);
-                        }
-                        container(text("🔔").size(icon_size * 0.7))
-                            .width(Length::Fixed(icon_size))
-                            .height(Length::Fixed(icon_size))
-                            .center_x(Length::Fill)
-                            .center_y(Length::Fill)
-                            .into()
-                    }
-                } else {
-                    if log_now {
-                        crate::dbg_log!("[notif-render] id={} icon=NONE", id);
-                    }
-                    container(text("🔔").size(icon_size * 0.7))
-                        .width(Length::Fixed(icon_size))
-                        .height(Length::Fixed(icon_size))
-                        .center_x(Length::Fill)
-                        .center_y(Length::Fill)
-                        .into()
-                };
-
-                let icon_hex_bg = ShapeBox::new()
-                    .shape(ShapeType::Hexagon { cut: icon_hex_cut })
-                    .background(theme.background)
-                    .border(theme.border, theme.control_border_width)
-                    .size(Length::Fixed(icon_hex_size), Length::Fixed(icon_hex_size));
-
-                let icon_clipped = container(inner_icon)
-                    .width(Length::Fixed(icon_size))
-                    .height(Length::Fixed(icon_size))
-                    .center_x(Length::Fill)
-                    .center_y(Length::Fill)
-                    .clip(true);
-
-                let icon_elem: Element<'a, NotifMessage> = Stack::new()
-                    .push(icon_hex_bg.view())
-                    .push(
-                        container(icon_clipped)
-                            .width(Length::Fixed(icon_hex_size))
-                            .height(Length::Fixed(icon_hex_size))
-                            .center_x(Length::Fill)
-                            .center_y(Length::Fill),
-                    )
-                    .into();
-
-                let time_str = toast.timestamp.clone();
-                let app_str = toast.app_name.clone();
-                let summary = toast.summary.clone();
-                let body = toast.body.clone();
-
-                // Delegate to shared helper — must match scroll_offset_for_selected.
-                let row_h = history_row_height(toast, row_w, fs, fs_sm, icon_size);
-
-                // Prominent highlight: bright green border at 2.5× width
-                // + surface_alt background. The line style is used
-                // everywhere else in the shell for "this is the active
-                // item" (RNG, Reminders, Todo, Notes, Unicode) so it reads
-                // intuitively.
-                let border_col = if is_sel { theme.success } else { theme.border };
-                let border_w = if is_sel {
-                    theme.control_border_width * 2.0
-                } else {
-                    theme.control_border_width
-                };
-
-                let row_bg = ShapeBox::new()
-                    .shape(ShapeType::Hexagon { cut: 16 })
-                    .background(if is_sel {
-                        theme.surface_alt
-                    } else {
-                        theme.background
-                    })
-                    .border(border_col, border_w)
-                    .size(Length::Fixed(row_w), Length::Fixed(row_h));
-
-                let text_col = column![
-                    row![
-                        text(summary).size(fs).bold().color(theme.text),
-                        iced::widget::space::horizontal(),
-                        text(format!("{} • {}", app_str, time_str))
-                            .size(fs_sm)
-                            .color(theme.muted),
-                    ]
-                    .align_y(iced::alignment::Vertical::Center),
-                    text(body)
-                        .size(fs_sm)
-                        .color(theme.text)
-                        .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
-                ]
-                .spacing(4)
-                .width(Length::Fill);
-
-                let inner_row = row![icon_elem, container(text_col).width(Length::Fill),]
-                    .spacing(16)
-                    .align_y(iced::alignment::Vertical::Top);
-
-                let row_content = container(inner_row)
-                    .width(Length::Fixed(row_w))
-                    .height(Length::Fixed(row_h))
-                    .padding(iced::Padding {
-                        top: 12.0,
-                        right: 20.0,
-                        bottom: 12.0,
-                        left: 20.0,
-                    })
-                    .align_y(iced::alignment::Vertical::Top);
-
-                let stack = Stack::new().push(row_bg.view()).push(row_content);
-
-                let btn = button(stack)
-                    .on_press(NotifMessage::HistoryDeleteSelected)
-                    .padding(0)
-                    .width(Length::Fixed(row_w))
-                    .height(Length::Fixed(row_h))
-                    .style(|_t, _s| button::Style {
-                        background: None,
-                        ..Default::default()
-                    });
-
-                list_col = list_col.push(btn);
-            }
-        }
-
-        let pos_label = if let Some(id) = self.selected_history_id {
-            if let Some(i) = self.history.iter().position(|t| t.id == id) {
-                // Render order is reversed: position in list (1-indexed, top-down)
-                // = history.len() - i
-                format!("{} / {}", self.history.len() - i, self.history.len())
-            } else {
-                format!("{} items", self.history.len())
-            }
-        } else if !self.history.is_empty() {
-            format!("{} items", self.history.len())
-        } else {
-            String::new()
-        };
-
-        let header_row = container(
-            row![
-                text("📜 NOTIFICATION HISTORY")
-                    .size(fs)
-                    .bold()
-                    .color(theme.text),
-                iced::widget::space::horizontal(),
-                text(pos_label).size(fs_sm).bold().color(theme.muted),
-                button(text("Clear All").size(fs_sm).bold().color(theme.danger))
-                    .on_press(NotifMessage::ClearHistory)
-                    .padding([6, 12])
-                    .style(move |_t, _s| button::Style {
-                        background: Some(iced::Background::Color(theme.background)),
-                        border: iced::Border {
-                            color: theme.danger,
-                            width: 1.0,
-                            radius: 4.0.into()
-                        },
-                        ..Default::default()
-                    }),
-            ]
-            .align_y(iced::alignment::Vertical::Center),
-        )
-        .width(Length::Fill)
-        .padding(Padding {
-            top: 0.0,
-            right: header_inset,
-            bottom: 0.0,
-            left: header_inset,
-        });
-
-        let list_container = container(
-            scrollable(list_col)
-                .id(iced::widget::Id::new("history_list"))
-                .height(Length::Fill),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .padding(Padding {
-            top: 0.0,
-            right: body_inset,
-            bottom: 0.0,
-            left: body_inset,
-        });
-
-        let footer_row = container(
-            text("↑/↓ Navigate  •  Enter to jump  •  Delete to remove  •  ESC to dismiss")
-                .size(fs_sm)
-                .color(theme.muted)
-                .align_x(Alignment::Center),
-        )
-        .width(Length::Fill)
-        .padding(Padding {
-            top: 0.0,
-            right: footer_inset,
-            bottom: 0.0,
-            left: footer_inset,
-        });
-
-        let card_bg = ShapeBox::new()
-            .shape(ShapeType::AngledHexagon {
-                cut: cut_f,
-                angle_deg,
-            })
-            .background(theme.background)
-            .border(theme.border, theme.border_width)
-            .size(Length::Fixed(win_w), Length::Fixed(win_h));
-
-        let card_content = container(
-            column![header_row, list_container, footer_row]
-                .spacing(14)
-                .padding(Padding {
-                    top: pad_top,
-                    right: 0.0,
-                    bottom: pad_bottom,
-                    left: 0.0,
-                }),
-        )
-        .width(Length::Fixed(win_w))
-        .height(Length::Fixed(win_h))
-        .style(|_t| iced::widget::container::Style::default());
-
-        let card = Stack::new().push(card_bg.view()).push(card_content);
-
-        container(card)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .style(|_t| iced::widget::container::Style::default())
-            .into()
+        super::view::render_history(self, theme, settings)
     }
-}
-
-/// Heuristic: does this text describe an *action* (spoke, sent, started,
-/// joined, …) rather than a person? Used to prevent phrases like
-/// "spoke in room" from being misidentified as a sender name.
-/// True when `text` looks like a clean person-name summary:
-/// short, no separators, no action verbs, all words capitalised,
-/// and no generic notification vocabulary. Handles Horizon's shape
-/// (summary = "Genesis Frost" with no separator at all).
-fn looks_like_clean_name(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.is_empty() || trimmed.chars().count() > 40 {
-        return false;
-    }
-    if trimmed.contains(':')
-        || trimmed.contains(" - ")
-        || trimmed.contains('/')
-        || trimmed.contains('(')
-        || trimmed.contains(')')
-    {
-        return false;
-    }
-    if looks_like_action(trimmed) {
-        return false;
-    }
-    let words: Vec<&str> = trimmed.split_whitespace().collect();
-    if words.is_empty() || words.len() > 4 {
-        return false;
-    }
-    const GENERIC: &[&str] = &[
-        "new",
-        "message",
-        "messages",
-        "voice",
-        "activity",
-        "notification",
-        "notifications",
-        "alert",
-        "alerts",
-        "system",
-        "test",
-        "app",
-        "you",
-        "have",
-        "a",
-        "an",
-        "the",
-        "this",
-        "that",
-        "incoming",
-        "audio",
-        "video",
-        "call",
-        "missed",
-        "recent",
-        "update",
-        "updates",
-        "reminder",
-        "warning",
-        "info",
-        "success",
-        "error",
-        "received",
-        "unread",
-        "from",
-        "to",
-        "in",
-        "on",
-        "at",
-        "by",
-        "here",
-        "there",
-    ];
-    words.iter().all(|w| {
-        let starts_upper = w.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
-        let is_generic = GENERIC.iter().any(|g| g.eq_ignore_ascii_case(w));
-        starts_upper && !is_generic
-    })
-}
-
-fn looks_like_action(text: &str) -> bool {
-    const VERBS: &[&str] = &[
-        "spoke",
-        "speaks",
-        "said",
-        "says",
-        "sent",
-        "sends",
-        "started",
-        "starts",
-        "called",
-        "calls",
-        "joined",
-        "joins",
-        "left",
-        "leaves",
-        "replied",
-        "replies",
-        "mentioned",
-        "mentions",
-        "pinged",
-        "pings",
-        "posted",
-        "posts",
-        "reacted",
-        "reacts",
-        "uploaded",
-        "uploads",
-        "shared",
-        "shares",
-        "playing",
-        "paused",
-        "changed",
-        "updated",
-    ];
-    VERBS
-        .iter()
-        .any(|v| text.split_whitespace().any(|w| w.eq_ignore_ascii_case(v)))
-}
-
-/// Extract a leading name from "Alice spoke in room" -> "Alice".
-/// Rejects generic sentence prefixes ("New", "Voice", "Audio", …) so
-/// summaries like "Voice Activity" do not produce "Message from Voice
-/// Activity".
-fn extract_leading_name(text: &str) -> Option<String> {
-    const GENERIC_PREFIX: &[&str] = &[
-        "new",
-        "a",
-        "an",
-        "the",
-        "this",
-        "that",
-        "voice",
-        "audio",
-        "video",
-        "incoming",
-        "notification",
-        "system",
-        "app",
-        "activity",
-        "alert",
-    ];
-    let words: Vec<&str> = text.split_whitespace().collect();
-    if words.is_empty() {
-        return None;
-    }
-    if GENERIC_PREFIX
-        .iter()
-        .any(|p| words[0].eq_ignore_ascii_case(p))
-    {
-        return None;
-    }
-    let is_name_word = |w: &str| -> bool {
-        !w.is_empty()
-            && w.chars()
-                .all(|c| c.is_alphabetic() || c == '-' || c == '_' || c == '.')
-            && w.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
-    };
-    let mut name_parts = Vec::new();
-    for w in words.iter().take(3) {
-        if is_name_word(w) {
-            name_parts.push(*w);
-        } else {
-            break;
-        }
-    }
-    if name_parts.is_empty() {
-        None
-    } else {
-        Some(name_parts.join(" "))
-    }
-}
-
-/// Extract "Alice" from "New Message from Alice" / "Call from Alice".
-/// Returns None when there is no " from " separator.
-
-/// Try to find a person name inside a summary that is NOT of the
-/// form "… from Name". Handles common Electron/Horizon shapes:
-///   "Genesis Frost: New Message"  -> "Genesis Frost"
-///   "Genesis Frost - New Message" -> "Genesis Frost"
-///   "Genesis Frost spoke in…"     -> "Genesis Frost"
-/// Returns None if the summary does not start with a name-like phrase.
-fn extract_name_from_summary(text: &str) -> Option<String> {
-    const MAX_NAME_CHARS: usize = 40;
-    // 1) "Name: rest" — split on the first colon
-    if let Some(idx) = text.find(':') {
-        let candidate = text[..idx].trim();
-        if !candidate.is_empty()
-            && candidate.chars().count() <= MAX_NAME_CHARS
-            && candidate.chars().any(|c| c.is_alphabetic())
-        {
-            return Some(candidate.to_string());
-        }
-    }
-    // 2) "Name - rest" — split on " - "
-    if let Some(idx) = text.find(" - ") {
-        let candidate = text[..idx].trim();
-        if !candidate.is_empty() && candidate.chars().count() <= MAX_NAME_CHARS {
-            return Some(candidate.to_string());
-        }
-    }
-    // 3) "Name <verb> rest" — leading words before the first action verb
-    let words: Vec<&str> = text.split_whitespace().collect();
-    for (i, w) in words.iter().enumerate() {
-        if looks_like_action(w) && i > 0 {
-            let candidate = words[..i].join(" ");
-            if candidate.chars().count() <= MAX_NAME_CHARS {
-                return Some(candidate);
-            }
-            break;
-        }
-    }
-    None
-}
-
-fn extract_from_phrase(text: &str) -> Option<String> {
-    let lower = text.to_lowercase();
-    let idx = lower.find(" from ")?;
-    let after = text[idx + 6..].trim();
-    if after.is_empty() {
-        return None;
-    }
-    let name: String = after
-        .split_whitespace()
-        .take(3)
-        .collect::<Vec<_>>()
-        .join(" ");
-    let trimmed = name.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '-');
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
-pub fn dnd_flag_path() -> PathBuf {
-    crate::libraries::process::mbs_runtime_dir().join("moonbeauty-dnd")
-}
-
-struct DndCache {
-    active: bool,
-    fetched_at: Instant,
-}
-
-static DND_CACHE: std::sync::OnceLock<std::sync::Mutex<DndCache>> = std::sync::OnceLock::new();
-
-fn dnd_cache() -> &'static std::sync::Mutex<DndCache> {
-    DND_CACHE.get_or_init(|| {
-        std::sync::Mutex::new(DndCache {
-            active: false,
-            fetched_at: Instant::now() - std::time::Duration::from_secs(60),
-        })
-    })
-}
-
-pub fn dnd_active() -> bool {
-    // Fix 4: 250 ms stat cache. Called at 2-5 Hz from bar capsules
-    // and both the unified and net tooltips.
-    let mut g = dnd_cache().lock().unwrap();
-    if g.fetched_at.elapsed() > std::time::Duration::from_millis(250) {
-        g.active = dnd_flag_path().exists();
-        g.fetched_at = Instant::now();
-    }
-    g.active
-}
-
-pub fn toggle_dnd() -> bool {
-    let p = dnd_flag_path();
-    let state = if p.exists() {
-        let _ = fs::remove_file(&p);
-        eprintln!("[dnd] flag file removed: {:?}", p);
-        false
-    } else {
-        let _ = crate::libraries::process::private_write_file(&p, b"1");
-        eprintln!("[dnd] flag file created: {:?}", p);
-        true
-    };
-    // Fix 4: propagate immediately, don't wait for the 250 ms cache TTL.
-    if let Ok(mut g) = dnd_cache().lock() {
-        g.active = state;
-        g.fetched_at = Instant::now();
-    }
-    state
-}
-
-pub fn held_notifs_path() -> PathBuf {
-    crate::libraries::process::mbs_runtime_dir().join("moonbeauty-held-notifs.json")
-}
-
-pub fn load_held_notifs() -> Vec<NotificationToast> {
-    // Finding 47: 16 MB cap (80 history × ~4 KB × 50 = 16 MB headroom;
-    // a real DND storm can reach this). Prevents a pre-fix file written
-    // at 400 MB from OOMing on read.
-    crate::libraries::process::read_json_capped::<Vec<NotificationToast>>(
-        &held_notifs_path(),
-        16 * 1024 * 1024,
-    )
-    .unwrap_or_default()
-}
-
-pub fn save_held_notifs(toasts: &[NotificationToast]) {
-    let p = held_notifs_path();
-    if toasts.is_empty() {
-        let _ = fs::remove_file(&p);
-    } else if let Ok(json) = serde_json::to_string(toasts) {
-        let tmp = p.with_extension("tmp");
-        if crate::libraries::process::private_write_file(&tmp, json.as_bytes()).is_ok() {
-            let _ = fs::rename(&tmp, &p);
-        }
-    }
-    let mtime = std::fs::metadata(&p).ok().and_then(|m| m.modified().ok());
-    let mut g = held_cache().lock().unwrap();
-    g.count = toasts.len();
-    g.fetched_at = Instant::now();
-    g.mtime = mtime;
-}
-
-struct HeldCache {
-    count: usize,
-    fetched_at: Instant,
-    mtime: Option<std::time::SystemTime>,
-}
-static HELD_CACHE: std::sync::OnceLock<std::sync::Mutex<HeldCache>> = std::sync::OnceLock::new();
-
-fn held_cache() -> &'static std::sync::Mutex<HeldCache> {
-    HELD_CACHE.get_or_init(|| {
-        std::sync::Mutex::new(HeldCache {
-            count: 0,
-            fetched_at: Instant::now() - std::time::Duration::from_secs(60),
-            mtime: None,
-        })
-    })
-}
-
-pub fn held_notifs_count() -> usize {
-    // Fix 3: only re-parse when the file's mtime changed. load_held_notifs
-    // can parse up to 16 MB; called at 2-5 Hz from the bar, this was
-    // re-parsing once per second during sustained DND. Now: one stat()
-    // per call, parse only on mtime change (or 60 s safety net).
-    let path = held_notifs_path();
-    let mtime = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok());
-    let mut g = held_cache().lock().unwrap();
-    if g.mtime != mtime || g.fetched_at.elapsed() > std::time::Duration::from_secs(60) {
-        g.count = load_held_notifs().len();
-        g.fetched_at = Instant::now();
-        g.mtime = mtime;
-    }
-    g.count
-}
-
-pub fn take_held_notifs() -> Vec<NotificationToast> {
-    let list = load_held_notifs();
-    let _ = fs::remove_file(held_notifs_path());
-    let mut g = held_cache().lock().unwrap();
-    g.count = 0;
-    g.fetched_at = Instant::now();
-    g.mtime = None;
-    list
-}
-
-// ── Cross-process active count ─────────────────────────────────────
-//
-// The bar's notification capsule needs to know how many notifications
-// are currently on screen or queued. Those live in the notif-surface
-// process's memory (`active_toasts` + `pending_toasts`), not the bar.
-// The notif-surface writes this count to a small file on every change
-// (plus a heartbeat), and the bar reads it with a short cache.
-
-pub fn active_count_path() -> PathBuf {
-    crate::libraries::process::mbs_runtime_dir().join("moonbeauty-active-count")
-}
-
-/// Notif-surface calls this on any change to active+pending count.
-pub fn write_active_count(count: usize) {
-    let p = active_count_path();
-    let tmp = p.with_extension("tmp");
-    if crate::libraries::process::private_write_file(&tmp, count.to_string().as_bytes()).is_ok() {
-        let _ = fs::rename(tmp, p);
-    }
-}
-
-struct ActiveCountCache {
-    count: usize,
-    fetched_at: Instant,
-}
-static ACTIVE_COUNT_CACHE: std::sync::OnceLock<std::sync::Mutex<ActiveCountCache>> =
-    std::sync::OnceLock::new();
-
-fn active_count_cache() -> &'static std::sync::Mutex<ActiveCountCache> {
-    ACTIVE_COUNT_CACHE.get_or_init(|| {
-        std::sync::Mutex::new(ActiveCountCache {
-            count: 0,
-            fetched_at: Instant::now() - std::time::Duration::from_secs(60),
-        })
-    })
-}
-
-/// Bar-side read. Cached 250ms (fast enough to feel instant on DND
-/// toggle, slow enough to avoid hammering the file during animation).
-pub fn read_active_count() -> usize {
-    let mut g = active_count_cache().lock().unwrap();
-    if g.fetched_at.elapsed() > std::time::Duration::from_millis(250) {
-        g.count = read_active_count_uncached();
-        g.fetched_at = Instant::now();
-    }
-    g.count
-}
-
-fn read_active_count_uncached() -> usize {
-    let p = active_count_path();
-    let Ok(meta) = fs::metadata(&p) else {
-        return 0;
-    };
-    // Stale detection: if the notif-surface has been dead for >10s,
-    // treat as 0 so the capsule doesn't show a phantom count forever.
-    if let Ok(modified) = meta.modified() {
-        if let Ok(elapsed) = modified.elapsed() {
-            if elapsed.as_secs() > 10 {
-                return 0;
-            }
-        }
-    }
-    fs::read_to_string(&p)
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

@@ -1,7 +1,6 @@
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Stack};
 use iced::{Alignment, Color, Element, Length, Padding};
 use std::path::PathBuf;
-use tokio::process::Command;
 use walkdir::WalkDir;
 
 use crate::libraries::config::settings::ShellSettings;
@@ -98,17 +97,6 @@ impl PassOverlay {
                     .collect();
             }
         }
-    }
-
-    pub async fn copy_password(key: &str) {
-        let clean = key.trim();
-        if clean.is_empty() {
-            return;
-        }
-        let _ = Command::new("pass").args(["-c", clean]).status().await;
-        let _ = Command::new("notify-send")
-            .args(["-a", "Password Store", "Credential Copied", clean])
-            .spawn();
     }
 
     pub fn view<'a>(

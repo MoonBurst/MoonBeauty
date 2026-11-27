@@ -129,20 +129,11 @@ pub fn run(args: &[String]) {
                     items = parsed;
                 }
             }
-            let mut text_preview = if is_image {
+            let text_preview = if is_image {
                 String::new()
             } else {
                 String::from_utf8_lossy(&bytes[..bytes.len().min(100)]).to_string()
             };
-
-            if is_image {
-                let name_file = crate::libraries::process::mbs_runtime_dir()
-                    .join("mbs-last-clip-name.txt");
-                if let Ok(txt) = std::fs::read_to_string(&name_file) {
-                    text_preview = txt.trim().to_string();
-                    let _ = std::fs::remove_file(&name_file);
-                }
-            }
 
             // Dedupe by content hash. `wl-paste --watch` can fire more
             // than once per wl-copy (fork-mode ownership change), which
@@ -176,8 +167,6 @@ pub fn run(args: &[String]) {
             if items.first().and_then(|t| t.content_hash.as_deref()) == Some(incoming_hash.as_str())
             {
                 eprintln!("[clipboard-ingest] duplicate content, skipping insert");
-                // The mbs-last-clip-name.txt we may have read from the
-                // first fire is already consumed; nothing left to do.
                 std::process::exit(0);
             }
 

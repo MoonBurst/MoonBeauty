@@ -1,13 +1,4 @@
 //! Shared tooltip rendering primitives.
-//!
-//! Extracted from bar/weather/tooltip.rs, overlays/system_tooltip.rs,
-//! and overlays/info_tooltip.rs. Those three files each independently
-//! defined `slanted_row`, and two of them each defined `KillButtonShape`
-//! (struct + impl). Every tooltip layout tweak required editing every
-//! copy. Consolidating here makes those changes one-file again.
-//!
-//! Extraction is behavior-preserving: the bodies are byte-identical to
-//! the originals (verified programmatically before extraction).
 
 use iced::widget::canvas::{self, Frame, Geometry, Path, Stroke};
 use iced::widget::{container, row};
@@ -187,51 +178,6 @@ impl<Message> canvas::Program<Message> for KillButtonShape {
     }
 }
 
-pub struct TooltipEnv {
-    pub cx: i32,
-    pub sw: i32,
-    pub grow_right: bool,
-    pub w_start: f32,
-    pub slant_l: crate::libraries::style::shape_box::SlantSide,
-    pub slant_r: crate::libraries::style::shape_box::SlantSide,
-}
-
-impl TooltipEnv {
-    pub fn from_env(default_w_start: f32) -> Self {
-        use crate::libraries::style::shape_box::SlantSide;
-        let cx: i32 = std::env::var("MBS_CAPSULE_CX")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(200);
-        let sw: i32 = std::env::var("MBS_SCREEN_W")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1920);
-        let grow_right = std::env::var("MBS_GROW_RIGHT")
-            .map(|v| v == "1")
-            .unwrap_or_else(|_| cx < sw / 2);
-        let w_start: f32 = std::env::var("MBS_CAPSULE_W")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(default_w_start);
-        let parse_slant = |key: &str| -> SlantSide {
-            if std::env::var(key).as_deref() == Ok("R") {
-                SlantSide::Right
-            } else {
-                SlantSide::Left
-            }
-        };
-        Self {
-            cx,
-            sw,
-            grow_right,
-            w_start,
-            slant_l: parse_slant("MBS_SLANT_L"),
-            slant_r: parse_slant("MBS_SLANT_R"),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct InBarTooltipConfig {
     pub id: String,
@@ -245,27 +191,6 @@ pub struct InBarTooltipConfig {
     pub slant_r: crate::libraries::style::shape_box::SlantSide,
     pub drop_ms: f32,
     pub expand_ms: f32,
-}
-
-pub fn layer_anchor_and_margin(
-    s: &crate::libraries::config::ShellSettings,
-    w: u32,
-    center_on_capsule: bool,
-) -> (iced_layershell::reexport::Anchor, (i32, i32, i32, i32)) {
-    let cx: i32 = std::env::var("MBS_CAPSULE_CX")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(200);
-    let sw: i32 = std::env::var("MBS_SCREEN_W")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1920);
-    let cap_w: f32 = std::env::var("MBS_CAPSULE_W")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(100.0);
-    let (bias_l, bias_r) = crate::bar::tooltip_spawn::read_offset_extra();
-    layer_anchor_and_margin_for(s, w, center_on_capsule, cx, sw, cap_w, bias_l, bias_r)
 }
 
 pub fn layer_anchor_and_margin_for(

@@ -58,7 +58,7 @@ pub enum ClipFilter {
     Images,
 }
 
-// ── Payload dispatch (fix4) ────────────────────────────────────────
+// ── Payload dispatch ───────────────────────────────────────────────
 // Firefox requests image/png for raw image bytes; JPEG/WebP/GIF/JXL
 // blobs are silently ignored on paste. text/uri-list is universally
 // accepted — the target loads the file via its own decoders
@@ -77,9 +77,7 @@ impl Payload {
             "png" => Self::Bytes("image/png"),
             "jpg" | "jpeg" => Self::Bytes("image/jpeg"),
             // Text content: serve actual bytes as text/plain so
-            // pasting a text entry yields the text, not a file://
-            // URI. The UriList path exists only because Firefox/
-            // Chrome silently ignore non-PNG image payloads.
+            // pasting a text entry yields the text, not a file:// URI.
             "txt" => Self::Bytes("text/plain;charset=utf-8"),
             _ => Self::UriList,
         }
@@ -107,10 +105,8 @@ pub fn serve_uri_list(paths: &[std::path::PathBuf]) {
     }
 }
 
-/// Ensure a persistent PNG companion exists for a JXL file.  Generated
-/// once via djxl, resized to max 1600px wide (screenshot-sized, keeps
-/// file small), reused forever.  Companion lives next to the .jxl as
-/// `{stem}.preview.png`.
+/// Ensure a persistent PNG companion exists for an image file,
+/// resized to max 512px and saved as `{stem}.preview.png`.
 pub fn ensure_image_preview(path: &std::path::Path) -> Option<std::path::PathBuf> {
     let ext = path
         .extension()
@@ -141,11 +137,10 @@ pub fn ensure_image_preview(path: &std::path::Path) -> Option<std::path::PathBuf
             .stderr(std::process::Stdio::null())
             .status();
 
-        if status.map(|s| s.success()).unwrap_or(false) {
-            if std::fs::rename(&tmp_path, &png_path).is_ok() {
+        if status.map(|s| s.success()).unwrap_or(false)
+            && std::fs::rename(&tmp_path, &png_path).is_ok() {
                 return Some(png_path);
             }
-        }
         let _ = std::fs::remove_file(&tmp_path);
     }
 
@@ -244,8 +239,6 @@ impl ClipboardOverlay {
         }
     }
 
-    /// Look up a ClipItem by id from index.json.
-
     /// Ingest a file into the index by reference. Used by annotator
     /// save and URI-list ingest. Sync — no tokio runtime needed.
     pub fn add_entry(source: &std::path::Path, display_name: Option<String>) -> Option<u64> {
@@ -314,8 +307,7 @@ impl ClipboardOverlay {
         let ext_owned = ext.to_string();
 
         // Copy the file into the clipboard cache so it's self-contained.
-        // std::fs::copy inherits the source file's mode (could be 0644),
-        // so chmod explicitly to 0600.
+        // std::fs::copy inherits the source file's mode, so chmod explicitly to 0600.
         let dest_path = dir.join(format!("{}.{}", id, ext));
         if std::fs::copy(source, &dest_path).is_err() {
             return None;
@@ -361,8 +353,7 @@ impl ClipboardOverlay {
         Some(id)
     }
 
-    /// Resolve the preferred paste path: source_path if the file still
-    /// exists, else the cache copy.
+    /// Resolve the preferred paste path: cache copy if present, else source_path.
     pub fn resolve_path(id: u64) -> Option<std::path::PathBuf> {
         let dir = dirs::data_dir()
             .unwrap_or_else(std::env::temp_dir)
@@ -394,17 +385,9 @@ impl ClipboardOverlay {
         None
     }
 
-    /// Return a path iced's image widget can actually render. iced 0.14's
-    /// decoder path goes through `image::load_from_memory`, which uses
-    /// magic-byte detection that doesn't know JXL. For `.jxl` entries we
-    /// generate a one-time `{id}.preview.png` companion via the registered
-    /// JXL decoder and return that instead. PNG is iced-native, so this
-    /// always renders.
-
     /// Like `get_file_path` but uses a known extension for a single
     /// stat instead of walking the ext list. Falls back to the stat
-    /// loop when `ext` is None (pre-patch entries) or the ext-named
-    /// file is missing (deleted, moved, or old id-collision).
+    /// loop when `ext` is None or the ext-named file is missing.
     pub fn get_file_path_with_ext(
         dir: &std::path::Path,
         id: u64,

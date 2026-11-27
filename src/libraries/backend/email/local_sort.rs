@@ -143,8 +143,8 @@ pub fn auto_sort(
             if let Some(name) = folder_name {
                 for env in envs {
                     let k = format!("{}@{}", env.id, gmail_folder);
-                    if !state.assignments.contains_key(&k) {
-                        state.assignments.insert(k, name.clone());
+                    if let std::collections::hash_map::Entry::Vacant(e) = state.assignments.entry(k) {
+                        e.insert(name.clone());
                         assigned += 1;
                     }
                 }

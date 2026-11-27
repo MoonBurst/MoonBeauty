@@ -1,20 +1,6 @@
 //! App core: Message enum + MoonBeautyShellApp struct.
 //!
-//! Bin-only module (submodule of main.rs). Not part of the
-//! `moonbeauty` library crate — the app orchestrator is
-//! binary-only.
-//!
-//! Commit 10a scope: type definitions only. All `impl MoonBeautyShellApp`
-//! blocks and helper functions still live in main.rs and reference these
-//! types via `use app::{Message, MoonBeautyShellApp};`.
-//!
-//! Subsequent commits (10b+) will progressively move:
-//!   - update()      (10b)
-//!   - view()        (10c)
-//!   - subscription()(10d)
-//!   - new_app() + small impls (10e)
-//!   - helpers        (10f)
-//!   - split app.rs into app/{mod,update,view,...} submodules (10g)
+//! Bin-only module (submodule of main.rs).
 
 pub mod helpers;
 pub mod keys;
@@ -24,12 +10,9 @@ pub mod update;
 pub mod view;
 
 // Helper functions from crate root (main.rs). Rust allows child modules
-// to reach parent-module items without them being `pub` (child modules
-// see the parent's private namespace). Plain `use` — not `pub use` —
-// because we don't need to re-export them outside `app`.
+// to reach parent-module items without them being `pub`.
 use crate::{detect_notif_surface, detect_standalone_overlay};
 use moonbeauty::libraries::process::resolve_exe;
-// Keyboard handlers now live in their respective feature modules.
 
 use iced::widget::{container, Stack};
 use iced::{Element, Length, Padding, Task as Command};
@@ -74,8 +57,6 @@ pub enum Message {
     ResizeNotifSurface(Option<iced::window::Id>, u32, u32),
     OpenNotifLayer(iced::window::Id, iced_layershell::reexport::NewLayerShellSettings),
     CloseNotifLayer(iced::window::Id),
-    // WindowResized removed (problem 07): emitted by resize_sub but
-    // the only consumer (view_toasts _window_w) ignored it.
     TopBar(TopBarMessage),
     Launcher(LauncherMessage),
     Calc(CalcMessage),
@@ -98,26 +79,18 @@ pub enum Message {
     DismissActiveOverlay,
     CloseShell,
     /// Background fetch of tray items — fires on startup and
-    /// every 15s. Ensures the first open has a correct
-    /// item count (avoids the 206→186 re-animation flicker).
+    /// every 15s so the first open animates straight to the right width.
     FetchTrayItems,
     TrayItemsLoaded(Vec<moonbeauty::bar::tray::TrayItem>),
     TrayWatchdogTick,
     InBarWeatherTip(moonbeauty::bar::weather::tooltip::Message),
     InBarSysTip(moonbeauty::overlays::system_tooltip::Message),
     InBarInfoTip(moonbeauty::overlays::info_tooltip::Message),
-    /// Pre-computed toast rectangles (surface-local coords). Emitted
-    /// whenever the toast count changes; `try_into` converts it to
-    /// `LayershellCustomAction::SetInputRegion` so the layer surface's
-    /// click target shrinks to just the visible toasts. Everything else
-    /// (the empty area around/above/below toasts) becomes pass-through.
+    /// Pre-computed toast rectangles (surface-local coords) emitted
+    /// whenever the toast count changes so `SetInputRegion` shrinks the
+    /// layer surface's click target to just the visible toasts.
     SetToastInputRegion(Option<iced::window::Id>, Vec<(i32, i32, i32, i32)>),
     RequestXdgActivation(iced_layershell::actions::ActivationCallback),
-    /// Fires from the 500ms subscription. If `standalone_child` is
-    /// Lockscreen and has exited (TTY switch, panic, SIGKILL), respawn
-    /// it immediately. Lockscreen must NEVER be absent — a dead lock is
-    /// an unlocked screen. Runs fast (500ms) so the worst-case window
-    /// between crash and respawn is 500ms + child boot (~300ms).
     /// Music cycle press completed — carries the updated state so
     /// subsequent presses continue from the right position.
     MusicCycleDone(moonbeauty::libraries::backend::MusicCycleState),
@@ -192,8 +165,6 @@ pub struct MoonBeautyShellApp {
         std::sync::mpsc::Receiver<moonbeauty::overlays::notifications::IncomingNotification>,
     >,
     pub settings_json_mtime: Option<std::time::SystemTime>,
-    // window_w removed (problem 07): the only setter was WindowResized
-    // and the only reader was view_toasts, which ignored it.
     pub notif_screen_at_startup: String,
     pub notif_surface_size: (u32, u32),
     pub notif_surface_child: Option<std::process::Child>,
@@ -234,8 +205,7 @@ pub struct MoonBeautyShellApp {
     pub settings_ui: SettingsOverlay,
     pub lockscreen: LockscreenOverlay,
     /// Music cycle state — which player to target next, and which we
-    /// most recently started (for pause priority when multiple are
-    /// playing). See backend/music_cycle.rs.
+    /// most recently started (for pause priority when multiple are playing).
     pub music_cycle_state: moonbeauty::libraries::backend::MusicCycleState,
     pub is_cycling: bool,
 

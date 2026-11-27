@@ -183,6 +183,119 @@ impl MoonBeautyShellApp {
                 }
                 return Command::none();
             }
+            EmailMessage::OpenInBrowser => {
+                if let Some(id) = &self.email.active_mail_id {
+                    let cache_file = dirs::data_dir()
+                        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+                        .join("moonbeauty/email_cache")
+                        .join(&self.email.active_folder)
+                        .join(format!("{}.eml", id));
+                    if cache_file.exists() {
+                        return Command::perform(
+                            async move {
+                                let _ = tokio::process::Command::new("xdg-open")
+                                    .arg(cache_file)
+                                    .spawn();
+                            },
+                            |_| Message::Noop,
+                        );
+                    }
+                }
+                return Command::none();
+            }
+            EmailMessage::SaveAttachment(name) => {
+                if let Some(email) = &self.email.parsed_email {
+                    if let Some((_, data)) = email.attachments.iter().find(|(n, _)| n == &name) {
+                        // Sanitize: keep only the basename, strip leading dots.
+                        let safe_name: String = std::path::Path::new(&name)
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .map(|s| s.trim_start_matches('.').to_string())
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or_else(|| "attachment".to_string());
+                        let data = data.clone();
+                        let configured_dir =
+                            self.settings.attachment_download_dir.trim().to_string();
+                        return Command::perform(
+                            async move {
+                                tokio::task::spawn_blocking(move || {
+                                    let home = dirs::home_dir()
+                                        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+                                    let download_dir = if !configured_dir.is_empty() {
+                                        std::path::PathBuf::from(configured_dir)
+                                    } else {
+                                        let fallback_dl = home.join("Downloads");
+                                        match dirs::download_dir() {
+                                            Some(d) => d,
+                                            None if fallback_dl.exists() => fallback_dl,
+                                            None => {
+                                                let _ = std::fs::create_dir_all(&fallback_dl);
+                                                fallback_dl
+                                            }
+                                        }
+                                    };
+                                    let _ = std::fs::create_dir_all(&download_dir);
+                                    let out_path = moonbeauty::overlays::email::unique_download_path(
+                                        &download_dir,
+                                        &safe_name,
+                                    );
+                                    moonbeauty::dbg_log!("[attach] saving to {:?}", out_path);
+                                    if moonbeauty::libraries::process::private_write_new(
+                                        &out_path, &data,
+                                    )
+                                    .is_ok()
+                                    {
+                                        if moonbeauty::overlays::email::is_safe_to_auto_open(
+                                            &out_path,
+                                        ) {
+                                            let _ = moonbeauty::libraries::process::spawn_and_reap(
+                                                std::process::Command::new("notify-send").args([
+                                                    "-a",
+                                                    "Email",
+                                                    "Attachment Saved",
+                                                    &format!("Saved to {}", out_path.display()),
+                                                ]),
+                                            );
+                                            let _ = moonbeauty::libraries::process::spawn_and_reap(
+                                                std::process::Command::new("xdg-open")
+                                                    .arg(&out_path),
+                                            );
+                                        } else {
+                                            let _ = moonbeauty::libraries::process::spawn_and_reap(
+                                                std::process::Command::new("notify-send").args([
+                                                    "-a",
+                                                    "Email",
+                                                    "Attachment Saved",
+                                                    &format!(
+                                                        "Saved (not auto-opened for safety) → {}",
+                                                        out_path.display()
+                                                    ),
+                                                ]),
+                                            );
+                                        }
+                                    } else {
+                                        let _ = moonbeauty::libraries::process::spawn_and_reap(
+                                            std::process::Command::new("notify-send").args([
+                                                "-a",
+                                                "Email",
+                                                "Save Failed",
+                                                &format!(
+                                                    "Could not write to {}",
+                                                    out_path.display()
+                                                ),
+                                            ]),
+                                        );
+                                    }
+                                })
+                                .await
+                                .ok();
+                            },
+                            |_| Message::Noop,
+                        );
+                    }
+                }
+                return Command::none();
+            }
             EmailMessage::SelectMailNext | EmailMessage::SelectMailPrev => {
                 if self.email.is_composing || self.email.is_logging_in || self.email.is_adding_folder {
                     return Command::none();
@@ -521,7 +634,6 @@ impl MoonBeautyShellApp {
                         |_| Message::Email(EmailMessage::SyncDone),
                     );
                 } else {
-                    // Not a local folder — inform the user
                     let _ = std::process::Command::new("notify-send")
                         .args([
                             "-a",
@@ -635,8 +747,7 @@ impl MoonBeautyShellApp {
                     }
                 }
             }
-            EmailMessage::OpenInBrowser
-            | EmailMessage::GetAppPassword
+            EmailMessage::GetAppPassword
             | EmailMessage::SelectContact(_)
             | EmailMessage::SelectAutocompleteNext
             | EmailMessage::SelectAutocompletePrev

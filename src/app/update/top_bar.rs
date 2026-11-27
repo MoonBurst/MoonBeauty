@@ -1,18 +1,8 @@
 //! Top bar message dispatch.
 //!
-//! Extracted from `app/update.rs` (tracker item
-//! `topbar-sub-extraction.md`, patch 3 of 3). Handles the entire
-//! `TopBarMessage` enum:
-//!
-//! - `Action(CapsuleAction)` — every bar capsule click dispatches
-//!   here. Delegates to `handle_capsule_action` (extracted in
-//!   patch 2), which covers music control, audio mute/cycle, tray
-//!   expand/activate/context-menu, GPU cycle, tooltip toggle, and
-//!   overlay spawn.
-//! - `Noop` — the no-operation message used by async Command
-//!   completions (e.g. `Command::perform(async { ... }, |_|
-//!   Message::TopBar(TopBarMessage::Noop))`). Falls through to
-//!   `Command::none()`.
+//! Handles the `TopBarMessage` enum:
+//! - `Action(CapsuleAction)` — bar capsule clicks, delegated to `handle_capsule_action`.
+//! - `Noop` — no-op completion message for async commands.
 
 use super::*;
 

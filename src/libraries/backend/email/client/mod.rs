@@ -1,11 +1,8 @@
 //! Email client: config, IMAP/SMTP, MIME parsing, secure filesystem.
 //!
-//! Extracted submodules (structural split, no behavior change):
+//! Extracted submodules:
 //!   types.rs       — NativeEnvelope, ParsedEmail
 //!   validation.rs  — is_safe_imap_uid, is_safe_imap_folder
-//!
-//! Everything else is still in this file.  See docs/REFACTOR.md for
-//! remaining split targets.
 
 mod secure_fs;
 mod types;
@@ -177,10 +174,7 @@ pub fn save_config(cfg: &EmailConfig, use_sops: bool) -> Result<(), String> {
     let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
 
     if use_sops {
-        // Finding 03 hardening: plaintext config no longer lands as a
-        // predictable filename in ~/.config. mbs_unique_tmp gives tmpfs
-        // storage (RAM, wiped on reboot) with an unpredictable name,
-        // shrinking the crash window between write and sops invocation.
+        // Write plaintext temp config in tmpfs with an unpredictable name before sops encrypts it.
         let tmp = crate::libraries::process::mbs_unique_tmp("mbs-email-plain", "json");
         crate::libraries::process::private_write_new(&tmp, json.as_bytes())
             .map_err(|e| e.to_string())?;
@@ -279,7 +273,7 @@ pub fn save_config(cfg: &EmailConfig, use_sops: bool) -> Result<(), String> {
                 .mode(0o600)
                 .open(&enc_path)
                 .map_err(|e| e.to_string())?;
-            // Finding 03: force 0600 on the final encrypted file too.
+            // Force 0600 on the final encrypted file.
             let _ = chmod_private(&enc_path, false);
             f.write_all(&out.stdout).map_err(|e| e.to_string())?;
             let _ = std::fs::remove_file(&path);
@@ -313,9 +307,7 @@ pub fn save_config(cfg: &EmailConfig, use_sops: bool) -> Result<(), String> {
             .mode(0o600)
             .open(&path)
             .map_err(|e| e.to_string())?;
-        // Finding 03: OpenOptions::mode() is a no-op on existing files.
-        // Pre-fix builds may have left email.json at 0644 (plaintext
-        // app-password inside), so force 0600 explicitly.
+        // Force 0600 on existing files (OpenOptions::mode() only applies on creation).
         let _ = chmod_private(&path, false);
         f.write_all(json.as_bytes()).map_err(|e| e.to_string())?;
         Ok(())
@@ -387,7 +379,7 @@ pub fn load_config() -> EmailConfig {
             .mode(0o600)
             .open(&path)
         {
-            // Finding 03: same upgrade-path fix as save_config.
+            // Force 0600 on existing files.
             let _ = chmod_private(&path, false);
             let _ = f.write_all(json.as_bytes());
         }
@@ -395,18 +387,7 @@ pub fn load_config() -> EmailConfig {
     def
 }
 
-// ── Secure filesystem helpers (finding 03) ────────────────────────
-//
-// Every write to the email cache, drafts file, and folders list must
-// land at mode 0600 (owner RW, no group/other access). Prior code used
-// std::fs::write / tokio::fs::write / bare OpenOptions, which inherit
-// umask (default 022 → 0644). On a multi-user host that made every
-// cached email body, attachment, and draft readable by other local
-// users. Sink-level fix: all writes go through these helpers.
-//
-// Note: OpenOptions.mode() only applies to NEW files. If the file
-// already exists at 0644, mode() is a no-op — so we also chmod
-// explicitly after opening. That's what chmod_private exists for.
+// ── Secure filesystem helpers ────────────────────────────────────
 
 fn get_cache_dir(folder: &str) -> PathBuf {
     let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
@@ -428,8 +409,7 @@ fn get_cache_dir_with_root(root: &std::path::Path, folder: &str) -> PathBuf {
     }
     let path: PathBuf = components.iter().map(String::as_str).collect();
     let path = root.join(&path);
-    // Defense-in-depth: sanitize is unit-tested; if a future refactor
-    // weakens it, refuse rather than traverse.
+    // Defense-in-depth: refuse any path that escapes root.
     if !path.starts_with(root) || path == root {
         eprintln!(
             "[email] SECURITY: refusing unsafe cache path {:?} (root {:?})",
@@ -444,9 +424,7 @@ pub fn load_index(folder: &str) -> Vec<NativeEnvelope> {
     let path = get_cache_dir(folder).join("index.json");
     if let Ok(content) = std::fs::read_to_string(path) {
         if let Ok(mut envs) = serde_json::from_str::<Vec<NativeEnvelope>>(&content) {
-            // Finding 29: reject poisoned envelopes from a hand-edited
-            // or old-version index.json before their ids can reach
-            // uid_fetch/uid_store/uid_copy.
+            // Reject non-numeric envelope ids before they reach IMAP uid_* commands.
             let before = envs.len();
             envs.retain(|e| is_safe_imap_uid(&e.id));
             if envs.len() < before {
@@ -824,9 +802,7 @@ pub async fn fetch_from_network(folder: &str) -> Result<Vec<NativeEnvelope>, Str
     if std::env::var_os("MBS_DEBUG").is_some() {
         eprintln!("[sync] fetch_from_network called for {}", folder);
     }
-    // Finding 28: defense-in-depth at the network sink. Even a folder
-    // from a stale cache (or from auto_sort's sender-derived names) must
-    // pass this check before reaching SELECT.
+    // Validate folder name before reaching IMAP SELECT.
     if !is_safe_imap_folder(folder) {
         return Err(format!("unsafe folder name: {:?}", folder));
     }
@@ -900,11 +876,10 @@ pub async fn fetch_from_network(folder: &str) -> Result<Vec<NativeEnvelope>, Str
 }
 
 async fn fetch_raw_message(id: &str, folder: &str) -> Result<Vec<u8>, String> {
-    // Finding 29: numeric-uid gate before uid_fetch.
+    // Numeric-uid and folder gates before IMAP commands.
     if !is_safe_imap_uid(id) {
         return Err(format!("unsafe message id: {:?}", id));
     }
-    // Finding 28: defense-in-depth at the network sink.
     if !is_safe_imap_folder(folder) {
         return Err(format!("unsafe folder name: {:?}", folder));
     }
@@ -982,8 +957,7 @@ pub async fn sync_bodies_background(folder: String) {
             }
         };
     let imap_folder = map_gmail_folder(&folder);
-    // Finding 28 defense-in-depth: fetch_from_network validates at the
-    // sink, but sync_bodies_background may be called from other paths.
+    // Validate folder name before SELECT.
     if !is_safe_imap_folder(&imap_folder) {
         eprintln!("[sync] refusing unsafe folder: {:?}", imap_folder);
         return;
@@ -999,8 +973,7 @@ pub async fn sync_bodies_background(folder: String) {
         let cache_file = get_cache_dir(&folder).join(format!("{}.eml", env.id));
         if !cache_file.exists() {
             tokio::time::sleep(std::time::Duration::from_secs(12)).await;
-            // Finding 29 defense-in-depth: load_index filters by
-            // is_safe_imap_uid, but this is a network sink.
+            // Numeric-uid gate before uid_fetch.
             if !is_safe_imap_uid(&env.id) {
                 eprintln!("[sync] refusing unsafe uid: {:?}", env.id);
                 continue;
@@ -1010,8 +983,7 @@ pub async fn sync_bodies_background(folder: String) {
                     Ok(fetches) => {
                         if let Some(fetch) = fetches.first() {
                             if let Some(body) = fetch.body() {
-                                // Finding 06: cap body cache at 100 MB. Larger bodies are
-                                // almost always attachments mail-parser couldn't split.
+                                // Cap cached raw email body at 100 MB.
                                 const MAX_BODY: usize = 100 * 1024 * 1024;
                                 if body.len() > MAX_BODY {
                                     eprintln!(
@@ -1048,18 +1020,12 @@ pub async fn read_message(id: &str, folder: &str) -> ParsedEmail {
         }
     }
 
-    // Finding 26: cap raw MIME size BEFORE parse. mail_parser decodes the
-    // full MIME tree in memory; base64/QUOTED-PRINTABLE can expand up to
-    // 3×, so a 500 MB body from a hostile server/peer is a multi-GB
-    // allocation before our post-decode caps (06c/06e) can fire. Matches
-    // the 100 MB cap used in sync_bodies_background (06e) for consistency.
+    // Cap raw MIME size at 100 MB before parsing to bound mail_parser allocations.
     const MAX_RAW: u64 = 100 * 1024 * 1024;
     let cache_file = get_cache_dir(folder).join(format!("{}.eml", id));
     let bytes =
         if cache_file.exists() && cache_file.metadata().map(|m| m.len() > 0).unwrap_or(false) {
-            // Pre-check cached size via metadata (no allocation). Prevents
-            // std::fs::read from loading a hostile 500 MB cache file that
-            // a previous build wrote before batch-2 caps existed.
+            // Pre-check cached size via metadata before allocating.
             if cache_file.metadata().map(|m| m.len()).unwrap_or(0) > MAX_RAW {
                 return ParsedEmail {
                     text: format!(
@@ -1165,7 +1131,7 @@ pub async fn read_message(id: &str, folder: &str) -> ParsedEmail {
                 .to_string();
             let data = attachment.contents().to_vec();
             eprintln!("[email-debug] attachment: {} ({} bytes)", name, data.len());
-            // Finding 06: reject oversize attachments before storing.
+            // Reject attachments over 50 MB.
             const MAX_ATTACH: usize = 50 * 1024 * 1024;
             if data.len() > MAX_ATTACH {
                 eprintln!(
@@ -1199,7 +1165,7 @@ pub async fn read_message(id: &str, folder: &str) -> ParsedEmail {
                     .map(|s| s.trim_start_matches('.').to_string())
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| default_name.clone());
-                // Finding 06: reject oversize inline images before write.
+                // Reject inline images over 10 MB.
                 const MAX_IMG: usize = 10 * 1024 * 1024;
                 if part.contents().len() > MAX_IMG {
                     eprintln!(
@@ -1220,11 +1186,7 @@ pub async fn read_message(id: &str, folder: &str) -> ParsedEmail {
             }
         }
 
-        // Finding 25 (extended): cap body text. A hostile email with
-        // 100 MB of plaintext (or 100 MB after html2text expansion)
-        // would otherwise force iced to shape and lay out the whole
-        // thing inside the email overlay — 100+ MB RSS and multi-second
-        // freeze. 1 MB is ~200 pages of dense text.
+        // Cap rendered body text at 1 MB to keep Iced text layout responsive.
         const MAX_TEXT_BYTES: usize = 1_000_000;
         if parsed_email.text.len() > MAX_TEXT_BYTES {
             let mut cut = MAX_TEXT_BYTES;
@@ -1333,10 +1295,8 @@ pub async fn send_message(
                 content_type_count,
                 raw.len()
             );
-            // Print header section only — the body starts after the
-            // first blank line. Previously logged up to 40 lines, which
-            // for a simple text email leaked 20+ lines of body into
-            // mbs-standalone-*.log (world-readable before finding 11).
+            // Print header section only — the body starts after the first blank line
+            // so body content isn't leaked into mbs-standalone-*.log.
             eprintln!("[send] ─── MIME HEADERS ───");
             for line in raw.lines().take(40) {
                 if line.is_empty() {
@@ -1367,14 +1327,10 @@ pub async fn send_message(
 }
 
 pub async fn toggle_star(id: &str, folder: &str, star: bool) -> Result<(), String> {
-    // Finding 29: numeric-uid gate before uid_store.
+    // Numeric-uid and folder gates before IMAP commands.
     if !is_safe_imap_uid(id) {
         return Err(format!("unsafe message id: {:?}", id));
     }
-
-    // Finding 28 defense-in-depth: sink-level folder validation.
-    // fetch_from_network validates the same sink; these four
-    // mutation fns previously trusted their folder argument.
     if !is_safe_imap_folder(folder) {
         return Err(format!("unsafe folder name: {:?}", folder));
     }
@@ -1457,14 +1413,10 @@ pub async fn mark_not_spam(id: &str) -> Result<(), String> {
 }
 
 pub async fn delete_message(id: &str, folder: &str) -> Result<(), String> {
-    // Finding 29: numeric-uid gate before uid_store.
+    // Numeric-uid and folder gates before IMAP commands.
     if !is_safe_imap_uid(id) {
         return Err(format!("unsafe message id: {:?}", id));
     }
-
-    // Finding 28 defense-in-depth: sink-level folder validation.
-    // fetch_from_network validates the same sink; these four
-    // mutation fns previously trusted their folder argument.
     if !is_safe_imap_folder(folder) {
         return Err(format!("unsafe folder name: {:?}", folder));
     }
@@ -1512,8 +1464,7 @@ pub async fn fetch_folder_list() -> Result<Vec<String>, String> {
         if n.is_empty() || n == "INBOX" || n.starts_with("[Gmail]") {
             continue;
         }
-        // Finding 28: reject hostile server LIST responses. A folder
-        // named "FOO\r\nAPPEND ..." would break out of SELECT.
+        // Reject unsafe folder names returned by server LIST.
         if !is_safe_imap_folder(n) {
             eprintln!("[imap] rejecting unsafe folder name from LIST: {:?}", n);
             continue;
@@ -1558,8 +1509,7 @@ pub fn contacts_path() -> PathBuf {
 
 pub fn load_contacts() -> Vec<String> {
     let path = contacts_path();
-    // Finding 20: one-shot migration. Only accept if every non-empty
-    // line looks like an email — rejects a stray ./resources/contacts.txt.
+    // One-shot migration; only accept if every non-empty line looks like an email.
     if !path.exists() {
         let legacy = PathBuf::from("resources/contacts.txt");
         if legacy.exists() {

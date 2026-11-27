@@ -139,10 +139,10 @@ impl CapsuleRenderer {
         {
             "calendar" => calendar::render::<Message>(theme),
             "music" => music::render::<Message>(telemetry, theme),
-            "alarm" => alarm::render::<Message>(theme),
+            "alarm" => alarm::render::<Message>(telemetry, theme),
             "weather" => weather::render::<Message>(telemetry, theme),
             "unified" => unified::render::<Message>(telemetry, theme),
-            "notify" | "notifications" => notify::render::<Message>(theme),
+            "notify" | "notifications" => notify::render::<Message>(telemetry, theme),
             "clock" => clock::render::<Message>(telemetry, theme),
             "audio" => audio::render::<Message>(telemetry, theme),
             "mic" => audio::render_mic::<Message>(telemetry, theme),

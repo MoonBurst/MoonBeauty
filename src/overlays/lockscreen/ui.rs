@@ -23,8 +23,7 @@ pub struct LockscreenOverlay {
     pub is_caps_lock: bool,
     /// Snapshot of `ShellSettings::global_padding` at construction time.
     /// Read in `view()` (which runs at 60fps), so we cache it here instead
-    /// of calling `ShellSettings::load()` on every frame — that would read
-    /// + parse the JSON file 60×/sec per child.
+    /// of calling `ShellSettings::load()` on every frame.
     cached_global_padding: u16,
     ipc_tx: Option<mpsc::Sender<LockIpc>>,
     ipc_rx: Option<mpsc::Receiver<LockIpc>>,
@@ -52,8 +51,7 @@ impl LockscreenOverlay {
 
     pub fn new() -> Self {
         // Only --lockscreen-instance children have MBS_LOCK_SOCKET. Bar,
-        // notif-surface, and tooltip processes do not, and warning about
-        // it would be a false alarm.
+        // notif-surface, and tooltip processes do not.
         let (ipc_tx, ipc_rx) = if std::env::var_os("MBS_LOCK_SOCKET").is_none() {
             (None, None)
         } else {
@@ -85,25 +83,22 @@ impl LockscreenOverlay {
     fn connect_coordinator() -> Option<(mpsc::Sender<LockIpc>, mpsc::Receiver<LockIpc>)> {
         let path = match std::env::var("MBS_LOCK_SOCKET") {
             Ok(p) => {
-                eprintln!("[lock-child-v225] socket env set: {:?}", p);
+                eprintln!("[lock-child] socket env set: {:?}", p);
                 p
             }
             Err(_) => {
-                eprintln!("[lock-child-v225] MBS_LOCK_SOCKET NOT SET");
+                eprintln!("[lock-child] MBS_LOCK_SOCKET NOT SET");
                 return None;
             }
         };
-        eprintln!(
-            "[lock-child-v225] attempting UnixStream::connect({:?})",
-            path
-        );
+        eprintln!("[lock-child] attempting UnixStream::connect({:?})", path);
         let stream = match std::os::unix::net::UnixStream::connect(&path) {
             Ok(s) => {
-                eprintln!("[lock-child-v225] socket CONNECTED");
+                eprintln!("[lock-child] socket CONNECTED");
                 s
             }
             Err(e) => {
-                eprintln!("[lock-child-v225] connect failed: {}", e);
+                eprintln!("[lock-child] connect failed: {}", e);
                 return None;
             }
         };
@@ -160,9 +155,8 @@ impl LockscreenOverlay {
         false
     }
 
-    /// Drain pending IPC messages. Returns one of:
-    ///   Some(LockMessage::AuthSuccess)  — coordinator signaled success
-    ///   None otherwise (updates applied in-place)
+    /// Drain pending IPC messages. Returns `Some(LockMessage::AuthSuccess)`
+    /// when the coordinator signals success, or `None` otherwise.
     pub fn drain_ipc(&mut self) -> Option<LockMessage> {
         let mut result = None;
         let rx = self.ipc_rx.as_ref()?;
@@ -175,9 +169,6 @@ impl LockscreenOverlay {
                         // every keystroke we've made, adopt it.
                         self.buffer_len = n;
                     }
-                    // else: this is a stale ack of an earlier keystroke;
-                    // our optimistic count has already advanced past it,
-                    // so leave buffer_len alone.
                     self.auth_failed = false;
                 }
                 LockIpc::Reset => {
@@ -194,9 +185,8 @@ impl LockscreenOverlay {
         result
     }
 
-    /// Forward a key event to the coordinator. Applies optimistic local
-    /// updates so dots appear immediately without waiting for the round-trip
-    /// confirmation. Coordinator's BufferUpdate will overwrite if drift occurs.
+    /// Forward a key event to the coordinator with optimistic local updates
+    /// so dots appear immediately; coordinator's BufferUpdate reconciles drift.
     pub fn forward_key(&mut self, key: &iced::keyboard::Key) {
         let (msg, delta) = match key {
             iced::keyboard::Key::Character(c) => (Some(LockIpc::Key(c.to_string())), 1_i32),
@@ -255,15 +245,9 @@ impl LockscreenOverlay {
         };
 
         // Octagon password field — same ShapeType::Hexagon family used by
-        // the clipboard search bar, dictionary rows, and other overlay fields.
-        // 360x56 with cut=16 gives a clearly visible octagon without
-        // clipping the "Incorrect password" text or a 20-char dot display.
+        // other overlay fields. Dimensions scale with global_padding (at
+        // pad=12 default: 360x56 cut=16), clamped so it never overflows the card.
         let pad = self.cached_global_padding as f32;
-
-        // Field dimensions scale with global_padding. At pad=12 (default)
-        // this resolves to 360x56 cut=16 — matching V185. Smaller padding
-        // → smaller field; larger → bigger, up to hard caps so the octagon
-        // never overflows the card.
         let field_w = (280.0 + pad * 6.67).min(520.0);
         let field_h = (40.0 + pad * 1.33).min(80.0);
         let cut_u16 = (pad * 1.33).clamp(8.0, 28.0) as u16;

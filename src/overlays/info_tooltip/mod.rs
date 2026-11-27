@@ -9,9 +9,7 @@ mod net_proc;
 use buttons::*;
 
 use iced::widget::{button, column, container, row, scrollable, text, text_input, Stack};
-use iced::{Alignment, Color, Element, Length, Padding, Task, Theme};
-use iced_layershell::reexport::{KeyboardInteractivity, Layer};
-use iced_layershell::settings::{LayerShellSettings, Settings};
+use iced::{Alignment, Color, Element, Length, Padding, Task};
 use std::time::Instant;
 
 use crate::libraries::backend::unified::{borg::{BorgBackend, BorgStatus}, podman::{PodmanBackend, PodmanStatus}, checks::UnifiedItemStatus};
@@ -22,11 +20,8 @@ use crate::libraries::config::ShellSettings;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
 use crate::libraries::style::TextExt;
 
-use crate::overlays::tooltip_common::{
-    layer_anchor_and_margin, slanted_row, InBarTooltipConfig, TooltipEnv,
-};
+use crate::overlays::tooltip_common::{slanted_row, InBarTooltipConfig};
 
-const W_START: f32 = 130.0;
 const AUTO_MS: u128 = 15_000;
 
 #[derive(Debug, Clone)]
@@ -72,15 +67,6 @@ pub enum Message {
     Noop,
 }
 
-impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message {
-    type Error = Message;
-    fn try_into(
-        self,
-    ) -> Result<iced_layershell::actions::LayershellCustomActionWithId, Self::Error> {
-        Err(self)
-    }
-}
-
 pub struct App {
     opened: Instant,
     mode: String,
@@ -104,69 +90,10 @@ pub struct App {
     music_search_results: Vec<(String, String)>,
     music_selected_idx: usize,
     music_sources: crate::libraries::backend::music::MusicSources,
-    in_bar: bool,
     pub should_close: bool,
 }
 
-#[allow(dead_code)]
 impl App {
-    fn new_app() -> (Self, Task<Message>) {
-        crate::libraries::process::install_sigterm_handler();
-        let mode = std::env::var("MBS_INFO_MODE").unwrap_or_else(|_| "custom".into());
-        let env = TooltipEnv::from_env(W_START);
-        let w: u32 = std::env::var("MBS_TOOLTIP_W")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(380);
-        let s = ShellSettings::load();
-        let h: u32 = std::env::var("MBS_TOOLTIP_H")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(s.tooltip_height_px);
-        eprintln!("[info_tooltip-h] MBS_TOOLTIP_H = {}", h);
-        let drop_ms = s.tooltip_drop_ms as f32;
-        let expand_ms = s.tooltip_expand_ms as f32;
-
-        let settings = ShellSettings::load();
-        let theme = ShellTheme::from_settings(&settings);
-        let app = Self {
-            opened: Instant::now(),
-            mode: mode.clone(),
-            data: None,
-            grow_right: env.grow_right,
-            w,
-            w_start: env.w_start,
-            slant_l: env.slant_l,
-            slant_r: env.slant_r,
-            h,
-            drop_ms,
-            expand_ms,
-            closing_at: None,
-            search_query: String::new(),
-            trash_confirm: false,
-            anim_frame: 0,
-            settings,
-            theme,
-            music_search_query: String::new(),
-            music_search_results: Vec::new(),
-            music_selected_idx: 0,
-            music_sources: crate::libraries::backend::music::MusicSources::load(),
-            in_bar: false,
-            should_close: false,
-        };
-        let task = Task::perform(fetch_data(mode), Message::Loaded);
-        (
-            app,
-            Task::batch(vec![
-                task,
-                Task::perform(
-                    async { tokio::time::sleep(std::time::Duration::from_millis(4)).await },
-                    |_| Message::Tick,
-                ),
-            ]),
-        )
-    }
-
     pub fn new_in_bar(cfg: &InBarTooltipConfig) -> (Self, Task<Message>) {
         let mode = cfg.id.clone();
         let settings = ShellSettings::load();
@@ -193,7 +120,6 @@ impl App {
             music_search_results: Vec::new(),
             music_selected_idx: 0,
             music_sources: crate::libraries::backend::music::MusicSources::load(),
-            in_bar: true,
             should_close: false,
         };
         let task = Task::perform(fetch_data(mode), Message::Loaded);
@@ -228,10 +154,6 @@ impl App {
         }
     }
 
-    fn namespace(&self) -> String {
-        format!("mbs-info-tip-{}", self.mode)
-    }
-
     pub fn is_music_search_nav(&self) -> bool {
         self.mode == "music" && !self.music_search_results.is_empty()
     }
@@ -239,19 +161,13 @@ impl App {
     pub fn update(&mut self, m: Message) -> Task<Message> {
         match m {
             Message::Tick => {
-                if crate::libraries::process::was_sigterm_signaled()
-                    && self.closing_at.is_none()
-                {
-                    let snap = self.snapshot_for_close();
-                    self.closing_at = Some(snap);
-                }
                 self.anim_frame = self.anim_frame.wrapping_add(1);
-                
+
                 let mut tasks = Vec::new();
 
                 // Keep the tooltip live if it's the music player (~1 sec)
                 // ONLY do this if we aren't currently closing!
-                if self.mode == "music" && self.anim_frame % 250 == 0 && self.closing_at.is_none() {
+                if self.mode == "music" && self.anim_frame.is_multiple_of(250) && self.closing_at.is_none() {
                     tasks.push(Task::perform(fetch_data("music".to_string()), Message::Loaded));
                 }
 
@@ -262,18 +178,12 @@ impl App {
 
                 if let Some(t) = &self.closing_at {
                     if t.started.elapsed().as_millis() > (self.drop_ms * 3.0) as u128 {
-                        if self.in_bar {
-                            self.should_close = true;
-                            return Task::none();
-                        }
-                        std::process::exit(0);
-                    }
-                } else if self.opened.elapsed().as_millis() > AUTO_MS {
-                    if self.in_bar {
                         self.should_close = true;
                         return Task::none();
                     }
-                    std::process::exit(0);
+                } else if self.opened.elapsed().as_millis() > AUTO_MS {
+                    self.should_close = true;
+                    return Task::none();
                 }
 
                 let next_ms: u64 = if elapsed_ms < 2000 || self.closing_at.is_some() {
@@ -283,8 +193,6 @@ impl App {
                         .filter(|n| *n >= 1 && *n <= 100)
                         .unwrap_or(4)
                 } else {
-                    // 100ms (was 500) so SIGTERM-close is picked up within
-                    // ~100ms during idle.
                     100
                 };
 
@@ -524,7 +432,7 @@ impl App {
                             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                             fetch_data("music".to_string()).await
                         },
-                        |info| Message::Loaded(info),
+                        Message::Loaded,
                     );
                 }
             }
@@ -545,7 +453,7 @@ impl App {
                             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                             fetch_data("music".to_string()).await
                         },
-                        |info| Message::Loaded(info),
+                        Message::Loaded,
                     );
                 }
             }
@@ -652,47 +560,6 @@ impl App {
         crate::overlays::tooltip_engine::align_to_side(stacked.into(), align)
     }
 
-    fn subscription(&self) -> iced::Subscription<Message> {
-        let music_search_nav = if self.mode == "music" && !self.music_search_results.is_empty() {
-            iced::event::listen_with(|event, _status, _window| {
-                if let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, .. }) = event
-                {
-                    match key {
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowDown) => {
-                            Some(Message::MusicSelectNext)
-                        }
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowUp) => {
-                            Some(Message::MusicSelectPrev)
-                        }
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
-            })
-        } else {
-            iced::Subscription::none()
-        };
-
-        let esc_sub = iced::event::listen_with(|event, _status, _window| {
-            let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
-                ..
-            }) = event
-            else {
-                return None;
-            };
-            Some(Message::Dismiss)
-        });
-
-        iced::Subscription::batch(vec![music_search_nav, esc_sub])
-    }
-    fn theme(&self) -> Theme {
-        Theme::Dark
-    }
-}
-
-impl App {
     fn build_content<'a>(
         &'a self,
         t: &ShellTheme,
@@ -721,7 +588,6 @@ impl App {
         let mut col = column![].spacing(gap).width(Length::Fill);
 
         let mk_close = || -> Element<'a, Message> {
-            // Removed per user request — press Escape to close.
             iced::widget::container(iced::widget::Space::new())
                 .width(Length::Fixed(0.0))
                 .height(Length::Fixed(0.0))
@@ -781,60 +647,6 @@ impl App {
             .clip(true)
             .into()
     }
-}
-
-/// Octagon-aware row insets: content hugs the middle columns of a widened
-/// octagon, but the top and bottom rows are pulled inward proportionally
-/// to how far they sit inside the diagonal corner cut. Mirrors slanted_row,
-/// but for a 4-cut octagon instead of a 2-cut parallelogram.
-
-pub fn run() -> Result<(), iced_layershell::Error> {
-    let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
-    let s = ShellSettings::load();
-    let w: u32 = std::env::var("MBS_TOOLTIP_W")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(380);
-    let h: u32 = std::env::var("MBS_TOOLTIP_H")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(s.tooltip_height_px);
-    eprintln!("[info_tooltip-h] MBS_TOOLTIP_H = {}", h);
-
-    let is_clock = std::env::var("MBS_INFO_MODE").map(|m| m == "clock").unwrap_or(false);
-    let (anchor, margin) = layer_anchor_and_margin(&s, w, is_clock);
-
-    let layer = LayerShellSettings {
-        size: Some((w, h)),
-        exclusive_zone: -1,
-        anchor,
-        layer: Layer::Overlay,
-        keyboard_interactivity: KeyboardInteractivity::Exclusive,
-        start_mode: output
-            .map(iced_layershell::settings::StartMode::TargetScreen)
-            .unwrap_or(iced_layershell::settings::StartMode::Active),
-        margin,
-        ..Default::default()
-    };
-    let ns_mode_val = std::env::var("MBS_INFO_MODE").unwrap_or_else(|_| "custom".into());
-    let ns_mode = format!("mbs-info-tip-{}", ns_mode_val);
-
-    iced_layershell::application(
-        App::new_app,
-        move || ns_mode.clone(),
-        App::update,
-        App::view,
-    )
-    .subscription(App::subscription)
-    .style(|_state, _theme| iced::theme::Style {
-        background_color: iced::Color::TRANSPARENT,
-        text_color: iced::Color::WHITE,
-    })
-    .settings(Settings {
-        layer_settings: layer,
-        ..Default::default()
-    })
-    .run()
 }
 
 async fn fetch_data(mode: String) -> InfoData {

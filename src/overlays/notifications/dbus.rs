@@ -15,8 +15,7 @@ pub struct IncomingNotification {
 }
 
 pub struct NotifServer {
-    // Finding 55: bounded channel. Was Sender (unbounded); a hostile
-    // notify-send loop outpaces the receiver and OOMs the shell.
+    // Bounded channel so a flood of notifications cannot OOM the shell.
     tx: SyncSender<IncomingNotification>,
 }
 
@@ -39,9 +38,7 @@ impl NotifServer {
         hints: HashMap<String, OwnedValue>,
         _expire_timeout: i32,
     ) -> u32 {
-        // Finding 55: cap payload fields at ingress before try_send
-        // into the bounded channel (sync_channel 256). Without this,
-        // a hostile client can queue 256 x N MB and OOM the shell.
+        // Cap payload fields at ingress before try_send into the bounded channel.
         const MAX_APP_NAME: usize = 128;
         const MAX_SUMMARY: usize = 512;
         const MAX_BODY: usize = 4096;
@@ -98,10 +95,8 @@ impl NotifServer {
                 zbus::zvariant::Value::Str(s) => Some(s.as_str().to_string()),
                 _ => None,
             });
-        // Finding 55: try_send (non-blocking). On full, drop the payload
-        // but still return id — matches D-Bus spec (notify() returns
-        // immediately) and dunst's queue-full policy (no error to well-
-        // behaved apps that would retry and amplify the flood).
+        // Non-blocking try_send: drop payload on full channel while still returning
+        // id immediately per the freedesktop notifications spec.
         if let Err(e) = self.tx.try_send(IncomingNotification {
             id,
             app_name,

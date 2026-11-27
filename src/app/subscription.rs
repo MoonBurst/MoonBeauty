@@ -87,12 +87,8 @@ impl MoonBeautyShellApp {
 
         let todo_sub = if matches!(self.active_overlay, Some(OverlayTarget::Todo)) {
             iced::event::listen_with(|event, status, _window| {
-                // NOTE: no status gate. text_input returns Captured for
-                // Delete/arrows even when empty (it "handles" a no-op).
-                // If we gated on status, Delete would never reach us.
-                // Instead, each message handler checks new_task_text.is_empty()
-                // to decide whether it should act, so text editing still
-                // works normally when there's text in the field.
+                // No status gate: text_input returns Captured for Delete/arrows
+                // even when empty. Handlers check new_task_text.is_empty() instead.
                 if let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                     key: ref dbg_key,
                     ..
@@ -113,9 +109,7 @@ impl MoonBeautyShellApp {
                         Some(Message::Todo(TodoMessage::TaskSelectNext))
                     }
                     Key::Named(Named::Delete) => Some(Message::Todo(TodoMessage::DeleteSelected)),
-                    // NOTE: Enter is intentionally absent here. text_input
-                    // captures Enter and fires AddTask (via on_submit).
-                    // AddTask dispatches 3-way: save-edit / add-new / toggle.
+                    // Enter is handled by text_input::on_submit -> AddTask.
                     _ => None,
                 }
             })
@@ -433,12 +427,6 @@ impl MoonBeautyShellApp {
             iced::Subscription::run(ipc_stream)
         };
 
-        // Lockscreen watchdog: 500ms cadence. Combined with the
-        // coordinator's own 200ms child-watchdog, the two together
-        // mean the *screen is locked* or *will be locked within 800ms*
-        // under any crash scenario. Not bulletproof, but small enough
-        // that a human attacker cannot reliably exploit the window.
-
         let notif_sub = if self.is_notif_surface {
             let interval = if self.notifs.active_toasts.is_empty() {
                 100
@@ -450,11 +438,8 @@ impl MoonBeautyShellApp {
         } else {
             iced::Subscription::none()
         };
-        // resize_sub removed (problem 07): emitted WindowResized whose
-        // only consumer ignored the value.
         // Standalone window-close listener: when Sway detaches the surface
-        // on a TTY switch, it sends a Closed event. By exiting, we let the
-        // bar's lockscreen_watchdog see a dead child and respawn it.
+        // on a TTY switch, exit so the coordinator/bar can respawn cleanly.
         let close_sub = if self.is_standalone {
             iced::event::listen_with(|event, _, _| {
                 if let iced::Event::Window(iced::window::Event::Closed) = event {
@@ -477,27 +462,16 @@ impl MoonBeautyShellApp {
             iced::Subscription::none()
         };
 
-        // Tray watchdog: dedicated 500ms timer while expanded. Fixes the
-        // "tray never closes" bug where the Command::perform-based timer
-        // silently failed to fire. Polling is cheap — only active while
-        // tray_expanded is true.
-        // Tray watchdog sub drives both the timeout check AND the
-        // collapse/expand animation. 16ms cadence while animating,
-        // 500ms cadence while steady-expanded (timeout check only).
-        // This replaces reliance on TrayAnimTick's sub, which has been
-        // observed to silently not fire in this iced version (same
-        // failure class as the earlier Command::perform timer).
         let tray_animating = (self.tray_anim_width - self.tray_target_width).abs() > 0.01;
-        // Tray items pre-fetch: every 15s, keeps the item list warm so
-        // first open animates straight to the correct width instead of
-        // briefly showing 0 items (target=206) then re-animating to N
-        // items (target=186). This is a low-cost D-Bus call per item.
+        // Pre-fetch tray items every 15s so the first open animates to the right width.
         let tray_fetch_sub = if self.is_notif_surface || self.is_standalone {
             iced::Subscription::none()
         } else {
             iced::time::every(std::time::Duration::from_secs(15)).map(|_| Message::FetchTrayItems)
         };
 
+        // Drive tray expand/collapse animation (16ms) and timeout watchdog (500ms)
+        // via Subscription::every rather than Task::perform timers.
         let tray_watchdog_sub = if tray_animating {
             iced::time::every(std::time::Duration::from_millis(16))
                 .map(|_| Message::TrayWatchdogTick)

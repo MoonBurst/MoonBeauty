@@ -29,10 +29,8 @@ impl std::fmt::Debug for Message {
 }
 
 pub fn read_state_file(path: &std::path::Path) -> (String, i32, i32, i32, i32) {
-    // Finding 50: cap state-file read at 1KB. The coordination file is
-    // 5 short lines (~30 bytes); a hostile same-user process could
-    // truncate+write it between orchestrator writes. Metadata-first
-    // check avoids the read_to_string allocation entirely on oversize.
+    // Cap state-file read at 1KB (expected ~30 bytes); metadata check avoids
+    // allocation on oversized files.
     const MAX_BYTES: u64 = 1024;
     if std::fs::metadata(path).map(|m| m.len()).unwrap_or(0) > MAX_BYTES {
         eprintln!(
@@ -67,12 +65,8 @@ pub fn read_state_file(path: &std::path::Path) -> (String, i32, i32, i32, i32) {
 
 pub fn write_state_file(path: &std::path::Path, state: &str, sx: i32, sy: i32, cx: i32, cy: i32) {
     let tmp = path.with_extension("tmp");
-    // Finding 33 (corrected): private_create_new uses O_EXCL, refusing
-    // to follow a symlink planted at `tmp`. remove_file first clears any
-    // stale file (or symlink) from a previous tick; if the attacker
-    // re-creates the symlink between the two calls, private_create_new
-    // returns EEXIST and we skip the write — the next 16ms poll tick
-    // retries. This closes the last unguarded `OpenOptions` in the tree.
+    // Remove any stale tmp file, then open with O_EXCL via private_create_new
+    // so symlinks at `tmp` are never followed; on EEXIST the next 16ms tick retries.
     let _ = std::fs::remove_file(&tmp);
     if let Ok(mut f) = crate::libraries::process::private_create_new(&tmp) {
         let _ = write!(f, "{}\n{}\n{}\n{}\n{}\n", state, sx, sy, cx, cy);
@@ -331,11 +325,7 @@ pub fn run(
     local_png: PathBuf,
     state_file: PathBuf,
 ) -> Result<(), String> {
-    // Item 6: reject arbitrary read/write paths. Both must resolve
-    // under $XDG_RUNTIME_DIR/mbs-tmp/. Blocks `moonbeauty
-    // --freeze-fragment DP-1 0 0 /etc/passwd /etc/shadow` from
-    // reading attacker-picked files or truncating user files via
-    // write_state_file.
+    // Reject arbitrary read/write paths: both must resolve under $XDG_RUNTIME_DIR/mbs-tmp/.
     if !crate::libraries::process::path_is_under_mbs_tmp(&local_png) {
         return Err(format!("local_png outside mbs-tmp: {:?}", local_png));
     }

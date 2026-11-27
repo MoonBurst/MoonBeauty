@@ -1,8 +1,6 @@
 use crate::libraries::style::TextExt;
 use iced::widget::{button, column, container, row, text, Stack};
 use iced::{Alignment, Color, Element, Length, Padding, Task, Theme};
-use iced_layershell::reexport::{KeyboardInteractivity, Layer};
-use iced_layershell::settings::{LayerShellSettings, Settings};
 use std::time::Instant;
 
 use crate::libraries::backend::system::{GpuInfo, ProcessItem, SystemCollector};
@@ -11,11 +9,9 @@ use crate::libraries::config::ShellSettings;
 use crate::libraries::style::shape_box::SlantSide;
 
 use crate::overlays::tooltip_common::{
-    layer_anchor_and_margin, proc_kill_row, slanted_row, slanted_search_bar, truncate_proc_name,
-    InBarTooltipConfig, TooltipEnv,
+    proc_kill_row, slanted_row, slanted_search_bar, truncate_proc_name, InBarTooltipConfig,
 };
 
-const W_START: f32 = 130.0;
 const AUTO_MS: u128 = 10_000;
 
 #[derive(Debug, Clone)]
@@ -36,15 +32,6 @@ pub enum Message {
     Scrolled(f32),
     ScrollToFraction(f32),
     CycleGpu,
-}
-
-impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message {
-    type Error = Message;
-    fn try_into(
-        self,
-    ) -> Result<iced_layershell::actions::LayershellCustomActionWithId, Self::Error> {
-        Err(self)
-    }
 }
 
 pub struct App {
@@ -68,92 +55,10 @@ pub struct App {
     anim_frame: u64,
     settings: ShellSettings,
     theme: ShellTheme,
-    in_bar: bool,
     pub should_close: bool,
 }
 
-#[allow(dead_code)]
 impl App {
-    fn new_app() -> (Self, Task<Message>) {
-        crate::libraries::process::install_sigterm_handler();
-        eprintln!("[sys-tooltip] V16 LOADED");
-        let target = std::env::var("MBS_SYS_TARGET").unwrap_or_else(|_| "cpu".into());
-        let env = TooltipEnv::from_env(W_START);
-        let s = ShellSettings::load();
-        let mut w: u32 = std::env::var("MBS_TOOLTIP_W")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(380);
-        let mut h: u32 = std::env::var("MBS_TOOLTIP_H")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(s.tooltip_height_px);
-        if target == "ram" {
-            w = w.max(540);
-            h = h.max(480);
-        }
-
-        let drop_ms: f32 = std::env::var("MBS_TOOLTIP_DROP_MS")
-            .ok()
-            .and_then(|v| v.parse::<u32>().ok())
-            .unwrap_or(s.tooltip_drop_ms) as f32;
-        let expand_ms: f32 = std::env::var("MBS_TOOLTIP_EXPAND_MS")
-            .ok()
-            .and_then(|v| v.parse::<u32>().ok())
-            .unwrap_or(s.tooltip_expand_ms) as f32;
-        
-
-        let gpu_list = if target == "gpu" {
-            SystemCollector::list_gpus_sync()
-        } else {
-            Vec::new()
-        };
-        for (i, g) in gpu_list.iter().enumerate() {
-            eprintln!(
-                "[gpu-init] {} card_id={} pci={} name={} nv={}",
-                i, g.card_id, g.pci_addr, g.name, g.is_nvidia
-            );
-        }
-
-        // Start on whichever GPU the user selected in Settings.
-        let selected_gpu = if target == "gpu" {
-            select_gpu_index(&gpu_list, &s.gpu_selected_id)
-        } else {
-            0
-        };
-        eprintln!(
-            "[gpu-init] selected_gpu={} (from settings.gpu_selected_id={:?})",
-            selected_gpu, s.gpu_selected_id
-        );
-
-        let settings = s;
-        let theme = ShellTheme::from_settings(&settings);
-        let app = Self {
-            opened: Instant::now(),
-            target: target.clone(),
-            data: None,
-            grow_right: env.grow_right,
-            w,
-            h,
-            drop_ms,
-            expand_ms,
-            w_start: env.w_start,
-            slant_l: env.slant_l,
-            slant_r: env.slant_r,
-            closing_at: None,
-            search_query: String::new(),
-            scroll_y: 0.0,
-            gpu_list,
-            selected_gpu,
-            anim_frame: 0,
-            settings,
-            theme,
-            in_bar: false,
-            should_close: false,
-        };
-        Self::boot_with_app(app, target)
-    }
-
     pub fn new_in_bar(cfg: &InBarTooltipConfig) -> (Self, Task<Message>) {
         let target = cfg.id.clone();
         let s = ShellSettings::load();
@@ -195,7 +100,6 @@ impl App {
             anim_frame: 0,
             settings,
             theme,
-            in_bar: true,
             should_close: false,
         };
         Self::boot_with_app(app, target)
@@ -227,7 +131,7 @@ impl App {
             })
         } else {
             eprintln!(
-                "[sys-tooltip] FATAL: unknown MBS_SYS_TARGET={:?}; expected cpu|gpu|ram",
+                "[sys-tooltip] FATAL: unknown target={:?}; expected cpu|gpu|ram",
                 target
             );
             std::process::exit(2);
@@ -263,19 +167,9 @@ impl App {
         }
     }
 
-    fn namespace(&self) -> String {
-        format!("mbs-sys-tip-{}", self.target)
-    }
-
     pub fn update(&mut self, m: Message) -> Task<Message> {
         match m {
             Message::Tick => {
-                if crate::libraries::process::was_sigterm_signaled()
-                    && self.closing_at.is_none()
-                {
-                    let snap = self.snapshot_for_close();
-                    self.closing_at = Some(snap);
-                }
                 self.anim_frame = self.anim_frame.wrapping_add(1);
                 let elapsed_ms = self.opened.elapsed().as_millis() as u64;
                 if std::env::var_os("MBS_TICK_DIAG").is_some() {
@@ -284,18 +178,12 @@ impl App {
 
                 if let Some(t) = &self.closing_at {
                     if t.started.elapsed().as_millis() > (self.drop_ms * 3.0) as u128 {
-                        if self.in_bar {
-                            self.should_close = true;
-                            return Task::none();
-                        }
-                        std::process::exit(0);
-                    }
-                } else if self.opened.elapsed().as_millis() > AUTO_MS {
-                    if self.in_bar {
                         self.should_close = true;
                         return Task::none();
                     }
-                    std::process::exit(0);
+                } else if self.opened.elapsed().as_millis() > AUTO_MS {
+                    self.should_close = true;
+                    return Task::none();
                 }
 
                 let next_ms: u64 = if elapsed_ms < 2000 || self.closing_at.is_some() {
@@ -310,7 +198,7 @@ impl App {
 
                 let mut tasks = Vec::new();
 
-                if self.anim_frame % 250 == 0 && self.closing_at.is_none() {
+                if self.anim_frame.is_multiple_of(250) && self.closing_at.is_none() {
                     let target = self.target.clone();
                     let gpu_info = self.gpu_list.get(self.selected_gpu).cloned().unwrap_or_default();
                     tasks.push(Task::perform(
@@ -468,24 +356,6 @@ impl App {
                 iced::alignment::Horizontal::Right
             },
         )
-    }
-
-    fn subscription(&self) -> iced::Subscription<Message> {
-        // Animation is driven by Command::perform recursion in update(),
-        // not by a subscription timer. Subscriptions here only handle ESC.
-        iced::event::listen_with(|event, _status, _window| {
-            let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
-                ..
-            }) = event
-            else {
-                return None;
-            };
-            Some(Message::Dismiss)
-        })
-    }
-    fn theme(&self) -> Theme {
-        Theme::Dark
     }
 }
 
@@ -1187,57 +1057,6 @@ impl App {
             .clip(true)
             .into()
     }
-}
-
-pub fn run() -> Result<(), iced_layershell::Error> {
-    let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
-    let s = ShellSettings::load();
-    let mut w: u32 = std::env::var("MBS_TOOLTIP_W")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(380);
-    let mut h: u32 = std::env::var("MBS_TOOLTIP_H")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(s.tooltip_height_px);
-    if std::env::var("MBS_SYS_TARGET").unwrap_or_default() == "ram" {
-        w = w.max(540);
-        h = h.max(480);
-    }
-
-    let (anchor, margin) = layer_anchor_and_margin(&s, w, false);
-
-    let layer = LayerShellSettings {
-        size: Some((w, h)),
-        exclusive_zone: -1,
-        anchor,
-        layer: Layer::Overlay,
-        keyboard_interactivity: KeyboardInteractivity::Exclusive,
-        start_mode: output
-            .map(iced_layershell::settings::StartMode::TargetScreen)
-            .unwrap_or(iced_layershell::settings::StartMode::Active),
-        margin,
-        ..Default::default()
-    };
-    let ns_tgt_val = std::env::var("MBS_SYS_TARGET").unwrap_or_else(|_| "cpu".into());
-    let ns_target = format!("mbs-sys-tip-{}", ns_tgt_val);
-
-    iced_layershell::application(
-        App::new_app,
-        move || ns_target.clone(),
-        App::update,
-        App::view,
-    )
-    .subscription(App::subscription)
-    .style(|_state, _theme| iced::theme::Style {
-        background_color: iced::Color::TRANSPARENT,
-        text_color: iced::Color::WHITE,
-    })
-    .settings(Settings {
-        layer_settings: layer,
-        ..Default::default()
-    })
-    .run()
 }
 
 fn select_gpu_index(gpu_list: &[GpuInfo], selected_id: &str) -> usize {

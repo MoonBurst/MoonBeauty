@@ -279,9 +279,8 @@ impl SettingsOverlay {
         .width(Length::Fill)
         .into();
 
-        // Finding 77: per-slot offset columns. Slider shows the
-        // effective value (auto or override); label marks "(auto)"
-        // when the field is None; reset button clears the override.
+        // Per-slot offset columns: slider shows the effective value (auto or override),
+        // marks "(auto)" when None, and the reset button clears the override.
         let offset_left_col: Element<'a, SettingsMessage> = {
             let is_auto = settings.tooltip_offset_left.is_none();
             let eff = settings.effective_tooltip_offset_left();

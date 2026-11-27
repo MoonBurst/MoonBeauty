@@ -117,6 +117,11 @@ impl MoonBeautyShellApp {
         if changed {
             moonbeauty::overlays::reminders::save_reminders(&entries);
         }
+        self.telemetry.next_alarm_epoch = entries
+            .iter()
+            .filter(|e| e.target_epoch > now)
+            .map(|e| e.target_epoch)
+            .min();
         Command::none()
     }
 }

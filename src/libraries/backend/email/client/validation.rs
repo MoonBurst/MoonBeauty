@@ -3,11 +3,10 @@
 //! Both functions are security-critical: they prevent crafted strings
 //! from being interpolated into IMAP commands sent to the server.
 
-/// Finding 28: reject folder names that could break out of the SELECT
-/// command sent to the IMAP server. `async_imap::Session::select()` and
-/// `uid_fetch()` format the folder as a quoted string; CR/LF/control
-/// chars can terminate the command and inject arbitrary IMAP commands
-/// (e.g. a hostile LIST response like "INBOX\r\nAPPEND INBOX ...").
+/// Reject folder names that could break out of the SELECT command sent to the
+/// IMAP server. `async_imap::Session::select()` and `uid_fetch()` format the
+/// folder as a quoted string; CR/LF/control chars can terminate the command and
+/// inject arbitrary IMAP commands.
 ///
 /// Reject: empty, over 512 bytes, any C0 control char (0x00-0x1f)
 /// including CR/LF, plus DEL (0x7f).
@@ -19,13 +18,11 @@ pub fn is_safe_imap_folder(folder: &str) -> bool {
     !folder.chars().any(|c| c.is_control())
 }
 
-/// Finding 29: reject any message id that isn't a plain ASCII integer.
+/// Reject any message id that isn't a plain ASCII integer.
 ///
 /// `async-imap::Session::uid_fetch`, `uid_store`, and `uid_copy` embed
-/// the uid in the wire command. A crafted `id` from a poisoned
-/// `index.json` (or a future IPC caller) could inject IMAP commands:
-/// `uid_fetch("1; APPEND INBOX ...")` breaks out of the fetch. Numeric
-/// validation is the only safe contract — server-assigned uids are
+/// the uid in the wire command, so non-numeric ids from a poisoned
+/// `index.json` could inject IMAP commands. Server-assigned uids are
 /// always u32 integers, serialized to 1-10 ASCII digits.
 ///
 /// Accept: non-empty, ≤20 bytes (u64::MAX is 20 digits), all ASCII digits.

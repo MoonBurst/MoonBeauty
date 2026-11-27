@@ -76,7 +76,7 @@ impl DictionaryOverlay {
     }
 
     fn cache_path() -> PathBuf {
-        // Finding 24: mirror finding 23 for user search history.
+        // Keep dictionary cache out of world-readable /tmp.
         dirs::cache_dir()
             .expect(
                 "XDG_CACHE_HOME or HOME must be set; refusing to persist dictionary cache to /tmp",
@@ -85,7 +85,7 @@ impl DictionaryOverlay {
     }
 
     pub fn load_cache() -> HashMap<String, Vec<MeaningEntry>> {
-        // Finding 47: 8 MB cap.
+        // 8 MB cap.
         crate::libraries::process::read_json_capped::<HashMap<String, Vec<MeaningEntry>>>(
             &Self::cache_path(),
             8 * 1024 * 1024,
@@ -109,14 +109,6 @@ impl DictionaryOverlay {
                 self.active_definitions = defs.clone();
                 self.cache.insert(word.to_lowercase(), defs);
                 self.save_cache();
-            }
-            DictMessage::CopyDefinition(def) => {
-                tokio::spawn(async move {
-                    let _ = Command::new("wl-copy").arg(&def).status().await;
-                    let _ = Command::new("notify-send")
-                        .args(["-a", "Dictionary", "Definition Copied", &def])
-                        .spawn();
-                });
             }
             _ => {}
         }

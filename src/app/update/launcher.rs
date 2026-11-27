@@ -23,8 +23,6 @@ impl MoonBeautyShellApp {
                 self.active_overlay = None;
             }
             LauncherMessage::ExecuteApp(cmd) => {
-                // __tab__ branch removed (problem 10): nothing emits
-                // ExecuteApp("__tab__").
                 // Math result — copy to clipboard and close
                 if let Some(result) = cmd.strip_prefix("math:") {
                     let result = result.to_string();
@@ -149,7 +147,7 @@ impl MoonBeautyShellApp {
                     let row = idx / 3;
                     (row as f32) * (76.0 + 6.0)
                 } else {
-                    let math_rows = (math_count + 2) / 3;
+                    let math_rows = math_count.div_ceil(3);
                     let math_height = if math_rows > 0 {
                         (math_rows as f32) * 76.0 + ((math_rows - 1) as f32) * 6.0 + 10.0
                     } else {

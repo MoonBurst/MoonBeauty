@@ -5,19 +5,7 @@
 use crate::libraries::backend::UnifiedTelemetry;
 use crate::libraries::config::ShellSettings;
 
-/// Compute the popup height for a given tooltip id.
-///
-/// Priority:
-///   1. If `settings.tooltip_sizes` contains an entry for this id, return
-///      its height. This is the value produced by dragging the resize box
-///      in Settings → Bar Layout. Consulted here at spawn time because
-///      the popup process reads only MBS_TOOLTIP_H from env and does not
-///      reload settings itself.
-///   2. Otherwise, derive height from current telemetry content size
-///      (weather forecast line count, CPU/GPU/RAM process count, etc.).
-/// Finding 76: read the per-capsule bias from env. Tooltip spawners
-/// add this on top of the settings' global offset. Missing env var
-/// defaults to 0 (identical to pre-finding-76 behavior).
+/// Read per-capsule offset bias from env, added on top of global offsets.
 pub fn read_offset_extra() -> (i32, i32) {
     let read = |key: &str| -> i32 {
         std::env::var(key)
@@ -31,6 +19,13 @@ pub fn read_offset_extra() -> (i32, i32) {
     )
 }
 
+/// Compute the popup height for a given tooltip id.
+///
+/// Priority:
+///   1. If `settings.tooltip_sizes` contains an entry for this id, return
+///      its height (produced by dragging the resize box in Settings → Bar Layout).
+///   2. Otherwise, derive height from current telemetry content size
+///      (weather forecast line count, CPU/GPU/RAM process count, etc.).
 pub fn compute_height(id: &str, settings: &ShellSettings, telemetry: &UnifiedTelemetry) -> u32 {
     // User-dragged override wins.
     if let Some((w, h)) = settings.tooltip_sizes.get(id) {
@@ -86,8 +81,6 @@ pub fn compute_height(id: &str, settings: &ShellSettings, telemetry: &UnifiedTel
     total
 }
 
-
-// ── Moved from outputs.rs ──
 // Wayland output lookup — resolve primary/focused output and screen width.
 
 pub fn resolve_primary_output() -> Option<String> {

@@ -106,7 +106,7 @@ impl RemindersOverlay {
     }
 
     pub fn load() -> Vec<ReminderEntry> {
-        // Finding 47: 4 MB cap.
+        // 4 MB cap.
         crate::libraries::process::read_json_capped::<Vec<ReminderEntry>>(
             &Self::storage_path(),
             4 * 1024 * 1024,
@@ -435,8 +435,7 @@ impl RemindersOverlay {
             let id = item.id;
             let now = Local::now().timestamp();
             let remaining_s = (item.target_epoch - now).max(0);
-            // Match Quickshell's formatRemaining exactly:
-            //   due now / Xd Yh / Xh Ym / Xm Ys / Xs
+            // Match Quickshell's formatRemaining: due now / Xd Yh / Xh Ym / Xm Ys / Xs
             let rem_label = if remaining_s <= 0 {
                 "Due now".to_string()
             } else {

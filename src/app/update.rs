@@ -21,7 +21,6 @@ mod tray;
 impl MoonBeautyShellApp {
     pub fn update(&mut self, message: Message) -> Command<Message> {
         match message {
-            // Message::WindowResized removed (problem 07)
             Message::ResizeNotifSurface(id, w, h) => {
                 // Intercepted by `try_into`; never reached. Arm kept only
                 // to keep the match exhaustive.

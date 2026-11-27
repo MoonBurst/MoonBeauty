@@ -58,10 +58,10 @@ impl MoonBeautyShellApp {
         // Background refresh so tray_items is populated before
         // the user ever clicks the tray capsule. Eliminates the
         // 0-item → N-item re-animation on first open.
-        return Command::perform(
+        Command::perform(
             moonbeauty::bar::tray::watcher::fetch_tray_items(self.tray_items.clone()),
             Message::TrayItemsLoaded,
-        );
+        )
     }
 
     pub(crate) fn handle_tray_items_loaded(

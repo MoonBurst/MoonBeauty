@@ -148,7 +148,7 @@ impl TodoOverlay {
     }
 
     pub fn load() -> TodoDb {
-        // Finding 47: 8 MB cap.
+        // 8 MB cap.
         crate::libraries::process::read_json_capped::<TodoDb>(
             &Self::storage_path(),
             8 * 1024 * 1024,
@@ -686,8 +686,7 @@ impl TodoOverlay {
         let cut_f = theme.overlay_cut;
         let angle_deg = theme.overlay_angle;
         // Per-row horizontal insets so content clears the angled-hexagon
-        // corner cuts. Matches the pattern used by launcher, clipboard,
-        // dictionary, settings. Without this, content clips at diagonals.
+        // corner cuts.
         let pad_top = 20.0_f32;
         let pad_bottom = 20.0_f32;
         let (header_inset, body_inset, footer_inset) =

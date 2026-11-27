@@ -5,19 +5,13 @@
 //! no-op otherwise), so combined execution is safe regardless of which
 //! other CLI block would have run first in main().
 
-use crate::libraries::ipc::IpcCommand;
-
-use crate::libraries::ipc::send_ipc_sync;
+use super::state::{send_notif_cmd, NotifRuntimeCmd};
+use crate::libraries::ipc::{send_ipc_sync, IpcCommand};
 
 pub fn run(args: &[String]) {
-    fn write_notif_cmd(cmd: &[u8], tag: &str) -> ! {
-        let cmd_path =
-            crate::libraries::process::mbs_runtime_dir().join("moonbeauty-notif-cmd");
-        let tmp_path = cmd_path.with_extension("tmp");
-        if let Err(e) = crate::libraries::process::private_write_file(&tmp_path, cmd)
-            .and_then(|_| std::fs::rename(&tmp_path, &cmd_path))
-        {
-            eprintln!("[{tag}] failed to write {:?}: {e}", cmd_path);
+    fn dispatch_notif_cmd(cmd: NotifRuntimeCmd, tag: &str) -> ! {
+        if let Err(e) = send_notif_cmd(&cmd) {
+            eprintln!("[{tag}] failed to write command: {e}");
             std::process::exit(1);
         }
         std::process::exit(0);
@@ -25,10 +19,10 @@ pub fn run(args: &[String]) {
 
     // Notification CLI actions
     if args.iter().any(|a| a == "--activate-latest-notif") {
-        write_notif_cmd(b"activate-latest", "activate-latest");
+        dispatch_notif_cmd(NotifRuntimeCmd::ActivateLatest, "activate-latest");
     }
     if args.iter().any(|a| a == "--dismiss-notif") {
-        write_notif_cmd(b"dismiss", "dismiss-notif");
+        dispatch_notif_cmd(NotifRuntimeCmd::DismissOldest, "dismiss-notif");
     }
     if args.iter().any(|a| a == "--notif-history") {
         match send_ipc_sync(&IpcCommand::ToggleHistory) {

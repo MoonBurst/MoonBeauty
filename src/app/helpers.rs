@@ -33,11 +33,8 @@ impl MoonBeautyShellApp {
 
     pub fn kill_standalone(&mut self) {
         if let Some((target, mut child)) = self.standalone_child.take() {
-            // For lockscreen, the coordinator normally kills its own
-            // children on clean exit — but SIGKILL bypasses that path,
-            // leaving orphan `--lockscreen-instance` children holding
-            // dead sockets. Explicitly pkill them so the fresh coordinator
-            // binds cleanly without competing for the same outputs.
+            // For lockscreen, SIGKILL bypasses the coordinator's clean exit,
+            // leaving orphan --lockscreen-instance children holding dead sockets.
             if matches!(target, OverlayTarget::Lockscreen) {
                 let _ = std::process::Command::new("pkill")
                     .args([
@@ -53,25 +50,6 @@ impl MoonBeautyShellApp {
         }
     }
 
-    /// Toggle the tooltip for `id` (bar capsule click handler).
-    ///
-    /// Extracted from the TopBar `OpenOverlay` arm (tracker item
-    /// `topbar-sub-extraction.md`, patch 1 of 3). Handles four
-    /// concerns that were inline:
-    ///   1. Toggle-off: kill existing tooltip if already open.
-    ///   2. Positioning: cursor position (if recent click) vs
-    ///      capsule_center_x. Right-side capsules use center (see
-    ///      Finding 78 comment preserved below).
-    ///   3. Slant selection: from settings.slant_mode plus
-    ///      left/center/right membership (center uses keystone).
-    ///   4. Spawn: SpawnRequest with per-capsule tooltip_bias,
-    ///      height from compute_height (derived from telemetry),
-    ///      output from settings.bar_monitor or MBS_OUTPUT/primary.
-    ///
-    /// The id clone at the top is paid once per user click (sub-Hz
-    /// even with rapid clicking). Preserving `id` as String inside
-    /// the body keeps the extracted logic byte-for-byte identical
-    /// to the inline version; no per-site &str/String juggling.
     pub(crate) fn dismiss_tooltip_child(&mut self) -> Command<Message> {
         self.in_bar_tooltip = None;
         if let Some(wid) = self.tooltip_window_id.take() {
@@ -81,6 +59,9 @@ impl MoonBeautyShellApp {
         Command::none()
     }
 
+    /// Toggle the tooltip for `id` (bar capsule click handler):
+    /// toggle-off if already open, compute placement and slant, and open
+    /// the in-bar layer surface.
     pub fn toggle_tooltip(&mut self, id: &str) -> Command<Message> {
         let id = id.to_string();
         if let Some(ref mut tip) = self.in_bar_tooltip {
@@ -113,13 +94,9 @@ impl MoonBeautyShellApp {
         let in_left = self.settings.bar_left.contains(&id);
         let in_center = self.settings.bar_center.contains(&id);
         let in_right = self.settings.bar_right.contains(&id);
-        // Finding 78: right-side capsules use capsule_center_x, not
-        // last_cursor_x. Right-anchored math is
-        //   margin_right = sw - cx - half_cap + adjust_right
-        // which assumes cx = capsule center. If cx = click_x (near
-        // capsule right edge), tooltip lands half_cap - adjust past
-        // capsule_right — off-screen at larger font sizes. Left-anchored
-        // works because the clamp catches the (cx - half_cap) overshoot.
+        // Right-side capsules use capsule_center_x rather than last_cursor_x:
+        // right-anchored margin math assumes cx is the capsule center, so a
+        // click near the right edge would shift the tooltip off-screen.
         let cx = if id == "clock" {
             capsule_center_x(&self.settings, sw, &id)
         } else if recent_click && self.last_cursor_x > 0.0 && in_left {
@@ -168,7 +145,7 @@ impl MoonBeautyShellApp {
         };
         let (tip_w, _tip_h) = self.settings.tooltip_size(&id);
 
-        // Finding 76: per-capsule tooltip bias.
+        // Per-capsule tooltip bias.
         let (bias_l, bias_r) = moonbeauty::bar::capsules::tooltip_bias(&id, &self.theme);
         let tip_h = moonbeauty::bar::tooltip_spawn::compute_height(
             &id,
@@ -248,36 +225,21 @@ impl MoonBeautyShellApp {
     }
 
     /// Handle a bar capsule action (bar-side click handler dispatch).
-    ///
-    /// Extracted from the TopBar `Action` arm (tracker item
-    /// `topbar-sub-extraction.md`, patch 2 of 3). Contains every
-    /// CapsuleAction variant handler: tooltip open (via
-    /// toggle_tooltip), music control, audio mute/cycle, notification
-    /// DND, tooltip cancel, tray expand/activate/context-menu, GPU
-    /// cycle. Arms that mutate state without returning a Command
-    /// fall through to `Command::none()`.
     pub fn handle_capsule_action(&mut self, act: CapsuleAction) -> Command<Message> {
         match act {
             CapsuleAction::OpenOverlay(id) => {
                 eprintln!("[topbar-action] OpenOverlay: id = {:?}", id);
 
                 // 1. ALARM — standalone reminders overlay.
-                // Handled BEFORE the tooltip-open/toggle block so:
-                //   (a) an open tooltip can't hijack the click,
-                //   (b) id="alarm" never enters the tooltip spawn
-                //       selection and falls through to --sys-tooltip
-                //       (which defaults unknown targets to RAM).
+                // Handled before the tooltip block so an open tooltip can't
+                // hijack the click and "alarm" never falls into sys-tooltip.
                 if id == "alarm" {
                     let cmd = self.dismiss_tooltip_child();
                     self.toggle_standalone(OverlayTarget::Reminders);
                     return cmd;
                 }
 
-                // 2. DROPDOWN TOOLTIPS (CPU, GPU, RAM, Tray)
-                // Helper handles toggle-off-if-open, cursor-vs-
-                // capsule-center positioning, slant selection,
-                // per-capsule bias, spawn, and error logging.
-                // See app::helpers::toggle_tooltip.
+                // 2. DROPDOWN TOOLTIPS
                 if matches!(
                     id.as_str(),
                     "weather"
@@ -293,7 +255,7 @@ impl MoonBeautyShellApp {
                 ) {
                     return self.toggle_tooltip(&id);
                 }
-                // 2. FULLSCREEN / STANDALONE OVERLAYS (Settings, History, Power)
+                // 3. FULLSCREEN / STANDALONE OVERLAYS (Settings, History, Power)
                 let mapped: Option<OverlayTarget> = match id.as_str() {
                     "notify" => Some(OverlayTarget::NotificationsHistory),
                     "battery" => Some(OverlayTarget::Power),
@@ -333,6 +295,7 @@ impl MoonBeautyShellApp {
                 // Right-click on alarm capsule: wipe active timers
                 if id == "alarm" {
                     moonbeauty::overlays::reminders::save_reminders(&[]);
+                    self.telemetry.next_alarm_epoch = None;
                     eprintln!("[topbar] cleared active timers");
                 }
                 return cmd;
@@ -359,10 +322,6 @@ impl MoonBeautyShellApp {
                     self.tray_target_width = expanded_w;
                     self.tray_anim_duration_ms = 220;
 
-                    // Auto-close is handled by the tray_watchdog_sub
-                    // subscription (see subscription()), which polls
-                    // tray_opened_at.elapsed() every 500ms while
-                    // tray_expanded is true. No per-open timer needed.
                     return Command::perform(
                         moonbeauty::bar::tray::watcher::fetch_tray_items(self.tray_items.clone()),
                         Message::TrayItemsLoaded,
@@ -458,18 +417,9 @@ impl MoonBeautyShellApp {
 
         let mut cmd = std::process::Command::new(exe);
         if matches!(target, OverlayTarget::Lockscreen) {
-            // Lockscreen is not a normal overlay. --overlay spawns a
-            // standalone shell that renders a UI, but the lockscreen UI
-            // is only useful when a coordinator exists to receive key
-            // events and run authenticate(). main.rs only starts the
-            // coordinator when `--lockscreen` is present (bare flag,
-            // not `--overlay lockscreen`). Passing --overlay therefore
-            // spawned a LockscreenOverlay with ipc_tx = None: the UI
-            // rendered, but every Enter was silently dropped in
-            // forward_key() because there was no coordinator to submit
-            // to. The correct spawn is the coordinator, which then
-            // spawns per-output --lockscreen-instance children that
-            // connect to the coordinator socket.
+            // Lockscreen requires the coordinator (--lockscreen), which
+            // spawns per-output --lockscreen-instance children connected to
+            // its socket. Using --overlay lockscreen would omit the coordinator.
             cmd.arg("--lockscreen");
         } else {
             cmd.arg("--overlay");
@@ -539,23 +489,8 @@ impl MoonBeautyShellApp {
 }
 
 /// Run a standalone-overlay copy to completion, then exit the process.
-///
-/// The `if self.is_standalone` branches in update handlers need to
-/// perform async work (wl-copy, pass -c) BEFORE exiting, otherwise
-/// the copy is lost. Historically they used
-/// `Runtime::new().unwrap()`, which panics on rare failures (FD
-/// exhaustion, fork-without-exec state from a signal handler). That
-/// is a hard crash for what is meant to be a graceful "copy and
-/// close" operation.
-///
-/// On runtime creation failure: log a diagnostic and exit anyway.
-/// The copy is best-effort; the overlay still closes. A panic here
-/// is worse than a silent skip — it takes down the whole process
-/// including any state the user was in the middle of.
-///
-/// Prefer `if let Ok(rt)` pattern used in bar/tray/context.rs, but
-/// codified here so every copy site shares the same fallback
-/// behavior and diagnostic tag.
+/// On runtime creation failure, logs a diagnostic and exits anyway so
+/// the overlay still closes.
 pub(crate) fn run_then_exit<F>(future: F) -> !
 where
     F: std::future::Future<Output = ()>,

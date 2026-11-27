@@ -109,11 +109,7 @@ impl PodmanBackend {
             std::collections::HashMap::new();
 
         for (engine_idx, engine) in engines.iter().enumerate() {
-            // #E2: bollard's connect timeout does not bound the response.
-            // A reachable-but-hung daemon would block this await past the
-            // client timeout. Wrapping in tokio::time::timeout bounds the
-            // total wall-clock per engine, so one bad engine cannot stall
-            // the entire tooltip open.
+            // Wrap in tokio::time::timeout so a hung daemon cannot stall tooltip open.
             let list = match tokio::time::timeout(
                 std::time::Duration::from_secs(5),
                 engine.list_containers(options.clone()),
@@ -232,8 +228,7 @@ impl PodmanBackend {
             ..Default::default()
         });
 
-        // #E2: bound the stream consumption. A daemon that accepts the
-        // connection but stalls mid-stream would otherwise block forever.
+        // Bound stream consumption so a stalled daemon cannot block forever.
         let full_output = {
             use futures_util::StreamExt;
             let collect = async move {

@@ -32,27 +32,19 @@ impl MoonBeautyShellApp {
         self.telemetry.battery = bat;
 
         let gpu_id = self.settings.gpu_selected_id.clone();
-        // #3: update_net() blocks on TcpStream::connect_timeout
-        // (ping check) and on an `ss` subprocess. Both used to
-        // run on the UI thread before this Command was even
-        // constructed, freezing the shell for up to ~450 ms
-        // every ping-cache cycle. Moving them into the async
-        // task on a dedicated blocking thread eliminates the
-        // stall.
+        // update_net() blocks on TcpStream::connect_timeout and an `ss` subprocess,
+        // so run it inside the async task on a blocking thread instead of the UI thread.
         let net_collector = self.system_collector.clone();
 
-        return Command::perform(
+        Command::perform(
             async move {
                 let (cpu, ram) = SystemCollector::collect_all().await;
                 let gpu = SystemCollector::collect_gpu_by_card_id(&gpu_id).await;
                 let audio = AudioBackend::get_sink().await;
                 let mic = AudioBackend::get_source().await;
-                // Finding 74: MPD-priority-over-MPRIS. Prefer the
-                // dedicated music daemon over incidental browser
-                // media when both are Playing.
+                // Prefer the dedicated music daemon over incidental browser media when both are playing.
                 let (mpris, _source) = moonbeauty::libraries::backend::poll_track().await;
-                // #3: blocking net poll on a dedicated thread,
-                // not the async executor or the UI thread.
+                // Blocking net poll on a dedicated thread, not the async executor or UI thread.
                 let net =
                     tokio::task::spawn_blocking(move || net_collector.lock().unwrap().update_net())
                         .await
@@ -62,7 +54,7 @@ impl MoonBeautyShellApp {
             |(cpu, ram, gpu, audio, mic, mpris, net)| {
                 Message::MetricsCollected(cpu, ram, gpu, audio, mic, mpris, net)
             },
-        );
+        )
     }
 
     pub(crate) fn handle_weather_loaded(
@@ -74,31 +66,25 @@ impl MoonBeautyShellApp {
     }
 
     pub(crate) fn handle_tick_weather(&mut self) -> Command<Message> {
-        return Command::perform(
+        Command::perform(
             async { moonbeauty::bar::weather::WeatherBackend::fetch().await.ok() },
             Message::WeatherLoaded,
-        );
+        )
     }
 
     pub(crate) fn handle_tick_clock(&mut self) -> Command<Message> {
         self.telemetry.bar_time = ClockBackend::get_bar_time();
-        return self.check_reminder_alerts();
+        if !self.is_standalone && !self.is_notif_surface {
+            let (paused, count) = moonbeauty::overlays::notifications::read_bar_status();
+            self.telemetry.notify_paused = paused;
+            self.telemetry.notify_count = count;
+        }
+        self.check_reminder_alerts()
     }
 
     pub(crate) fn handle_idle_tick(&mut self) -> Command<Message> {
-        // Reap self-terminating tooltip children. Tooltips
-        // self-exit via process::exit(0) on AUTO_MS timeout
-        // (20s weather, 25s tray) or user dismissal. Without
-        // this try_wait, Child's Drop does NOT reap (Rust
-        // docs: no Drop impl for Child), so each self-exit
-        // leaves a zombie accumulating over hours of use.
-        // try_wait also clears the handle so the next toggle
-        // starts from a clean slate rather than take()-ing a
-        // dead child.
-        // Reap zombie standalone overlays. spawn_standalone stores a
-        // Child handle; without polling try_wait, self-exiting overlays
-        // (std::process::exit(0)) leave defunct processes until the next
-        // spawn of the same target. try_wait() reaps + drops the handle.
+        // Reap zombie standalone overlays so self-exiting children don't
+        // stay defunct until the next spawn of the same target.
         if let Some((_, c)) = self.standalone_child.as_mut() {
             if matches!(c.try_wait(), Ok(Some(_))) {
                 self.standalone_child = None;
@@ -129,6 +115,6 @@ impl MoonBeautyShellApp {
         }
         let c1 = self.update(Message::TickClock);
         let c2 = self.update(Message::TickHardware);
-        return Command::batch(vec![c1, c2]);
+        Command::batch(vec![c1, c2])
     }
 }

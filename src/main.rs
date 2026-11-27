@@ -29,11 +29,6 @@ pub(crate) fn detect_standalone_overlay(args: &[String]) -> Option<OverlayTarget
     None
 }
 
-// Sync IPC helper — send_client_command uses tokio::net::UnixStream,
-// which requires a tokio reactor. main() has no runtime, so we use
-// std::os::unix::net::UnixStream directly. Same wire format.
-
-
 fn app_theme(_state: &MoonBeautyShellApp) -> iced::Theme {
     iced::Theme::Dark
 }
@@ -55,9 +50,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     moonbeauty::overlays::clipboard::cli::run(&args);
 
-    // Finding 07 defense-in-depth: restrictive ImageMagick policy that
-    // every child process (annotator, watermark, reveal) inherits via
-    // MAGICK_CONFIGURE_PATH.
+    // Install restrictive ImageMagick policy via MAGICK_CONFIGURE_PATH for child processes.
     if let Some(dir) = moonbeauty::libraries::process::ensure_imagemagick_policy() {
         std::env::set_var("MAGICK_CONFIGURE_PATH", &dir);
     }
@@ -84,17 +77,12 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     moonbeauty::overlays::screenshot::cli::run_orchestrator(&args);
 
-
     moonbeauty::bar::tray::cli::run(&args);
-    moonbeauty::overlays::tooltips::run(&args);
 
     let is_notif_surface = detect_notif_surface(&args);
 
-    // Finding 68: notif-surface reads its target monitor from
-    // settings.json directly, ignoring inherited MBS_OUTPUT. This
-    // eliminates the dual-spawn-path race between bar-spawn and
-    // D-Bus/systemd activation — whichever parent launches us, the
-    // child resolves the same value that's on disk right now.
+    // notif-surface reads its target monitor directly from settings.json,
+    // ignoring inherited MBS_OUTPUT so bar-spawn and D-Bus activation agree.
     if is_notif_surface {
         let s = ShellSettings::load();
         let target = &s.notif_screen_name;
@@ -112,23 +100,15 @@ pub fn main() -> Result<(), iced_layershell::Error> {
 
     let standalone_target = detect_standalone_overlay(&args);
     eprintln!(
-        "[main-v225] standalone_target={:?} is_notif={}",
+        "[main] standalone_target={:?} is_notif={}",
         standalone_target, is_notif_surface
     );
-    // Tighten user-content file permissions once per process. Fixes
-    // pre-existing 0644 files written by earlier builds; new writes go
-    // through private_write_file at 0600.
+    // Tighten user-content file permissions once per process (0600).
     moonbeauty::libraries::process::tighten_user_state_files();
 
     let settings = ShellSettings::load();
-    // Eager spawn. D-Bus activation cold-start is 800-1500ms, which is
-    // slower than the round-trip from the originating application in most
-    // cases — notifications arrive AFTER the user has read the message.
-    // 106 MB RSS is the cost of working notifications.
-    //
-    // Reverted from the lazy-activation experiment (2026-11-08). The
-    // D-Bus service file is kept as a crash fallback: if notif-surface
-    // crashes, D-Bus reactivates it on the next Notify() call.
+    // Eager spawn: D-Bus cold-start takes ~800-1500ms, so keeping notif-surface
+    // warm avoids late toast delivery while keeping D-Bus activation as fallback.
     if !is_notif_surface && standalone_target.is_none() {
         // SIGKILL, not SIGTERM: the previous notif-surface may never
         // poll was_sigterm_signaled(). SIGKILL is uncatchable.
@@ -174,7 +154,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
             })
     };
     // Only the top-level bar process resolves MBS_OUTPUT.
-    // Child processes (tooltips, notif-surface, standalone overlays) inherit
+    // Child processes (notif-surface, standalone overlays) inherit
     // it via std::process env, guaranteeing they all agree on the target output.
     if std::env::var("MBS_OUTPUT").is_err() {
         if let Some(ref name) = resolved_output {
@@ -253,7 +233,7 @@ pub fn main() -> Result<(), iced_layershell::Error> {
     } else if standalone_target.as_ref() == Some(&OverlayTarget::Annotator) {
         // Floating annotator window. wlr-layer-shell centers when all four
         // sides are anchored with a fixed size. Overlay layer keeps it above
-        // the bar. Tune (W, H) to taste — this reads well on 1440p.
+        // the bar.
         LayerShellSettings {
             size: Some((1600, 1000)),
             exclusive_zone: -1,
@@ -327,4 +307,3 @@ pub fn main() -> Result<(), iced_layershell::Error> {
         _app.run()
     }
 }
-

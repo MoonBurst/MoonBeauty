@@ -1,68 +1,12 @@
 use iced::widget::{button, container, text, tooltip, MouseArea, Row, Stack};
 use iced::{Alignment, Color, Element, Length};
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
 
 use super::{label, CapsuleAction};
-
-static RGBA_CACHE: OnceLock<Mutex<HashMap<String, iced::widget::image::Handle>>> = OnceLock::new();
-
-fn cached_rgba_handle(path: &str) -> Option<iced::widget::image::Handle> {
-    let cache = RGBA_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut g = cache.lock().unwrap();
-    if let Some(h) = g.get(path) {
-        return Some(h.clone());
-    }
-
-    let bytes = std::fs::read(path).ok()?;
-    
-    // Try Rust image crate first. If it fails, fallback to ImageMagick.
-    let rgba = match image::load_from_memory(&bytes) {
-        Ok(img) => img.to_rgba8(),
-        Err(_) => {
-            eprintln!("[tray-render] image crate failed, trying ImageMagick for {:?}", path);
-            let out = std::process::Command::new("convert")
-                .args([path, "-depth", "8", "rgba:-"])
-                .output()
-                .ok()?;
-            if !out.status.success() { return None; }
-            let raw = out.stdout;
-            let dims = std::process::Command::new("identify")
-                .args(["-format", "%w %h", path])
-                .output().ok()?;
-            let dims_str = String::from_utf8_lossy(&dims.stdout);
-            let mut parts = dims_str.split_whitespace();
-            let w = parts.next()?.parse::<u32>().ok()?;
-            let h = parts.next()?.parse::<u32>().ok()?;
-            if raw.len() != (w * h * 4) as usize { return None; }
-            image::RgbaImage::from_raw(w, h, raw)?
-        }
-    };
-    
-    // Check if the image is completely transparent. If so, force the text fallback.
-    let mut has_visible_pixel = false;
-    for pixel in rgba.pixels() {
-        if pixel[3] > 10 { 
-            has_visible_pixel = true; 
-            break; 
-        }
-    }
-    if !has_visible_pixel {
-        eprintln!("[tray-render] image {:?} is fully transparent, using fallback", path);
-        return None;
-    }
-
-    
-    let (w, h) = rgba.dimensions();
-    let handle = iced::widget::image::Handle::from_rgba(w, h, rgba.into_raw());
-    g.insert(path.to_string(), handle.clone());
-    Some(handle)
-}
-
+use crate::bar::tray::watcher::TrayIconHandle;
 use crate::libraries::config::settings::ShellSettings;
 use crate::libraries::config::theme::ShellTheme;
-use crate::libraries::style::TextExt;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType, SlantSide};
+use crate::libraries::style::TextExt;
 
 pub(super) fn render<'a, Message: 'a>(
     theme: &ShellTheme,
@@ -97,21 +41,6 @@ pub(super) fn tooltip_bias(theme: &ShellTheme) -> (i32, i32) {
     let pad = theme.slant_width + 12.0;
     let bias = (pad - arrow_w / 2.0 - 8.0).round() as i32;
     (bias, bias)
-}
-
-static SVG_HANDLE_CACHE: OnceLock<
-    Mutex<std::collections::HashMap<String, iced::widget::svg::Handle>>,
-> = OnceLock::new();
-
-fn cached_svg_handle(path: &str) -> iced::widget::svg::Handle {
-    let cache = SVG_HANDLE_CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
-    let mut g = cache.lock().unwrap();
-    if let Some(h) = g.get(path) {
-        return h.clone();
-    }
-    let h = iced::widget::svg::Handle::from_path(path);
-    g.insert(path.to_string(), h.clone());
-    h
 }
 
 pub(super) fn render_expanded<'a, Message: 'static + Clone>(
@@ -202,22 +131,16 @@ pub(super) fn render_expanded<'a, Message: 'static + Clone>(
 
     let mut icons_row = Row::new().spacing(spacing).align_y(Alignment::Center);
     for item in items.iter().take(shown) {
-        let icon_elem: Element<'a, Message> = match &item.icon_path {
-            Some(p) if std::path::Path::new(p).exists() && p.ends_with(".svg") => {
-                iced::widget::svg(cached_svg_handle(p))
-                    .width(Length::Fixed(icon_size))
-                    .height(Length::Fixed(icon_size))
-                    .into()
-            }
-            Some(p) if std::path::Path::new(p).exists() => cached_rgba_handle(p)
-                .map(|handle| {
-                    iced::widget::image(handle)
-                        .width(Length::Fixed(icon_size))
-                        .height(Length::Fixed(icon_size))
-                        .into()
-                })
-                .unwrap_or_else(|| mk_fallback(item)),
-            _ => mk_fallback(item),
+        let icon_elem: Element<'a, Message> = match &item.icon_handle {
+            Some(TrayIconHandle::Svg(handle)) => iced::widget::svg(handle.clone())
+                .width(Length::Fixed(icon_size))
+                .height(Length::Fixed(icon_size))
+                .into(),
+            Some(TrayIconHandle::Rgba(handle)) => iced::widget::image(handle.clone())
+                .width(Length::Fixed(icon_size))
+                .height(Length::Fixed(icon_size))
+                .into(),
+            None => mk_fallback(item),
         };
 
         let activate_item = item.clone();

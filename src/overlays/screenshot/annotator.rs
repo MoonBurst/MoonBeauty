@@ -163,9 +163,7 @@ impl AnnotatorOverlay {
     }
 
     pub fn load_image(&mut self, path: PathBuf, bytes: Vec<u8>) {
-        // Finding 46: cap raw bytes + dimension pre-decode. Same class as
-        // finding 27 (tray). A hostile PNG forces OOM through the decode
-        // path even if raw bytes are small (compression bomb).
+        // Cap raw bytes and dimensions pre-decode to avoid decompression-bomb OOM.
         const MAX_RAW: usize = 100 * 1024 * 1024;
         const MAX_DIM: u32 = 16384;
         if bytes.len() > MAX_RAW {
@@ -191,10 +189,7 @@ impl AnnotatorOverlay {
                 return;
             }
         }
-        // Finding 52: bound the decoded pixel buffer, not just dimensions.
-        // The dimension gate above allows 16384×16384 = 1 GB decoded; a
-        // hostile PNG compressed to <100 KB passes byte + dimension checks
-        // then bombs on decode. image::Limits caps decoded memory directly.
+        // Bound decoded pixel buffer memory directly via image::Limits.
         let mut limits = ::image::Limits::default();
         limits.max_image_width = Some(MAX_DIM);
         limits.max_image_height = Some(MAX_DIM);
@@ -508,8 +503,7 @@ impl AnnotatorOverlay {
         };
 
         // ContentFit::Contain preserves 1:1 pixel mapping so the auto-leveled
-        // high-pass reveal isn't blurred by upsampling. Source is also shown
-        // at 1:1 this way (matches how QML displays the reveal overlay).
+        // high-pass reveal isn't blurred by upsampling.
         let image_widget = iced::widget::image(active_handle.unwrap())
             .width(Length::Fill)
             .height(Length::Fill)
@@ -722,7 +716,7 @@ impl AnnotatorOverlay {
                         .push(tool_row)
                         .push(text(" ").size(13))
                         .push(color_row)
-                        .push(font_controls) // <-- Added font controls here
+                        .push(font_controls)
                         .spacing(10)
                         .align_y(Alignment::Center),
                 )
@@ -1110,12 +1104,6 @@ fn draw_ann<F: Fn(Point) -> Point>(
     }
 }
 
-// ── LSB steganography ─────────────────────────────────────────────────
-//
-// 16-bit length header + UTF-8 payload, 1 bit per RGB channel (LSB).
-// Changes each channel's value by at most 1/255 — imperceptible.
-// Survives PNG round-tripping (grim + wl-copy + image viewers).
-
 // ── ImageMagick annotation compose ────────────────────────────────────
 
 /// Register the JPEG XL decoder with the `image` crate so that
@@ -1384,8 +1372,7 @@ pub fn compose_annotations(
         }
     }
     args.push(out.to_str().unwrap_or("").into());
-    // Finding 07: bound ImageMagick resource use. Input is a PNG, but
-    // a crafted PNG can encode decompression bombs that exhaust memory.
+    // Bound ImageMagick resource use against decompression bombs.
     let ok = std::process::Command::new(bin)
         .args([
             "-limit", "memory", "512MiB", "-limit", "map", "1GiB", "-limit", "disk", "2GiB",
@@ -1523,5 +1510,3 @@ pub fn save_annotated_image(
     crate::overlays::clipboard::serve_uri_list(&produced);
     Ok(produced)
 }
-
-// ── slurp / grim ─────────────────────────────────────────────────────

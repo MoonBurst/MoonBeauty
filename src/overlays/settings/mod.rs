@@ -6,12 +6,8 @@ use crate::libraries::config::settings::{
     ContentRule, FriendProfile, ScreenshotSaveFormat, ShellSettings,
 };
 
-/// Debug log — gated on MBS_DEBUG or MBS_SETTINGS_DEBUG so release builds
-/// stay silent. Uses a persistent file handle (opened once) instead of
-/// opening/writing/closing per call.
-/// Minimum tooltip size per module id. Mirrors the per-row minimums that
-/// used to be inlined in `render_row` — shared with the drag handler so the
-/// mapping `x_norm → w` matches the slider range that existed before.
+/// Minimum tooltip size per module id, shared with the drag handler so
+/// the mapping `x_norm → w` matches the slider range.
 fn min_size_for(id: &str) -> (u32, u32) {
     match id {
         "alarm" => (400, 280),
@@ -23,6 +19,7 @@ fn min_size_for(id: &str) -> (u32, u32) {
     }
 }
 
+/// Debug log gated on MBS_DEBUG or MBS_SETTINGS_DEBUG.
 fn mbs_dbg(msg: &str) {
     use std::io::Write;
     use std::sync::{Mutex, OnceLock};
@@ -214,9 +211,6 @@ pub enum SettingsMessage {
     SaveSettings,
     TestNotification,
     CopyIpc(String),
-    // ToggleEditModule removed (problem 09): handler set
-    // self.editing_module, but view() never read it and nothing
-    // emitted the message.
     SelectBarMonitor(String),
     Dismiss,
 }
@@ -226,9 +220,6 @@ pub struct SettingsOverlay {
     pub selected_screen: String,
     pub selected_profile: usize,
     last_save: std::time::Instant,
-    // editing_module removed (problem 09)
-    preview_child: Option<std::process::Child>,
-    last_preview: std::time::Instant,
     pub detected_gpus: Vec<GpuInfo>,
     pub browsing_music_dir: Option<std::path::PathBuf>,
     pub browse_entries: Vec<std::path::PathBuf>,
@@ -243,8 +234,6 @@ impl SettingsOverlay {
             selected_screen: "Auto (Primary)".into(),
             selected_profile: 0,
             last_save: std::time::Instant::now(),
-            preview_child: None,
-            last_preview: std::time::Instant::now() - std::time::Duration::from_secs(60),
             detected_gpus: SystemCollector::list_gpus_sync(),
             browsing_music_dir: None,
             browse_entries: Vec::new(),
@@ -259,8 +248,6 @@ impl SettingsOverlay {
             selected_screen: "Auto (Primary)".into(),
             selected_profile: 0,
             last_save: std::time::Instant::now(),
-            preview_child: None,
-            last_preview: std::time::Instant::now() - std::time::Duration::from_secs(60),
             detected_gpus: Vec::new(),
             browsing_music_dir: None,
             browse_entries: Vec::new(),
@@ -353,18 +340,11 @@ impl SettingsOverlay {
                 let new_h = ((y_norm * max_h as f32).round() as u32).clamp(min_h, max_h);
                 settings.tooltip_sizes.insert(id, (new_w, new_h));
             }
-            SettingsMessage::SizeCommit { id } => {
-                // Release → save happens via should_persist below.
-                // Spawn the live preview here, one time, at the final size.
-                let (w, h) = settings.tooltip_size(&id);
-                self.spawn_tooltip_preview(&id, w, h, settings);
-            }
+            SettingsMessage::SizeCommit { .. } => {}
             SettingsMessage::ResetTooltipSize(id) => {
-                self.kill_preview();
                 settings.tooltip_sizes.remove(&id);
             }
             SettingsMessage::SelectTab(t) => {
-                self.kill_preview();
                 self.browsing_music_dir = None;
                 self.browse_mode = None;
                 self.browse_entries.clear();
@@ -763,7 +743,6 @@ impl SettingsOverlay {
                 settings.friend_profiles =
                     crate::libraries::config::settings::load_friend_profiles();
             }
-            // SettingsMessage::ToggleEditModule removed (problem 09)
             SettingsMessage::AlarmSoundChanged(v) => {
                 settings.alarm_sound = if v.trim().is_empty() { None } else { Some(v) };
             }
@@ -796,9 +775,7 @@ impl SettingsOverlay {
             // enum exhaustiveness when SettingsOverlay::update is
             // called directly.
             SettingsMessage::CopyIpc(_) => {}
-            SettingsMessage::Dismiss => {
-                self.kill_preview();
-            }
+            SettingsMessage::Dismiss => {}
         }
 
         // Commit to disk: immediately on explicit save-worthy events, or
@@ -808,82 +785,6 @@ impl SettingsOverlay {
         if should_persist || rate_limited {
             let _ = settings.save();
             self.last_save = std::time::Instant::now();
-        }
-    }
-
-    fn spawn_tooltip_preview(&mut self, id: &str, w: u32, h: u32, settings: &ShellSettings) {
-        // Debounce: skip if we spawned within last 80ms
-        if self.last_preview.elapsed() < std::time::Duration::from_millis(80) {
-            return;
-        }
-        self.last_preview = std::time::Instant::now();
-
-        // Kill existing preview
-        if let Some(mut c) = self.preview_child.take() {
-            let _ = c.kill();
-            let _ = c.wait();
-        }
-
-        let exe = match std::env::current_exe() {
-            Ok(e) => e,
-            Err(_) => return,
-        };
-
-        let (arg, extra_env): (&str, Option<(&str, String)>) = match id {
-            "weather" => ("--weather-tooltip", None),
-            "tray" => ("--tray-popup", None),
-            "alarm" => ("--alarm-tooltip", None),
-            "cpu" | "gpu" | "ram" => ("--sys-tooltip", Some(("MBS_SYS_TARGET", id.to_string()))),
-            "calendar" | "music" | "unified" | "net" | "custom" => {
-                ("--info-tooltip", Some(("MBS_INFO_MODE", id.to_string())))
-            }
-            _ => return,
-        };
-
-        let id_owned = id.to_string();
-        let (sl, sr, grow_right) = if settings.bar_left.contains(&id_owned) {
-            ("L", "L", "1")
-        } else if settings.bar_right.contains(&id_owned) {
-            ("R", "R", "0")
-        } else {
-            ("L", "R", "1")
-        };
-
-        // Approximate bar position — settings doesn't know the exact capsule cx.
-        let preview_cx = 400i32;
-        let preview_sw = 1920i32;
-        let preview_cap_w = 150i32;
-
-        let mut cmd = std::process::Command::new(exe);
-        cmd.arg(arg);
-        cmd.env("MBS_TOOLTIP_W", w.to_string())
-            .env("MBS_TOOLTIP_H", h.to_string())
-            .env("MBS_TOOLTIP_DROP_MS", settings.tooltip_drop_ms.to_string())
-            .env(
-                "MBS_TOOLTIP_EXPAND_MS",
-                settings.tooltip_expand_ms.to_string(),
-            )
-            .env(
-                "MBS_TOOLTIP_PAUSE_MS",
-                settings.tooltip_pause_ms.to_string(),
-            )
-            .env("MBS_CAPSULE_CX", preview_cx.to_string())
-            .env("MBS_CAPSULE_W", preview_cap_w.to_string())
-            .env("MBS_SCREEN_W", preview_sw.to_string())
-            .env("MBS_SLANT_L", sl)
-            .env("MBS_SLANT_R", sr)
-            .env("MBS_GROW_RIGHT", grow_right)
-            .env("MBS_OUTPUT", &settings.bar_monitor);
-
-        if let Some((k, v)) = extra_env {
-            cmd.env(k, v);
-        }
-
-        match cmd.spawn() {
-            Ok(child) => {
-                self.preview_child = Some(child);
-            }
-            Err(e) => eprintln!("[preview] spawn failed: {e}"),
         }
     }
 
@@ -1178,13 +1079,6 @@ impl SettingsOverlay {
         )
     }
 
-    fn kill_preview(&mut self) {
-        if let Some(mut c) = self.preview_child.take() {
-            let _ = c.kill();
-            let _ = c.wait();
-        }
-    }
-
     pub fn view<'a>(
         &'a self,
         settings: &'a ShellSettings,
@@ -1245,13 +1139,9 @@ impl SettingsOverlay {
 
         let body_content: Element<'a, SettingsMessage> = match self.active_tab {
             SettingsTab::Notifications => self.view_notifications(settings, theme),
-
             SettingsTab::ColorsStyles => self.view_colors_styles(settings, theme),
-
             SettingsTab::Hardware => self.view_hardware(settings, theme),
-
             SettingsTab::BarLayout => self.view_bar_layout(settings, theme),
-
             SettingsTab::OverlaysWindows => self.view_overlays_windows(settings, theme),
             SettingsTab::IpcCommands => self.view_ipc_commands(settings, theme),
         };
@@ -1339,12 +1229,6 @@ impl SettingsOverlay {
             .center_y(Length::Fill)
             .into()
     }
-
-
-
-
-
-
 }
 
 pub fn import_alarm_sound_file_to(

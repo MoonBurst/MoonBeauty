@@ -3,7 +3,7 @@ use moonbeauty::libraries::ipc::IpcCommand;
 
 impl MoonBeautyShellApp {
     pub(crate) fn handle_ipc(&mut self, cmd: IpcCommand) -> Command<Message> {
-        let _ = match cmd {
+        match cmd {
             IpcCommand::Toggle(target) => {
                 // Every overlay runs as a standalone child so it gets
                 // keyboard=Exclusive from its layer surface. The bar's own

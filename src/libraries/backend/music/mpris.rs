@@ -30,11 +30,8 @@ static CACHE: OnceLock<Mutex<Option<(Instant, Option<MprisTrack>)>>> = OnceLock:
 const MPRIS_IFACE: &str = "org.mpris.MediaPlayer2.Player";
 const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 
-/// Finding 31: cap MPRIS-provided strings before concatenation /
-/// display. The initial `get_property::<String>` allocation is
-/// unavoidable (it's the D-Bus message payload); this bounds the
-/// *derived* work. Real `xesam:title`/`album` are <200 chars; 512 is
-/// generous. `xesam:url` gets 4096 (Windows-style long paths).
+/// Cap MPRIS-provided strings before concatenation or display to bound
+/// derived allocations.
 fn truncate_chars(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
@@ -43,14 +40,10 @@ fn truncate_chars(s: &str, max: usize) -> String {
     }
 }
 
-/// Finding 33: parse a `file://` MPRIS track URL into a safe absolute
-/// path. Rejects relative paths and traversal. `open_track_folder` and
-/// `trash_current_track` are the only sinks — both require a user
-/// click, but the click is presented as innocuous ("Folder", "Trash").
+/// Parse a `file://` MPRIS track URL into a safe absolute media path,
+/// rejecting relative paths, traversal, and non-media extensions.
 fn safe_mpris_file_path(url: &str) -> Option<std::path::PathBuf> {
     let clean = url.strip_prefix("file://")?;
-    // Reject relative (file://etc → no leading slash) and traversal
-    // (file:///home/u/../../../etc).
     if !clean.starts_with('/') || clean.contains("..") {
         crate::dbg_log!("[mpris] rejected unsafe track url: {:?}", clean);
         return None;
@@ -86,10 +79,7 @@ impl MprisBackend {
             .ok()?;
 
         let names: Vec<String> = reply.body().deserialize().ok()?;
-        // Finding 32: cap enumeration at 20. A hostile app can register
-        // thousands of `org.mpris.MediaPlayer2.*` names; unbounded
-        // iteration → unbounded D-Bus probe calls → shell hang.
-        // Real systems have ≤5 legit players; 20 is generous headroom.
+        // Cap enumeration at 20 to bound D-Bus probe calls.
         let mpris_names: Vec<String> = names
             .into_iter()
             .filter(|n| n.starts_with("org.mpris.MediaPlayer2."))
@@ -101,10 +91,8 @@ impl MprisBackend {
             return None;
         }
 
-        // Prefer a player that's currently Playing.
-        // Finding 32: per-player timeout so a hung / hostile proxy
-        // doesn't block the whole enumeration. 2s is generous for a
-        // local D-Bus round-trip (real players respond in <50ms).
+        // Prefer a player that's currently Playing, with a per-player timeout
+        // so a hung proxy doesn't block enumeration.
         for name in &mpris_names {
             if let Ok(proxy) = zbus::Proxy::new(&conn, name.as_str(), MPRIS_PATH, MPRIS_IFACE).await
             {
@@ -135,26 +123,22 @@ impl MprisBackend {
         {
             let g = c.lock().unwrap();
             if let Some((t, tr)) = &*g {
-                // Finding 32: cache None results for 30s instead of 5s.
-                // A hostile player that hangs forces a 10s timeout per
-                // poll; caching the None longer avoids 10s hangs on
-                // every 15s hardware tick.
+                // Cache None results for 30s to avoid repeated 10s hangs
+                // across hardware ticks when a player is unresponsive.
                 let cache_ttl = if tr.is_some() { 5 } else { 30 };
                 if t.elapsed().as_secs() < cache_ttl {
                     return tr.clone();
                 }
             }
         }
-        // Finding 32: outer 10s timeout caps worst case for the whole
-        // poll_uncached invocation. Per-player timeout is 2s × 20 cap =
-        // 40s worst case; this brings it to 10s.
+        // Outer 10s timeout caps worst-case poll_uncached duration.
         let result =
             match tokio::time::timeout(std::time::Duration::from_secs(10), Self::poll_uncached())
                 .await
             {
                 Ok(r) => r,
                 Err(_) => {
-                    eprintln!("[mpris] poll timed out at 10s (finding 32)");
+                    eprintln!("[mpris] poll timed out at 10s");
                     None
                 }
             };
@@ -290,21 +274,13 @@ impl MprisBackend {
     }
 
     /// Poll a specific player by bus name. Used by the music cycle;
-    /// the normal `poll()` auto-selects. Same field extraction as
-    /// `poll_uncached`, just targeted.
+    /// the normal `poll()` auto-selects.
     pub async fn poll_for(bus: &str) -> Option<MprisTrack> {
         let conn = Connection::session().await.ok()?;
         Self::read_track_from_bus(&conn, bus).await
     }
 
-    /// Play/pause a specific player by bus name. Used by the music
-    /// cycle and the tooltip buttons (finding 74 fix).
-    ///
-    /// Finding 75: use `PlayPause` (required-by-MPRIS-spec toggle)
-    /// after checking current state, instead of `Play`/`Pause`
-    /// individually. Firefox implements all four; some MPRIS bridges
-    /// (e.g. mpv-mpris) stub the individual ones. `PlayPause` with a
-    /// pre-check is universal.
+    /// Play or pause a specific player by bus name, falling back to PlayPause.
     pub async fn set_playing_for(bus: &str, play: bool) {
         let Ok(conn) = Connection::session().await else {
             crate::dbg_log!("[mpris] set_playing_for({}): no session conn", bus);
@@ -407,9 +383,8 @@ impl MprisBackend {
     }
 
     pub async fn trash_current_track(url_opt: Option<&str>) -> bool {
-        // Finding 33: `gio trash <path>` destroys the file. Without this
-        // guard, hostile MPRIS sets xesam:url = file:///home/u/.ssh/id_rsa
-        // and the user's "Trash" click silently destroys their SSH key.
+        // Only trash validated absolute media paths so untrusted xesam:url
+        // values cannot destroy arbitrary user files.
         if let Some(path) = url_opt.and_then(safe_mpris_file_path) {
             let status = Command::new("gio")
                 .args(["trash"])
@@ -481,10 +456,7 @@ mod safe_mpris_tests {
 
     #[test]
     fn non_media_extension_rejected() {
-        // Finding 33 (corrected): the previous guard allowed any absolute
-        // path, so file:///home/u/.ssh/id_rsa passed and 'Trash' would
-        // run `gio trash ~/.ssh/id_rsa`. Media-extension allowlist now
-        // blocks non-media extensions.
+        // Non-media extensions must be rejected so xesam:url cannot target sensitive files.
         assert!(safe_mpris_file_path("file:///home/u/.ssh/id_rsa").is_none());
         assert!(safe_mpris_file_path("file:///home/u/Documents/thesis.pdf").is_none());
         assert!(safe_mpris_file_path("file:///tmp/notes.txt").is_none());

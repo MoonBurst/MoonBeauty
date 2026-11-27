@@ -1,7 +1,5 @@
 use iced::widget::{column, container, row, text, Stack};
-use iced::{Alignment, Color, Element, Length, Padding, Task, Theme};
-use iced_layershell::reexport::{KeyboardInteractivity, Layer};
-use iced_layershell::settings::{LayerShellSettings, Settings};
+use iced::{Alignment, Color, Element, Length, Padding, Task};
 use std::time::Instant;
 
 use crate::bar::weather::client::{WeatherAlert, WeatherData};
@@ -14,7 +12,6 @@ use crate::libraries::style::TextExt;
 pub use crate::overlays::tooltip_common::slanted_row;
 use crate::overlays::tooltip_common::InBarTooltipConfig;
 
-const W_START: f32 = 130.0;
 const AUTO_MS: u128 = 20_000;
 
 #[derive(Debug, Clone)]
@@ -22,15 +19,6 @@ pub enum Message {
     Tick,
     Loaded(Option<WeatherData>),
     Dismiss,
-}
-
-impl TryInto<iced_layershell::actions::LayershellCustomActionWithId> for Message {
-    type Error = Message;
-    fn try_into(
-        self,
-    ) -> Result<iced_layershell::actions::LayershellCustomActionWithId, Self::Error> {
-        Err(self)
-    }
 }
 
 pub struct App {
@@ -52,66 +40,10 @@ pub struct App {
     // during the drop/expand animation (~400ms of ~24 frames each).
     settings: ShellSettings,
     theme: ShellTheme,
-    in_bar: bool,
     pub should_close: bool,
 }
 
-#[allow(dead_code)]
 impl App {
-    fn new_app() -> (Self, Task<Message>) {
-        crate::libraries::process::install_sigterm_handler();
-        let env = crate::overlays::tooltip_common::TooltipEnv::from_env(W_START);
-        let w: u32 = std::env::var("MBS_TOOLTIP_W")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(420);
-        let s = ShellSettings::load();
-        let h: u32 = std::env::var("MBS_TOOLTIP_H")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(520);
-        eprintln!("[weather_tooltip-h] MBS_TOOLTIP_H = {}", h);
-        eprintln!("[child-h] weather_tooltip MBS_TOOLTIP_H = {}", h);
-
-        let drop_ms = s.tooltip_drop_ms as f32;
-        let expand_ms = s.tooltip_expand_ms as f32;
-        
-
-        let app = Self {
-            opened: Instant::now(),
-            weather: None,
-            fetched: false,
-            grow_right: env.grow_right,
-            w,
-            w_start: env.w_start,
-            slant_l: env.slant_l,
-            slant_r: env.slant_r,
-            h,
-            drop_ms,
-            expand_ms,
-            closing_at: None,
-            anim_frame: 0,
-            settings: s.clone(),
-            theme: ShellTheme::from_settings(&s),
-            in_bar: false,
-            should_close: false,
-        };
-        let task = Task::perform(
-            async { WeatherBackend::fetch().await.ok() },
-            Message::Loaded,
-        );
-        (
-            app,
-            Task::batch(vec![
-                task,
-                Task::perform(
-                    async { tokio::time::sleep(std::time::Duration::from_millis(4)).await },
-                    |_| Message::Tick,
-                ),
-            ]),
-        )
-    }
-
     pub fn new_in_bar(cfg: &InBarTooltipConfig) -> (Self, Task<Message>) {
         let s = ShellSettings::load();
         let app = Self {
@@ -130,7 +62,6 @@ impl App {
             anim_frame: 0,
             settings: s.clone(),
             theme: ShellTheme::from_settings(&s),
-            in_bar: true,
             should_close: false,
         };
         let task = Task::perform(
@@ -168,19 +99,9 @@ impl App {
         }
     }
 
-    fn namespace(&self) -> String {
-        "mbs-wx-tip".into()
-    }
-
     pub fn update(&mut self, m: Message) -> Task<Message> {
         match m {
             Message::Tick => {
-                if crate::libraries::process::was_sigterm_signaled()
-                    && self.closing_at.is_none()
-                {
-                    let snap = self.snapshot_for_close();
-                    self.closing_at = Some(snap);
-                }
                 self.anim_frame = self.anim_frame.wrapping_add(1);
                 let elapsed_ms = self.opened.elapsed().as_millis() as u64;
                 if std::env::var_os("MBS_TICK_DIAG").is_some() {
@@ -189,18 +110,12 @@ impl App {
 
                 if let Some(t) = &self.closing_at {
                     if t.started.elapsed().as_millis() > (self.drop_ms * 3.0) as u128 {
-                        if self.in_bar {
-                            self.should_close = true;
-                            return Task::none();
-                        }
-                        std::process::exit(0);
-                    }
-                } else if self.opened.elapsed().as_millis() > AUTO_MS {
-                    if self.in_bar {
                         self.should_close = true;
                         return Task::none();
                     }
-                    std::process::exit(0);
+                } else if self.opened.elapsed().as_millis() > AUTO_MS {
+                    self.should_close = true;
+                    return Task::none();
                 }
 
                 let next_ms: u64 = if elapsed_ms < 2000 || self.closing_at.is_some() {
@@ -210,10 +125,6 @@ impl App {
                         .filter(|n| *n >= 1 && *n <= 100)
                         .unwrap_or(4)
                 } else {
-                    // 100ms (was 500) so SIGTERM-close is picked up within
-                    // ~100ms during idle; without this, the tooltip sits
-                    // visible for up to 500ms before the close animation
-                    // can start.
                     100
                 };
 
@@ -231,9 +142,7 @@ impl App {
                     let snap = self.snapshot_for_close();
                     self.closing_at = Some(snap);
                 }
-                // Same fix as popup.rs::Message::Dismiss — reschedule
-                // Tick so the auto-exit check runs; otherwise the
-                // process hangs at ESC.
+                // Reschedule Tick so the close animation advances to should_close.
                 return Task::perform(
                     async {
                         tokio::time::sleep(std::time::Duration::from_millis(4)).await
@@ -307,24 +216,6 @@ impl App {
         )
     }
 
-    fn subscription(&self) -> iced::Subscription<Message> {
-        iced::event::listen_with(|event, _status, _window| {
-            let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
-                ..
-            }) = event
-            else {
-                return None;
-            };
-            Some(Message::Dismiss)
-        })
-    }
-    fn theme(&self) -> Theme {
-        Theme::Dark
-    }
-}
-
-impl App {
     fn build_content<'a>(
         &'a self,
         t: &ShellTheme,
@@ -457,50 +348,4 @@ impl App {
             .clip(true)
             .into()
     }
-}
-
-pub fn run() -> Result<(), iced_layershell::Error> {
-    let output: Option<String> = std::env::var("MBS_OUTPUT").ok().filter(|s| !s.is_empty());
-    let s = ShellSettings::load();
-    let w: u32 = std::env::var("MBS_TOOLTIP_W")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(420);
-    let h: u32 = std::env::var("MBS_TOOLTIP_H")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(520);
-    eprintln!("[weather_tooltip-h] MBS_TOOLTIP_H = {}", h);
-    eprintln!("[child-h] weather_tooltip MBS_TOOLTIP_H = {}", h);
-
-    let (anchor, margin) = crate::overlays::tooltip_common::layer_anchor_and_margin(&s, w, false);
-
-    let layer = LayerShellSettings {
-        size: Some((w, h)),
-        exclusive_zone: -1,
-        anchor,
-        layer: Layer::Overlay,
-        keyboard_interactivity: KeyboardInteractivity::Exclusive,
-        start_mode: output
-            .map(iced_layershell::settings::StartMode::TargetScreen)
-            .unwrap_or(iced_layershell::settings::StartMode::Active),
-        margin,
-        ..Default::default()
-    };
-    iced_layershell::application(
-        App::new_app,
-        || "mbs-wx-tip".to_string(),
-        App::update,
-        App::view,
-    )
-    .subscription(App::subscription)
-    .style(|_state, _theme| iced::theme::Style {
-        background_color: iced::Color::TRANSPARENT,
-        text_color: iced::Color::WHITE,
-    })
-    .settings(Settings {
-        layer_settings: layer,
-        ..Default::default()
-    })
-    .run()
 }

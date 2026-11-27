@@ -1,6 +1,5 @@
 use iced::widget::{button, column, container, row, text, Stack};
 use iced::{Alignment, Element, Length};
-use tokio::process::Command;
 
 use crate::libraries::config::theme::ShellTheme;
 use crate::libraries::style::shape_box::{ShapeBox, ShapeType};
@@ -37,63 +36,29 @@ impl PowerOverlay {
         Self { confirming: None }
     }
 
-    pub fn update(&mut self, message: PowerMessage) {
+    pub fn update(&mut self, message: PowerMessage) -> Option<PowerAction> {
         match message {
             PowerMessage::Select(act) => match act {
-                PowerAction::Lock | PowerAction::Sleep => {
-                    Self::execute(act);
-                }
+                PowerAction::Lock | PowerAction::Sleep => Some(act),
                 PowerAction::Logout | PowerAction::Reboot | PowerAction::Shutdown => {
                     if self.confirming == Some(act) {
-                        Self::execute(act);
                         self.confirming = None;
+                        Some(act)
                     } else {
                         self.confirming = Some(act);
+                        None
                     }
                 }
             },
             PowerMessage::Confirm(act) => {
-                Self::execute(act);
                 self.confirming = None;
+                Some(act)
             }
             PowerMessage::Dismiss => {
                 self.confirming = None;
+                None
             }
         }
-    }
-
-    pub fn execute(action: PowerAction) {
-        tokio::spawn(async move {
-            match action {
-                PowerAction::Lock => {
-                    // Triggers session lockscreen
-                }
-                PowerAction::Sleep => {
-                    let _ = Command::new("systemctl").arg("suspend").status().await;
-                }
-                PowerAction::Reboot => {
-                    let _ = Command::new("systemctl").arg("reboot").status().await;
-                }
-                PowerAction::Shutdown => {
-                    let _ = Command::new("systemctl").arg("poweroff").status().await;
-                }
-                PowerAction::Logout => {
-                    if std::env::var("HYPRLAND_INSTANCE_SIGNATURE").is_ok() {
-                        let _ = Command::new("hyprctl")
-                            .args(["dispatch", "exit"])
-                            .status()
-                            .await;
-                    } else if std::env::var("SWAYSOCK").is_ok() {
-                        let _ = Command::new("swaymsg").arg("exit").status().await;
-                    } else {
-                        let _ = Command::new("loginctl")
-                            .args(["terminate-session", "self"])
-                            .status()
-                            .await;
-                    }
-                }
-            }
-        });
     }
 
     pub fn view<'a>(&'a self, theme: &ShellTheme) -> Element<'a, PowerMessage> {

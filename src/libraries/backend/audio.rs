@@ -214,14 +214,7 @@ impl AudioBackend {
 
 /// Resolve a user-configured alarm sound. Tries in order:
 ///   1. Absolute path as-is
-///   2. `~/.local/share/moonbeauty/sounds/<basename>` (stable, where imports go now)
-///
-/// cwd-relative and $CARGO_MANIFEST_DIR candidates were dropped
-/// (finding 19): they only worked from the source tree and could be
-/// shadowed by an attacker-controlled ./resources/<name>.
-///
-/// Logs the resolved path when found; if nothing is found, the caller
-/// logs the failure (see `play_alarm_sound`).
+///   2. `~/.local/share/moonbeauty/sounds/<basename>`
 pub fn resolve_alarm_sound_path(sound: &str) -> Option<std::path::PathBuf> {
     use std::path::PathBuf;
 
@@ -230,8 +223,7 @@ pub fn resolve_alarm_sound_path(sound: &str) -> Option<std::path::PathBuf> {
         return Some(raw);
     }
 
-    // Filename-only fallback across the standard locations. Use just the
-    // basename so a moved directory still resolves via XDG data.
+    // Filename-only fallback in XDG data sounds dir.
     let filename = raw
         .file_name()
         .map(PathBuf::from)
@@ -239,12 +231,9 @@ pub fn resolve_alarm_sound_path(sound: &str) -> Option<std::path::PathBuf> {
 
     let mut candidates: Vec<PathBuf> = Vec::new();
 
-    // Stable per-user data dir — where ImportAlarmSound now copies files.
     if let Some(data) = dirs::data_dir() {
         candidates.push(data.join("moonbeauty").join("sounds").join(&filename));
     }
-
-    // Finding 19: cwd-relative and CARGO_MANIFEST_DIR candidates dropped.
 
     for c in &candidates {
         if c.exists() && c.is_file() {
@@ -254,14 +243,12 @@ pub fn resolve_alarm_sound_path(sound: &str) -> Option<std::path::PathBuf> {
     None
 }
 
-/// Play an alarm sound. Tries pw-play, then paplay, then aplay. Logs the
-/// resolved path and every failure mode so the user can see what's wrong
-/// in `/tmp/mbs-test.log`. Sleeps `duration_secs` in a detached thread,
-/// then kills the child — no `timeout` binary dependency.
+/// Play an alarm sound. Tries pw-play, then paplay, then aplay. Sleeps
+/// `duration_secs` in a detached thread, then kills the child.
 pub fn play_alarm_sound(sound: &str, volume_pct: u32, duration_secs: u32) {
     let Some(path) = resolve_alarm_sound_path(sound) else {
         eprintln!(
-            "[alarm-sound] NOT FOUND: {:?} — tried XDG data/sounds, cwd, cwd/resources, manifest/resources",
+            "[alarm-sound] NOT FOUND: {:?} — tried XDG data/sounds",
             sound
         );
         return;

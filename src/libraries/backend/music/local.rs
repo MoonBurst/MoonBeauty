@@ -254,7 +254,7 @@ fn scan_music_library(music_dirs: &[PathBuf]) -> Vec<IndexedTrack> {
         }
     }
 
-    tracks.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    tracks.sort_by_key(|a| a.title.to_lowercase());
     tracks
 }
 

@@ -15,9 +15,8 @@ use super::magick_or_convert;
 use std::path::PathBuf;
 
 fn private_dir() -> PathBuf {
-    // mbs_subdir: panics if $XDG_RUNTIME_DIR unset (no /tmp fallback),
-    // creates the dir at 0700, and tightens pre-existing looser modes.
-    // Same guarantee every other temp path in the tree gets.
+    // mbs_subdir panics if $XDG_RUNTIME_DIR is unset (no /tmp fallback)
+    // and enforces 0700 permissions.
     crate::libraries::process::mbs_subdir("mbs-watermark")
 }
 
@@ -95,7 +94,7 @@ pub fn add_plate_watermark(bytes: &[u8], name: &str) -> Result<Vec<u8>, String> 
         tmp_out.to_string_lossy().into_owned(),
     ];
 
-    // Finding 07: bound ImageMagick resource use.
+    // Bound ImageMagick resource use.
     let status = std::process::Command::new(bin)
         .args([
             "-limit", "memory", "512MiB", "-limit", "map", "1GiB", "-limit", "disk", "2GiB",
@@ -176,7 +175,7 @@ pub fn reveal(bytes: &[u8]) -> Result<Vec<u8>, String> {
         std::fs::write(&tmp_in, bytes).map_err(|e| format!("write: {e}"))?;
     }
 
-    // Finding 07: bound ImageMagick resource use.
+    // Bound ImageMagick resource use.
     let mut cmd = std::process::Command::new(bin);
     cmd.args([
         "-limit", "memory", "512MiB", "-limit", "map", "1GiB", "-limit", "disk", "2GiB", "-limit",

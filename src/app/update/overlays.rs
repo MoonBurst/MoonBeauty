@@ -9,6 +9,53 @@
 
 use super::*;
 
+async fn copy_pass_key(key: String) {
+    let clean = key.trim();
+    if clean.is_empty() {
+        return;
+    }
+    let _ = tokio::process::Command::new("pass")
+        .args(["-c", clean])
+        .status()
+        .await;
+    let _ = tokio::process::Command::new("notify-send")
+        .args(["-a", "Password Store", "Credential Copied", clean])
+        .spawn();
+}
+
+async fn execute_power_action(action: PowerAction) {
+    use tokio::process::Command as TokioCommand;
+    match action {
+        PowerAction::Lock => {
+            // Triggers session lockscreen
+        }
+        PowerAction::Sleep => {
+            let _ = TokioCommand::new("systemctl").arg("suspend").status().await;
+        }
+        PowerAction::Reboot => {
+            let _ = TokioCommand::new("systemctl").arg("reboot").status().await;
+        }
+        PowerAction::Shutdown => {
+            let _ = TokioCommand::new("systemctl").arg("poweroff").status().await;
+        }
+        PowerAction::Logout => {
+            if std::env::var("HYPRLAND_INSTANCE_SIGNATURE").is_ok() {
+                let _ = TokioCommand::new("hyprctl")
+                    .args(["dispatch", "exit"])
+                    .status()
+                    .await;
+            } else if std::env::var("SWAYSOCK").is_ok() {
+                let _ = TokioCommand::new("swaymsg").arg("exit").status().await;
+            } else {
+                let _ = TokioCommand::new("loginctl")
+                    .args(["terminate-session", "self"])
+                    .status()
+                    .await;
+            }
+        }
+    }
+}
+
 impl MoonBeautyShellApp {
     pub(crate) fn handle_calc(&mut self, msg: CalcMessage) -> Command<Message> {
         match msg {
@@ -55,6 +102,20 @@ impl MoonBeautyShellApp {
             NotesMessage::Refocus => {
                 return iced::widget::operation::focus(moonbeauty::overlays::notes::NOTES_INPUT_ID)
                     .map(Message::Notes);
+            }
+            NotesMessage::CopyNote(content) => {
+                return Command::perform(
+                    async move {
+                        let _ = tokio::process::Command::new("wl-copy")
+                            .arg(&content)
+                            .status()
+                            .await;
+                        let _ = tokio::process::Command::new("notify-send")
+                            .args(["-a", "Notes", "Note Copied", &content])
+                            .spawn();
+                    },
+                    |_| Message::Noop,
+                );
             }
             _ => self.notes.update(msg),
         }
@@ -219,10 +280,7 @@ impl MoonBeautyShellApp {
                 if let Some(url) = WebSearchOverlay::build_url(&self.web.query) {
                     if self.is_standalone {
                         // Fork synchronously so the child process exists
-                        // before exit(0). The previous tokio::spawn +
-                        // exit(0) raced: the spawned task could be killed
-                        // before it forked xdg-open, so Enter sometimes
-                        // did nothing.
+                        // before exit(0), preventing tokio::spawn races.
                         let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
                         std::process::exit(0);
                     }
@@ -243,17 +301,22 @@ impl MoonBeautyShellApp {
     pub(crate) fn handle_power(&mut self, msg: PowerMessage) -> Command<Message> {
         match msg {
             PowerMessage::Dismiss => {
+                let _ = self.power.update(PowerMessage::Dismiss);
                 if self.is_standalone {
                     std::process::exit(0);
                 }
                 self.active_overlay = None;
             }
             _ => {
-                self.power.update(msg);
-                if self.is_standalone {
-                    std::process::exit(0);
+                if let Some(action) = self.power.update(msg) {
+                    if self.is_standalone {
+                        crate::app::helpers::run_then_exit(execute_power_action(action));
+                    }
+                    self.active_overlay = None;
+                    return Command::perform(execute_power_action(action), |_| {
+                        Message::DismissActiveOverlay
+                    });
                 }
-                self.active_overlay = None;
             }
         }
         Command::none()
@@ -305,19 +368,10 @@ impl MoonBeautyShellApp {
             }
             PassMessage::CopyKey(k) => {
                 if self.is_standalone {
-                    // Run copy to completion, then exit — no orphan task.
-                    let k_clone = k.clone();
-                    crate::app::helpers::run_then_exit(async move {
-                        PassOverlay::copy_password(&k_clone).await;
-                    });
+                    crate::app::helpers::run_then_exit(copy_pass_key(k));
                 }
                 self.active_overlay = None;
-                return Command::perform(
-                    async move {
-                        PassOverlay::copy_password(&k).await;
-                    },
-                    |_| Message::DismissActiveOverlay,
-                );
+                return Command::perform(copy_pass_key(k), |_| Message::DismissActiveOverlay);
             }
             _ => self.pass.update(msg),
         }

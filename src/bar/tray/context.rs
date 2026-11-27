@@ -26,17 +26,22 @@ pub struct App {
     items: Vec<TrayMenuItem>,
     bus: String,
     menu_path: String,
+    settings: ShellSettings,
+    theme: ShellTheme,
 }
 
 #[allow(dead_code)]
 impl App {
-    fn new_app(flags: (Vec<TrayMenuItem>, String, String)) -> (Self, Task<Message>) {
-        let (items, bus, menu_path) = flags;
+    fn new_app(flags: (Vec<TrayMenuItem>, String, String, ShellSettings)) -> (Self, Task<Message>) {
+        let (items, bus, menu_path, settings) = flags;
+        let theme = ShellTheme::from_settings(&settings);
         (
             Self {
                 items,
                 bus,
                 menu_path,
+                settings,
+                theme,
             },
             Task::none(),
         )
@@ -84,9 +89,9 @@ impl App {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let settings = ShellSettings::load();
-        let theme = ShellTheme::from_settings(&settings);
-        let fs = settings.tooltip_font_size;
+        let theme = &self.theme;
+        let fs = self.settings.tooltip_font_size;
+        let surface_alt = theme.surface_alt;
 
         let mut col = column![].spacing(4).padding(16);
 
@@ -100,7 +105,7 @@ impl App {
                     .width(Length::Fill)
                     .height(Length::Fixed(1.0))
                     .style(move |_t| container::Style {
-                        background: Some(iced::Background::Color(theme.surface_alt)),
+                        background: Some(iced::Background::Color(surface_alt)),
                         ..Default::default()
                     });
                 col = col.push(container(sep).padding([4, 0]));
@@ -128,7 +133,7 @@ impl App {
             .style(move |_t, status| {
                 let bg = match status {
                     button::Status::Hovered | button::Status::Pressed => {
-                        Some(iced::Background::Color(theme.surface_alt))
+                        Some(iced::Background::Color(surface_alt))
                     }
                     _ => None,
                 };
@@ -180,12 +185,14 @@ pub fn run(
     let _items_for_boot = items.clone();
     let _bus_for_boot = bus.clone();
     let _menu_for_boot = menu_path.clone();
+    let _settings_for_boot = s.clone();
     iced_layershell::application(
         move || {
             App::new_app((
                 _items_for_boot.clone(),
                 _bus_for_boot.clone(),
                 _menu_for_boot.clone(),
+                _settings_for_boot.clone(),
             ))
         },
         || "mbs-tray-context".to_string(),

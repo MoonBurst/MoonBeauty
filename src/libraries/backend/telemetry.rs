@@ -3,22 +3,16 @@
 //! Every field here is what the bar renders + what the unified capsule
 //! tooltip displays. The struct is rebuilt on each hardware poll and
 //! cloned into the render path.
-//!
-//! Lives in bar/unified/ (not libraries/backend) because it aggregates
-//! types from multiple bar/ modules (weather, unified) alongside backend
-//! ones (audio, mpris, system). Keeping it in backend forced backend to
-//! `use crate::bar::…` for every relocated type, creating a backend → bar
-//! dependency that this move eliminates.
 
-use crate::libraries::backend::unified::{borg::BorgStatus, podman::PodmanStatus};
 use crate::bar::weather::WeatherData;
 use crate::libraries::backend::audio::AudioStatus;
 use crate::libraries::backend::music::MprisTrack;
 use crate::libraries::backend::system::{
     BatteryMetrics, CpuMetrics, GpuMetrics, NetMetrics, RamMetrics,
 };
+use crate::libraries::backend::unified::{borg::BorgStatus, podman::PodmanStatus};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct UnifiedTelemetry {
     pub cpu: CpuMetrics,
     pub gpu: GpuMetrics,
@@ -33,4 +27,7 @@ pub struct UnifiedTelemetry {
     pub podman: PodmanStatus,
     pub borg: BorgStatus,
     pub bar_time: String,
+    pub next_alarm_epoch: Option<i64>,
+    pub notify_paused: bool,
+    pub notify_count: usize,
 }
